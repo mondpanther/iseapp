@@ -122,7 +122,7 @@ ui <- fluidPage(
     tags$style(HTML("
       h1 {
         font-family: 'Arial', serif;
-        font-size: 40px;
+        font-size: 50px;
         font-weight: bold;
         color: #2C3E50;
       }
@@ -158,7 +158,7 @@ ui <- fluidPage(
       inputId = "country",
       label = "Country or Group",
       choices = grouped_choices,
-      selected = default_country,
+      selected = "All countries",
       multiple = TRUE,
       options = list(placeholder = 'Choose one or more countries or groups...')
     ),
