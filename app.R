@@ -4,13 +4,6 @@ library(bslib)
 library(thematic)
 library(tidyverse)
 library(gitlink)
-
-
-
-
-
-
-library(shiny)
 library(ggplot2)
 library(countrycode)
 library(plotly)
