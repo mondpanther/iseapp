@@ -13,6 +13,7 @@ library(dplyr)
 
 #rsconnect::writeManifest()
 
+
 # Load data
 files <- list.files(path="istraxes", pattern = "parquet$", full.names = TRUE)
 patchar_countrymap <- read_parquet("countrymap.parquet")
@@ -108,9 +109,50 @@ expand_country_selection <- function(selected) {
   unique(expanded)
 }
 
+
+
 # Define UI
 ui <- fluidPage(
-  titlePanel("ISE - Industrial Strategy Explorer"),
+  
+  
+  
+  
+  # Add custom CSS
+  tags$head(
+    tags$style(HTML("
+      h1 {
+        font-family: 'Arial', serif;
+        font-size: 40px;
+        font-weight: bold;
+        color: #2C3E50;
+      }
+      .intro-text {
+        font-family: 'Arial', sans-serif;
+        font-size: 20px;
+        color: #34495E;
+        margin-bottom: 20px;
+      }
+    "))
+  ),
+  
+  
+  
+  titlePanel("Welcome to ISE - The Industrial Strategy Explorer"),
+  
+  
+  
+  # Introductory paragraph
+  tags$p("This is a tool to explore various version of the Industrial Strategy Index (ISTRAX) 
+         developed in Guillard et al.     ",
+         tags$a(href = "https://cep.lse.ac.uk/_NEW/publications/abstract.asp?index=8614", target = "_blank", "Efficient Industrial Policy - Standing on the Shoulders of Hidden Giants"),
+         ". The figures show the returns from further investment in R&D in different technology areas and specific countries via knowledge spillovers; 
+         i.e. a return of 100% means that further R&D investment of 1000 Euro will lead to extra profits worth 1000 Euro for innovators different from the investor undertaking the additional spending.",
+         class = "intro-text"
+       ),
+  
+  
+  
+  
   inputPanel(
     selectizeInput(
       inputId = "country",
@@ -153,7 +195,7 @@ server <- function(input, output) {
       country_code = selected_countries,
       toflow = input$toflow,
       custom_colors = custom_colors
-    ) + ggtitle(input$country)
+    ) + ggtitle("")
     
     p
   })
