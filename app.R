@@ -148,7 +148,7 @@ ui <- fluidPage(
          ". The figures show the returns from further investment in R&D in different technology areas and specific countries via knowledge spillovers; 
          i.e. a return of 100% means that further R&D investment of 1000 Euro will lead to extra profits worth 1000 Euro for innovators different from the investor undertaking the additional spending.",
          tags$br(),
-         "You can desplay the average returns for different countries or countries groups broken down by technology areas. You can also examine this for different of scopes of spillovers.",
+         "You can display the average returns for different countries or countries groups broken down by technology areas. You can also examine this for different of scopes of spillovers.",
          "Global Returns means spillover benefits to inventors anywhere are taken into account. Returns LMICs only take into account spillover benefits to innovators in Low and Medium Income countries.",
          class = "intro-text"
        ),
