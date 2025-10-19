@@ -144,15 +144,15 @@ ui <- fluidPage(
   
   
   
-  titlePanel("Welcome to ISE - The Industrial Strategy Explorer"),
+  titlePanel("Welcome to ISE - The Innovation Strategy Explorer"),
   
   
   
   # Introductory paragraph
-  tags$p("This is a tool to explore various version of the Industrial Strategy Index (ISTRAX) 
-         developed in Guillard et al.     ",
-         tags$a(href = "https://cep.lse.ac.uk/_NEW/publications/abstract.asp?index=8614", target = "_blank", "Efficient Industrial Policy - Standing on the Shoulders of Hidden Giants"),
-         ". The figures show the returns from further investment in R&D in different technology areas and specific countries via knowledge spillovers; 
+  tags$p("This is a tool develop a innovation strategies at various scopes. It examines where spillovers from innovation are most likely highest and thus there is a case for further investments in R&D. The tool builds on the 
+         mmethodology proposed in Guillard et al.     ",
+         tags$a(href = "https://cep.lse.ac.uk/_NEW/publications/abstract.asp?index=8614", target = "_blank", "Efficient Industrial Policy - Standing on the Shoulders of Hidden Giants."),
+         " The figures show the returns from further investment in R&D in different technology areas and specific countries via knowledge spillovers; 
          i.e. a return of 100% means that further R&D investment of 1000 Euro will lead to extra profits worth 1000 Euro for innovators different from the investor undertaking the additional spending.",
          tags$br(),
          "You can display the average returns for different countries or countries groups broken down by technology areas. You can also examine this for different of scopes of spillovers.",
