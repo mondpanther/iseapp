@@ -128,7 +128,7 @@ ui <- fluidPage(
   tags$head(
     tags$style(HTML("
       h1 {
-        font-family: 'Arial', serif;
+        font-family: 'Courier New', monospace;
         font-size: 50px;
         font-weight: bold;
         color: #2C3E50;
@@ -142,9 +142,9 @@ ui <- fluidPage(
     "))
   ),
   
+  tags$h1("Welcome to ISE - The Innovation Strategy Explorer"),
   
-  
-  titlePanel("Welcome to ISE - The Innovation Strategy Explorer"),
+  #titlePanel("Welcome to ISE - The Innovation Strategy Explorer"),
   
   
   
@@ -197,14 +197,16 @@ ui <- fluidPage(
       label = "Show top n countries",
       min = 1,
       max = 200,
+      width = "250px",
       value = 20  # default starting value
     ),
     sliderInput(
       inputId = "mininno",
-      label = "Minium number of innovation in tech in country:",
+      label = "Innovation count threshold:",
       min = 1,
       max = 500,
-      value = 100  # default starting value
+      value = 100,  # default starting value
+      width = "250px"
     )
     
   ),
