@@ -29,6 +29,8 @@ green_classes <- c("Green Energy", "Green Transport", "Circular Economy", "Green
 
 source("istraxfunctions.R")
 
+grouped_techs=as.list((techmap %>% distinct(technology))$technology)
+
 toflow_choices <- c(
   "Global Returns" = "istrax_global",
   "National Returns" = "istrax_nationalkey_2009_2018",
@@ -76,6 +78,7 @@ lmics <- c("AF","AL","DZ","AO","AR","AM","AZ","BD","BJ","BO","BA","BW","BR","BG"
            "MK","PK","PW","PA","PG","PY","PE","PH","RW","WS","ST","SN","RS","SC",
            "SL","SB","SO","ZA","LK","SD","SR","SY","TJ","TZ","TH","TL","TG","TO",
            "TN","TR","TM","TV","UG","UA","UZ","VU","VE","VN","YE","ZM","ZW")
+
 lmics_excl_china <- setdiff(lmics, "CN")
 eu_countries <- c("AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR",
                   "HU","IE","IT","LV","LT","LU","MT","NL","PL","PT","RO","SK",
@@ -107,6 +110,10 @@ expand_country_selection <- function(selected) {
     }
   }))
   unique(expanded)
+  
+  
+  
+  
 }
 
 
@@ -165,6 +172,7 @@ ui <- fluidPage(
       multiple = TRUE,
       options = list(placeholder = 'Choose one or more countries or groups...')
     ),
+    
     selectInput(
       inputId = "toflow",
       label = "Return flow",
@@ -172,12 +180,42 @@ ui <- fluidPage(
       selected = "istrax_global"
     )
   ),
-  plotOutput("avstrax_plot", height = "600px")
+  plotOutput("avstrax_plot1", height = "600px"),
+  
+  inputPanel(
+    selectizeInput(
+      inputId = "techs",
+      label = "Technology categories",
+      choices = grouped_techs,
+      #selected = "All countries",
+      multiple = TRUE,
+      options = list(placeholder = 'Choose one or more technology categories...')
+    ),
+    
+    sliderInput(
+      inputId = "topn",
+      label = "Show top n countries",
+      min = 1,
+      max = 200,
+      value = 20  # default starting value
+    ),
+    sliderInput(
+      inputId = "mininno",
+      label = "Minium number of innovation in tech in country:",
+      min = 1,
+      max = 500,
+      value = 10  # default starting value
+    )
+    
+  ),
+  
+  plotOutput("avstrax_plot2", height = "600px")
+  
 )
 
 # Define server
 server <- function(input, output) {
-  output$avstrax_plot <- renderPlot({
+  output$avstrax_plot1 <- renderPlot({
     req(input$country, input$toflow)
     
     selected_countries <- expand_country_selection(input$country)
@@ -190,7 +228,8 @@ server <- function(input, output) {
       need(exists("green_classes"), "Object 'green_classes' not found."),
       need(exists("custom_colors"), "Object 'custom_colors' not found.")
     )
-    
+
+    #selected_countries="VN"  ;input=list(); input$toflow="istrax_global"  
     p <- plot_avstrax_by_country(
       pdata = patchar_countrymap,
       classes = techmap,
@@ -202,6 +241,54 @@ server <- function(input, output) {
     
     p
   })
+  
+  
+  output$avstrax_plot2 <- renderPlot({
+    req(input$country, 
+        input$toflow,
+        input$techs,
+        input$topn,
+        input$mininno)
+    
+    selected_countries <- expand_country_selection(input$country)
+    flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
+    
+    validate(
+      need(exists("plot_avstrax_by_country"), "Function 'plot_avstrax_by_country' not found in the environment."),
+      need(exists("patchar_countrymap"), "Object 'patchar_countrymap' not found."),
+      need(exists("techmap"), "Object 'techmap' not found."),
+      need(exists("green_classes"), "Object 'green_classes' not found."),
+      need(exists("custom_colors"), "Object 'custom_colors' not found.")
+    )
+  
+    
+    
+    #plot_avstrax_by_technology <- function(pdata, classes, green_classes, technologies, toflow, custom_colors)
+    #input$techs="Wireless" 
+    
+    # We first implement the filter from the previous diagram; i.e. we restrict to the countries selected there...
+    
+    filtered <- patchar_countrymap %>%
+      filter(ctry_code %in% selected_countries )  
+    
+    
+    
+    p <- plot_avstrax_by_technology(
+      pdata = filtered,
+      classes = techmap,
+      green_classes = green_classes,
+      
+      #country_code = selected_countries,
+      technologies=input$techs,
+      
+      toflow = input$toflow,
+      custom_colors = custom_colors,
+      topn=input$topn,
+      mininno=input$mininno
+    ) + ggtitle("")
+    
+    p
+  })  
 }
 
 # Run the app
