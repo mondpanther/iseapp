@@ -149,7 +149,7 @@ ui <- fluidPage(
   
   
   # Introductory paragraph
-  tags$p("This is a tool develop a innovation strategies at various scopes. It examines where spillovers from innovation are most likely highest and thus there is a case for further investments in R&D. The tool builds on the 
+  tags$p("This is tool supports the development of an innovation strategy at various scopes for either governments or (impact) investors. It examines where spillovers from innovation are most likely highest and thus there is a case for further investments in R&D. The tool builds on the 
          mmethodology proposed in Guillard et al.     ",
          tags$a(href = "https://cep.lse.ac.uk/_NEW/publications/abstract.asp?index=8614", target = "_blank", "Efficient Industrial Policy - Standing on the Shoulders of Hidden Giants."),
          " The figures show the returns from further investment in R&D in different technology areas and specific countries via knowledge spillovers; 
