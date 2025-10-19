@@ -187,7 +187,7 @@ ui <- fluidPage(
       inputId = "techs",
       label = "Technology categories",
       choices = grouped_techs,
-      #selected = "All countries",
+      selected = "Any Green",
       multiple = TRUE,
       options = list(placeholder = 'Choose one or more technology categories...')
     ),
@@ -204,7 +204,7 @@ ui <- fluidPage(
       label = "Minium number of innovation in tech in country:",
       min = 1,
       max = 500,
-      value = 10  # default starting value
+      value = 100  # default starting value
     )
     
   ),

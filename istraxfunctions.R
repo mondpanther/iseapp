@@ -134,7 +134,7 @@ plot_avstrax_by_country <- function(pdata, classes, green_classes, country_code,
   
   
   
-  labs(caption = "© 2025 Industrial Strategy Explorer") +
+  labs(caption = "© 2025 Innovation Strategy Explorer") +
     theme(
       plot.caption = element_text(hjust = 1, size = 10, color = "gray")
     )
@@ -282,7 +282,7 @@ plot_avstrax_by_technology <- function(pdata, classes, green_classes, technologi
   # Combine them
   annotation_plot / p + plot_layout(heights = c(0.1, 1))+
     
-    labs(caption = "© 2025 Industrial Strategy Explorer") +
+    labs(caption = "© 2025 Innovation Strategy Explorer") +
     theme(
       plot.caption = element_text(hjust = 1, size = 10, color = "gray")
     )
