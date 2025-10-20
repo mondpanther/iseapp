@@ -153,7 +153,7 @@ ui <- fluidPage(
   }
   summary.toggle-summary {
     font-weight: bold;
-    font-size: 18px;
+    font-size: 15px;
     cursor: pointer;
     padding: 10px;
     background-color: #ecf0f1;
