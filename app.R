@@ -148,12 +148,12 @@ ui <- fluidPage(
   details {
     margin-bottom: 20px;
     font-family: 'Arial', sans-serif;
-    font-size: 18px;
+    font-size: 15px;
     color: #34495E;
   }
   summary.toggle-summary {
     font-weight: bold;
-    font-size: 22px;
+    font-size: 18px;
     cursor: pointer;
     padding: 10px;
     background-color: #ecf0f1;
