@@ -144,23 +144,53 @@ ui <- fluidPage(
   
   tags$h1("Welcome to ISE - The Innovation Strategy Explorer"),
   
+  tags$style(HTML("
+  details {
+    margin-bottom: 20px;
+    font-family: 'Arial', sans-serif;
+    font-size: 18px;
+    color: #34495E;
+  }
+  summary {
+    font-weight: bold;
+    cursor: pointer;
+    font-size: 22px;
+    margin-bottom: 10px;
+  }
+")),
+  
+  
   #titlePanel("Welcome to ISE - The Innovation Strategy Explorer"),
   
+  tags$details(
+    tags$summary("About this tool"),
+    tags$p(
+      "This tool supports the development of an innovation strategy at various scopes 
+     for either governments or (impact) investors. 
+     It examines where marginal spillover from innovation are highest and 
+     thus there is a case for further investments in R&D. 
+     The tool builds on the methodology proposed in Guillard et al. ",
+      tags$a(href = "https://cep.lse.ac.uk/_NEW/publications/abstract.asp?index=8614", 
+             target = "_blank", "Efficient Industrial Policy - Standing on the Shoulders of Hidden Giants."),
+      " The figures show the returns from further investment in R&D in different technology areas and specific 
+     countries via knowledge spillovers; that is a return of 100% means that further R&D investment of 1000 Euro
+     will lead to extra profits worth 1000 Euro for innovators different from the investor undertaking the additional spending.",
+      tags$br(),
+      "The methodology is informed by data from patents. Spillovers are derived from citations between patents. Crucially, the approach takes 
+     into account direct as well as indirect citations where one innovation is connected to another via a citation chain of any degree of separation.
+     The private economic value of an innovation to an inventor is derived using the approach proposed by Kogan et al ",
+      tags$a(href = "https://academic.oup.com/qje/article-abstract/132/2/665/3076284?redirectedFrom=fulltext", 
+             target = "_blank", "Technological Innovation, Resource Allocation, and Growth"),
+      tags$br(),
+      "You can display the average returns for different countries or countries groups broken down by technology areas. You can also examine this for different scopes of spillovers.",
+      "Global Returns takes into account spillover benefits to inventors anywhere. Returns LMICs only take into account spillover benefits to innovators in Low and Medium Income countries.",
+      class = "intro-text"
+    )
+  ),
   
   
-  # Introductory paragraph
-  tags$p("This is tool supports the development of an innovation strategy at various scopes for either governments or (impact) investors. It examines where spillovers from innovation are most likely highest and thus there is a case for further investments in R&D. The tool builds on the 
-         mmethodology proposed in Guillard et al.     ",
-         tags$a(href = "https://cep.lse.ac.uk/_NEW/publications/abstract.asp?index=8614", target = "_blank", "Efficient Industrial Policy - Standing on the Shoulders of Hidden Giants."),
-         " The figures show the returns from further investment in R&D in different technology areas and specific countries via knowledge spillovers; 
-         i.e. a return of 100% means that further R&D investment of 1000 Euro will lead to extra profits worth 1000 Euro for innovators different from the investor undertaking the additional spending.",
-         tags$br(),
-         "You can display the average returns for different countries or countries groups broken down by technology areas. You can also examine this for different of scopes of spillovers.",
-         "Global Returns means spillover benefits to inventors anywhere are taken into account. Returns LMICs only take into account spillover benefits to innovators in Low and Medium Income countries.",
-         class = "intro-text"
-       ),
   
-  
+
   
   
   inputPanel(
