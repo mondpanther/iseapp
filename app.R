@@ -151,11 +151,18 @@ ui <- fluidPage(
     font-size: 18px;
     color: #34495E;
   }
-  summary {
+  summary.toggle-summary {
     font-weight: bold;
-    cursor: pointer;
     font-size: 22px;
-    margin-bottom: 10px;
+    cursor: pointer;
+    padding: 10px;
+    background-color: #ecf0f1;
+    border: 1px solid #bdc3c7;
+    border-radius: 5px;
+    transition: background-color 0.3s ease;
+  }
+  summary.toggle-summary:hover {
+    background-color: #d0d7de;
   }
 ")),
   
@@ -163,7 +170,7 @@ ui <- fluidPage(
   #titlePanel("Welcome to ISE - The Innovation Strategy Explorer"),
   
   tags$details(
-    tags$summary("About this tool"),
+    tags$summary("▶ About this tool", class = "toggle-summary"),
     tags$p(
       "This tool supports the development of an innovation strategy at various scopes 
      for either governments or (impact) investors. 
