@@ -1,0 +1,48 @@
+---
+title: "Checking on numbers"
+output: html_notebook
+---
+
+
+```{r}
+
+library(shiny)
+library(bslib)
+library(thematic)
+library(tidyverse)
+library(gitlink)
+library(ggplot2)
+library(countrycode)
+library(plotly)
+library(arrow)
+library(dplyr)
+
+
+
+
+
+```
+
+# Loading data
+
+```{r}
+
+
+df <- read_parquet("countrymap.parquet")
+df=df %>% left_join(read_parquet("istraxes/istrax_global.parquet"))
+df=df %>% mutate(cit_id=istrax_global>0)
+
+names(df)
+
+```
+
+
+# Analysis
+
+```{r}
+
+
+
+
+
+```
