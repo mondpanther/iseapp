@@ -15,11 +15,12 @@ library(dplyr)
 
 
 # Load data
-files <- list.files(path="istraxes", pattern = "parquet$", full.names = TRUE)
-patchar_countrymap <- read_parquet("countrymap.parquet")
-for (ff in files) {
-  patchar_countrymap <- patchar_countrymap %>% left_join(read_parquet(ff))
-}
+
+#files <- list.files(path="istraxes", pattern = "parquet$", full.names = TRUE)
+countrymap <- read_parquet("countrymap.parquet")
+#for (ff in files) {
+#  patchar_countrymap <- patchar_countrymap %>% left_join(read_parquet(ff))
+#}
 
 techmap <- read_parquet("techmap.parquet")
 
@@ -29,13 +30,14 @@ green_classes <- c("Green Energy", "Green Transport", "Circular Economy", "Green
 
 source("istraxfunctions.R")
 
-grouped_techs=as.list((techmap %>% distinct(technology))$technology)
+grouped_techs=c(as.list((techmap %>% distinct(technology))$technology),"All Innovations")
 
 toflow_choices <- c(
   "Global Returns" = "istrax_global",
   "National Returns" = "istrax_nationalkey_2009_2018",
-  "Returns to LMICs (excl. China)" = "istrax_EMDEexCN",
-  "Returns to LMICs (excl. China & India)" = "istrax_EMDEexCNIN",
+  "Returns to LMICs" = "istrax_EMDE",
+  "Returns to LMICs (excl. China)" = "istrax_EMDENOCN",
+  "Returns to LMICs (excl. China & India)" = "istrax_EMDENOCNIN",
   "Returns to HICs" = "istrax_HIC",
   "Returns to the EU" = "istrax_EU"
 )
@@ -189,7 +191,7 @@ ui <- fluidPage(
       tags$a(href = "https://academic.oup.com/qje/article-abstract/132/2/665/3076284?redirectedFrom=fulltext", 
              target = "_blank", "Technological Innovation, Resource Allocation, and Growth"),
       tags$br(),
-      "You can display the average returns for different countries or countries groups broken down by technology areas. You can also examine this for different scopes of spillovers.",
+      "You can display the average returns for different countries or country groups broken down by technology areas. You can also examine this for different scopes of spillovers.",
       "Global Returns takes into account spillover benefits to inventors anywhere. Returns LMICs only take into account spillover benefits to innovators in Low and Medium Income countries.",
       class = "intro-text"
     )
@@ -254,6 +256,28 @@ ui <- fluidPage(
 
 # Define server
 server <- function(input, output) {
+  
+
+  
+  
+  #for (ff in files) {
+  #  patchar_countrymap <- patchar_countrymap %>% left_join(read_parquet(ff))
+  #}
+  
+  
+  patchar_countrymap <- reactive({
+    req(input$toflow)
+    
+    
+    path <- paste0("./istraxes/", input$toflow,".parquet")
+    #path <- paste0("./istraxes/istrax_global.parquet")
+    patchar_countrymap <- countrymap %>% left_join(read_parquet(path))
+
+  })
+  
+  
+  
+  
   output$avstrax_plot1 <- renderPlot({
     req(input$country, input$toflow)
     
@@ -270,7 +294,7 @@ server <- function(input, output) {
 
     #selected_countries="VN"  ;input=list(); input$toflow="istrax_global"  
     p <- plot_avstrax_by_country(
-      pdata = patchar_countrymap,
+      pdata = patchar_countrymap(),
       classes = techmap,
       green_classes = green_classes,
       country_code = selected_countries,
@@ -307,7 +331,7 @@ server <- function(input, output) {
     
     # We first implement the filter from the previous diagram; i.e. we restrict to the countries selected there...
     
-    filtered <- patchar_countrymap %>%
+    filtered <- patchar_countrymap() %>%
       filter(ctry_code %in% selected_countries )  
     
     
@@ -327,7 +351,10 @@ server <- function(input, output) {
     ) + ggtitle("")
     
     p
-  })  
+  })
+  
+  
+  
 }
 
 # Run the app

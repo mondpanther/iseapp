@@ -152,7 +152,7 @@ plot_avstrax_by_country <- function(pdata, classes, green_classes, country_code,
 
 
 compute_avstrax_for_techs <- function(data, istrax_var, classes, green_classes) {
-  #data=patchar_countrymap;istrax_var="istrax_global"; classes=filtered; green_classes=green_classes
+  #data=patchar_countrymap;istrax_var="istrax_global"; classes=filtered; green_classes=green_classes;classes=data.frame()
   
   
   library(dplyr)
@@ -160,14 +160,25 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes, green_classes) 
   
   istrax_sym <- rlang::sym(istrax_var)
   
-  avstrax <- data %>% inner_join(classes %>% select(docdb_family_id) %>% distinct()) %>% 
+  
+  # If not filter classes are selected we taka all
+  if(nrow(classes)==0){
+     filtereddata=data  
+     print("aaaaa")
+  }  else {
+    print("bbbbb")
+    filtereddata=data %>% inner_join(classes %>% select(docdb_family_id)%>% distinct())
+  }
+  
+  
+  avstrax <- filtereddata %>% 
     select(docdb_family_id, !!istrax_sym, ctry_code) %>%
     rename(istrax = !!istrax_sym) %>%
     distinct() %>%
 
     bind_rows(
       #atest=
-      data %>%  inner_join(classes %>% select(docdb_family_id) %>% distinct()) %>% 
+      filtereddata %>% 
         select(docdb_family_id, !!istrax_sym,) %>%
         rename(istrax = !!istrax_sym) %>%
         distinct() %>%
@@ -204,6 +215,7 @@ plot_avstrax_by_technology <- function(pdata, classes, green_classes, technologi
     filter(technology %in% technologies )  %>%
     distinct()
   
+  if("All Innovations" %in% technologies) filtered=data.frame()
   # Compute avstrax
   avstrax <- compute_avstrax_for_techs(pdata, toflow, filtered, green_classes)
   
