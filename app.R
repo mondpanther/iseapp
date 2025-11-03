@@ -39,7 +39,12 @@ toflow_choices <- c(
   "Returns to LMICs (excl. China)" = "istrax_EMDENOCN",
   "Returns to LMICs (excl. China & India)" = "istrax_EMDENOCNIN",
   "Returns to HICs" = "istrax_HIC",
-  "Returns to the EU" = "istrax_EU"
+  "Returns to the EU" = "istrax_EU",
+  "Returns to US" = "istrax_US",
+  "Returns to UK" = "istrax_GB",
+  "Returns to Austria" = "istrax_AT",
+  "Returns to France" = "istrax_FR"
+  
 )
 
 get_available_iso2 <- function() {
