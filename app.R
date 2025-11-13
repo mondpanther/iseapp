@@ -30,7 +30,7 @@ green_classes <- c("Green Energy", "Green Transport", "Circular Economy", "Green
 
 source("istraxfunctions.R")
 
-grouped_techs=c(as.list((techmap %>% distinct(technology))$technology),"All Innovations")
+grouped_techs=c(as.list((techmap %>% distinct(technology))$technology),"Other")
 
 toflow_choices <- c(
   "Global Returns" = "istrax_global",
@@ -228,7 +228,7 @@ ui <- fluidPage(
       inputId = "tech_categories_plot1",
       label = "Technology categories to display",
       choices = grouped_techs,
-      selected = "All Innovations",
+      selected = "Other",
       multiple = TRUE,
       options = list(placeholder = 'Choose one or more technology categories...')
     )
@@ -307,12 +307,23 @@ server <- function(input, output) {
     )
 
     # Filter techmap based on selected technology categories
-    # If "All Innovations" is selected, use the entire techmap
-    if("All Innovations" %in% input$tech_categories_plot1) {
-      filtered_techmap <- techmap
-    } else {
+    # Handle "Other" category to include all non-selected technologies
+    selected_categories <- input$tech_categories_plot1
+    include_other <- "Other" %in% selected_categories
+    explicit_categories <- setdiff(selected_categories, "Other")
+
+    if(include_other && length(explicit_categories) > 0) {
+      # Include explicitly selected categories AND other categories relabeled as "Other"
       filtered_techmap <- techmap %>%
-        filter(technology %in% input$tech_categories_plot1)
+        mutate(technology = ifelse(technology %in% explicit_categories, technology, "Other"))
+    } else if(include_other && length(explicit_categories) == 0) {
+      # Only "Other" selected - show all categories as "Other"
+      filtered_techmap <- techmap %>%
+        mutate(technology = "Other")
+    } else {
+      # No "Other" - just filter to explicitly selected categories
+      filtered_techmap <- techmap %>%
+        filter(technology %in% explicit_categories)
     }
 
     #selected_countries="VN"  ;input=list(); input$toflow="istrax_global"
