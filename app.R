@@ -24,13 +24,19 @@ countrymap <- read_parquet("countrymap.parquet")
 
 techmap <- read_parquet("techmap.parquet")
 
+
+techmap=countrymap %>%
+  select(docdb_family_id) %>% 
+  distinct() %>% 
+  mutate(technology = "All") %>% bind_rows(techmap)
+
 green_classes <- c("Green Energy", "Green Transport", "Circular Economy", "Green Manufacturing",
                    "Adaptation", "Green Housing", "Green ICT", "Green Agriculture",
                    "GHG Capture", "Any Green")
 
 source("istraxfunctions.R")
 
-grouped_techs=c(as.list((techmap %>% distinct(technology))$technology),"Other")
+grouped_techs=c(as.list((techmap %>% distinct(technology))$technology),"All")
 
 toflow_choices <- c(
   "Global Returns" = "istrax_global",
@@ -226,9 +232,9 @@ ui <- fluidPage(
 
     selectizeInput(
       inputId = "tech_categories_plot1",
-      label = "Technology categories to display",
+      label = "Technology categories",
       choices = grouped_techs,
-      selected = "Other",
+      selected = c("Other","AI","Any Green"), 
       multiple = TRUE,
       options = list(placeholder = 'Choose one or more technology categories...')
     )
