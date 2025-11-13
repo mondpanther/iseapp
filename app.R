@@ -216,12 +216,21 @@ ui <- fluidPage(
       multiple = TRUE,
       options = list(placeholder = 'Choose one or more countries or groups...')
     ),
-    
+
     selectInput(
       inputId = "toflow",
       label = "Return flow",
       choices = toflow_choices,
       selected = "istrax_global"
+    ),
+
+    selectizeInput(
+      inputId = "tech_categories_plot1",
+      label = "Technology categories to display",
+      choices = grouped_techs,
+      selected = "All Innovations",
+      multiple = TRUE,
+      options = list(placeholder = 'Choose one or more technology categories...')
     )
   ),
   plotOutput("avstrax_plot1", height = "600px"),
@@ -284,11 +293,11 @@ server <- function(input, output) {
   
   
   output$avstrax_plot1 <- renderPlot({
-    req(input$country, input$toflow)
-    
+    req(input$country, input$toflow, input$tech_categories_plot1)
+
     selected_countries <- expand_country_selection(input$country)
     flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
-    
+
     validate(
       need(exists("plot_avstrax_by_country"), "Function 'plot_avstrax_by_country' not found in the environment."),
       need(exists("patchar_countrymap"), "Object 'patchar_countrymap' not found."),
@@ -297,16 +306,25 @@ server <- function(input, output) {
       need(exists("custom_colors"), "Object 'custom_colors' not found.")
     )
 
-    #selected_countries="VN"  ;input=list(); input$toflow="istrax_global"  
+    # Filter techmap based on selected technology categories
+    # If "All Innovations" is selected, use the entire techmap
+    if("All Innovations" %in% input$tech_categories_plot1) {
+      filtered_techmap <- techmap
+    } else {
+      filtered_techmap <- techmap %>%
+        filter(technology %in% input$tech_categories_plot1)
+    }
+
+    #selected_countries="VN"  ;input=list(); input$toflow="istrax_global"
     p <- plot_avstrax_by_country(
       pdata = patchar_countrymap(),
-      classes = techmap,
+      classes = filtered_techmap,
       green_classes = green_classes,
       country_code = selected_countries,
       toflow = input$toflow,
       custom_colors = custom_colors
     ) + ggtitle("")
-    
+
     p
   })
   
