@@ -24,13 +24,19 @@ countrymap <- read_parquet("countrymap.parquet")
 
 techmap <- read_parquet("techmap.parquet")
 
+
+techmap=countrymap %>%
+  select(docdb_family_id) %>% 
+  distinct() %>% 
+  mutate(technology = "All") %>% bind_rows(techmap)
+
 green_classes <- c("Green Energy", "Green Transport", "Circular Economy", "Green Manufacturing",
                    "Adaptation", "Green Housing", "Green ICT", "Green Agriculture",
                    "GHG Capture", "Any Green")
 
 source("istraxfunctions.R")
 
-grouped_techs=c(as.list((techmap %>% distinct(technology))$technology),"All Innovations")
+grouped_techs=c(as.list((techmap %>% distinct(technology))$technology),"All")
 
 toflow_choices <- c(
   "Global Returns" = "istrax_global",
@@ -216,12 +222,21 @@ ui <- fluidPage(
       multiple = TRUE,
       options = list(placeholder = 'Choose one or more countries or groups...')
     ),
-    
+
     selectInput(
       inputId = "toflow",
       label = "Return flow",
       choices = toflow_choices,
       selected = "istrax_global"
+    ),
+
+    selectizeInput(
+      inputId = "tech_categories_plot1",
+      label = "Technology categories",
+      choices = grouped_techs,
+      selected = c("Other","AI","Any Green"), 
+      multiple = TRUE,
+      options = list(placeholder = 'Choose one or more technology categories...')
     )
   ),
   plotOutput("avstrax_plot1", height = "600px"),
@@ -284,11 +299,11 @@ server <- function(input, output) {
   
   
   output$avstrax_plot1 <- renderPlot({
-    req(input$country, input$toflow)
-    
+    req(input$country, input$toflow, input$tech_categories_plot1)
+
     selected_countries <- expand_country_selection(input$country)
     flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
-    
+
     validate(
       need(exists("plot_avstrax_by_country"), "Function 'plot_avstrax_by_country' not found in the environment."),
       need(exists("patchar_countrymap"), "Object 'patchar_countrymap' not found."),
@@ -297,16 +312,36 @@ server <- function(input, output) {
       need(exists("custom_colors"), "Object 'custom_colors' not found.")
     )
 
-    #selected_countries="VN"  ;input=list(); input$toflow="istrax_global"  
+    # Filter techmap based on selected technology categories
+    # Handle "Other" category to include all non-selected technologies
+    selected_categories <- input$tech_categories_plot1
+    include_other <- "Other" %in% selected_categories
+    explicit_categories <- setdiff(selected_categories, "Other")
+
+    if(include_other && length(explicit_categories) > 0) {
+      # Include explicitly selected categories AND other categories relabeled as "Other"
+      filtered_techmap <- techmap %>%
+        mutate(technology = ifelse(technology %in% explicit_categories, technology, "Other"))
+    } else if(include_other && length(explicit_categories) == 0) {
+      # Only "Other" selected - show all categories as "Other"
+      filtered_techmap <- techmap %>%
+        mutate(technology = "Other")
+    } else {
+      # No "Other" - just filter to explicitly selected categories
+      filtered_techmap <- techmap %>%
+        filter(technology %in% explicit_categories)
+    }
+
+    #selected_countries="VN"  ;input=list(); input$toflow="istrax_global"
     p <- plot_avstrax_by_country(
       pdata = patchar_countrymap(),
-      classes = techmap,
+      classes = filtered_techmap,
       green_classes = green_classes,
       country_code = selected_countries,
       toflow = input$toflow,
       custom_colors = custom_colors
     ) + ggtitle("")
-    
+
     p
   })
   

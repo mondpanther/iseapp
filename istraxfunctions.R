@@ -57,6 +57,10 @@ plot_avstrax_by_country <- function(pdata, classes, green_classes, country_code,
   library(ggplot2)
   
   library(patchwork)
+  #classes=techmap
+  classlist=(classes %>% distinct(technology))$technology
+  
+  
   # Filter by country and year
   filtered <- pdata %>%
     filter(ctry_code %in% country_code )  %>%
@@ -75,8 +79,9 @@ plot_avstrax_by_country <- function(pdata, classes, green_classes, country_code,
     pull(innos)
   
   # Prepare data for plotting
+  if(!"All" %in% classlist) avstrax=avstrax %>% filter(technology != "All") 
   avstrax <- avstrax %>%
-    filter(technology != "All") %>%
+    #filter(technology != "All") %>%
     arrange(technology) %>%
     mutate(
       linnos = log(innos),
