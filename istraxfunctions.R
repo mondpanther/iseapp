@@ -26,7 +26,8 @@ compute_avstrax <- function(data, istrax_var, classes, green_classes) {
     select(docdb_family_id, !!istrax_sym) %>%
     rename(istrax = !!istrax_sym) %>%
     distinct() %>%
-    inner_join(classes, by = "docdb_family_id") %>%
+    left_join(classes, by = "docdb_family_id") %>%
+    mutate(technology = ifelse(is.na(technology), "Other", technology)) %>%
     bind_rows(
       data %>%
         select(docdb_family_id, starts_with("istrax")) %>%
