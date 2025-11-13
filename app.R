@@ -231,7 +231,7 @@ ui <- fluidPage(
       inputId = "techs",
       label = "Technology categories",
       choices = grouped_techs,
-      selected = "Any Green",
+      selected = c("AI", "Any Green", "Other"),
       multiple = TRUE,
       options = list(placeholder = 'Choose one or more technology categories...')
     ),
