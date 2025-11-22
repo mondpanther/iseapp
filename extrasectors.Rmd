@@ -63,11 +63,27 @@ library(arrow)
 cpcs=read_parquet(cpcfile)
 
 cpcs=cpcs %>% arrange(docdb_family_id)
+
+
+library(stringr)
+
+
+
+cpcs=cpcs %>% gsub(" ", "", cpc_class_symbol)
+
+
+
+library(data.table)
+library(stringi)
+
+setDT(cpcs)
+cpcs[, cpc_class_symbol := stri_replace_all_fixed(cpc_class_symbol, " ", "")]
+
+
 ```
 
 
-
-
+# Battery technology
 
 ## mapping file
 ```{r}
@@ -75,6 +91,46 @@ cpcs=cpcs %>% arrange(docdb_family_id)
 
 source("extrasectorshelper.r") # definitions of the battery sector
 
+battery_df_expanded <- battery_df %>%
+  separate_rows(CPC, sep = ";")%>%
+  mutate(cpc_class_symbol = trimws(CPC))
+
+setDT(battery_df_expanded)
+battery_df_expanded[, cpc_class_symbol := stri_replace_all_fixed(cpc_class_symbol, " ", "")]
+
+
+battery_df %>% 
+  distinct(technology) %>% 
+  pull(technology) %>% 
+  paste0('"', ., '"') %>%
+  paste(collapse = ", ") %>% cat()
+
+
+
+batteryclasses=cpcs %>% inner_join(battery_df_expanded %>% select(technology,cpc_class_symbol)) 
+
+all=batteryclasses %>% distinct(docdb_family_id) %>% mutate(technology="Any battery")
+batteryclasses=batteryclasses %>% bind_rows(all)
+batteryclasses=batteryclasses %>% select(docdb_family_id,technology)
 
 
 ```
+
+
+
+```{r}
+techmap <- read_parquet("techmap.parquet")
+techs=techmap %>% distinct(technology)
+if(!"Any battery" %in% techs){
+  techmap=techmap %>% bind_rows(batteryclasses)
+  
+  techmap = techmap %>% mutate(technology=ifelse(technology=="Any battery","Any battery technology",technology))
+  techmap = techmap %>% mutate(technology=ifelse(technology=="Any Green","Any Green technology",technology))
+  write_parquet(techmap,"techmap.parquet")
+}
+
+
+```
+
+
+

@@ -32,7 +32,12 @@ techmap=countrymap %>%
 
 green_classes <- c("Green Energy", "Green Transport", "Circular Economy", "Green Manufacturing",
                    "Adaptation", "Green Housing", "Green ICT", "Green Agriculture",
-                   "GHG Capture", "Any Green")
+                   "GHG Capture", "Any Green technology")
+
+battery_classes=c("Any battery technology", "Lithium Extraction & Processing", "Graphite & Carbon Materials", "Cathode Materials", "Anode Materials",
+                  "Electrolytes & Additives", "Separators", "Battery Cell Design & Assembly", "Battery Management Systems (BMS)", 
+                  "Electric Vehicles & Mobility", "Battery Recycling & Recovery")
+
 
 source("istraxfunctions.R")
 
