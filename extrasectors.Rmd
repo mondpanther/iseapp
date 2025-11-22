@@ -1,0 +1,80 @@
+---
+title: "Prepare various bits of data"
+output: html_notebook
+---
+
+```{r}
+
+library(dplyr)
+
+```
+
+
+
+```{r}
+library(dplyr)
+if (Sys.info()["nodename"] == "PCACL-9RVSQ74") {
+  datad="C:\\Users\\rmartin7\\OneDrive - WBG\\projects\\PRINZGlobal\\imperial_college_visualization\\01_data"
+  localbig="C:\\Users\\rmartin7\\OneDrive - Imperial College London\\inglobe"
+  ifcone="C:\\Users\\rmartin7\\OneDrive - WBG\\projects\\PRINZGlobal\\KEVCexplorer"
+}
+
+```
+
+
+# cpc data
+
+```{r}
+cpcfile=paste0(localbig,"\\data\\cpcs.parquet")
+if (!file.exists(cpcfile)) {
+  library(bigrquery)
+  library(DBI)
+  
+  # Set your project ID
+  project_id <- "patbis"
+  
+  # Option 1: Direct table download
+  # Specify dataset and table name
+  dataset <- "fromPATSTAT2021"
+  table <- "tls225_docdb_fam_cpc"
+  
+  # Download the entire table
+  cpcs <- bq_table_download(
+    bq_table(project_id, dataset, table)
+  )
+  
+  
+  cpcs=cpcs %>% select(docdb_family_id,cpc_class_symbol)
+  cpcs=cpcs %>% arrange(docdb_family_id)
+  library(arrow)
+  write_parquet(cpcs,cpcfile)
+}
+
+
+
+
+```
+
+
+  
+```{r}
+
+library(arrow)
+cpcs=read_parquet(cpcfile)
+
+cpcs=cpcs %>% arrange(docdb_family_id)
+```
+
+
+
+
+
+## mapping file
+```{r}
+
+
+source("extrasectorshelper.r") # definitions of the battery sector
+
+
+
+```
