@@ -185,21 +185,21 @@ ui <- fluidPage(
   tags$details(
     tags$summary("▶ About this tool", class = "toggle-summary"),
     tags$p(
-      "This tool supports the development of an innovation strategy at various scopes 
-     for either governments or (impact) investors. 
-     It examines where marginal spillover from innovation are highest and 
-     thus there is a case for further investments in R&D. 
+      "This tool supports the development of an innovation strategy at various scopes
+     for either governments or (impact) investors.
+     It examines where marginal spillover from innovation are highest and
+     thus there is a case for further investments in R&D.
      The tool builds on the methodology proposed in Guillard et al. ",
-      tags$a(href = "https://cep.lse.ac.uk/_NEW/publications/abstract.asp?index=8614", 
+      tags$a(href = "https://cep.lse.ac.uk/_NEW/publications/abstract.asp?index=8614",
              target = "_blank", "Efficient Industrial Policy - Standing on the Shoulders of Hidden Giants."),
-      " The figures show the returns from further investment in R&D in different technology areas and specific 
+      " The figures show the returns from further investment in R&D in different technology areas and specific
      countries via knowledge spillovers; that is a return of 100% means that further R&D investment of 1000 Euro
      will lead to extra profits worth 1000 Euro for innovators different from the investor undertaking the additional spending.",
       tags$br(),
-      "The methodology is informed by data from patents. Spillovers are derived from citations between patents. Crucially, the approach takes 
+      "The methodology is informed by data from patents. Spillovers are derived from citations between patents. Crucially, the approach takes
      into account direct as well as indirect citations where one innovation is connected to another via a citation chain of any degree of separation.
      The private economic value of an innovation to an inventor is derived using the approach proposed by Kogan et al ",
-      tags$a(href = "https://academic.oup.com/qje/article-abstract/132/2/665/3076284?redirectedFrom=fulltext", 
+      tags$a(href = "https://academic.oup.com/qje/article-abstract/132/2/665/3076284?redirectedFrom=fulltext",
              target = "_blank", "Technological Innovation, Resource Allocation, and Growth"),
       tags$br(),
       "You can display the average returns for different countries or country groups broken down by technology areas. You can also examine this for different scopes of spillovers.",
@@ -207,6 +207,47 @@ ui <- fluidPage(
       class = "intro-text"
     )
   ),
+
+  # Add CSS and JavaScript for collapsible plot
+  tags$style(HTML("
+    .plot-toggle {
+      font-weight: bold;
+      font-size: 16px;
+      cursor: pointer;
+      padding: 10px;
+      background-color: #3498db;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      margin: 10px 0;
+      transition: background-color 0.3s ease;
+      display: inline-block;
+      width: auto;
+    }
+    .plot-toggle:hover {
+      background-color: #2980b9;
+    }
+    .plot-container {
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+    }
+  ")),
+
+  tags$script(HTML("
+    $(document).ready(function() {
+      $('#togglePlot1').click(function() {
+        var plot = $('#plot1Container');
+        var button = $(this);
+        if (plot.is(':visible')) {
+          plot.slideUp(300);
+          button.text('▼ Show Figure 1');
+        } else {
+          plot.slideDown(300);
+          button.text('▲ Hide Figure 1');
+        }
+      });
+    });
+  ")),
   
   
   
@@ -234,12 +275,20 @@ ui <- fluidPage(
       inputId = "tech_categories_plot1",
       label = "Technology categories",
       choices = grouped_techs,
-      selected = c("Other","AI","Any Green"), 
+      selected = c("Other","AI","Any Green"),
       multiple = TRUE,
       options = list(placeholder = 'Choose one or more technology categories...')
     )
   ),
-  plotOutput("avstrax_plot1", height = "600px"),
+
+  # Toggle button for Figure 1
+  tags$button("▲ Hide Figure 1", id = "togglePlot1", class = "plot-toggle"),
+
+  # Wrap the first plot in a collapsible container
+  tags$div(
+    id = "plot1Container",
+    plotOutput("avstrax_plot1", height = "600px")
+  ),
   
   inputPanel(
     selectizeInput(
