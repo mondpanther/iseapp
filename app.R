@@ -240,10 +240,10 @@ ui <- fluidPage(
         var button = $(this);
         if (plot.is(':visible')) {
           plot.slideUp(300);
-          button.text('▼ Show Figure 1');
+          button.text('▼ More');
         } else {
           plot.slideDown(300);
-          button.text('▲ Hide Figure 1');
+          button.text('▲ Less');
         }
       });
     });
@@ -282,7 +282,7 @@ ui <- fluidPage(
   ),
 
   # Toggle button for Figure 1
-  tags$button("▲ Hide Figure 1", id = "togglePlot1", class = "plot-toggle"),
+  tags$button("▲ Less", id = "togglePlot1", class = "plot-toggle"),
 
   # Wrap the first plot in a collapsible container
   tags$div(
