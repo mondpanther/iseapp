@@ -52,6 +52,11 @@ hard_to_abate_classes=c("Hard to Abate Sector Decarbonization", "Aviation Decarb
                         "Chemicals & Plastics Decarbonisation", "Shipping Decarbonisation",
                         "Steel & Iron Decarbonisation")
 
+ai_classes=c("AI", "Machine Learning", "Deep Learning", "Natural Language Processing (NLP)", 
+             "Computer Vision", "Speech Recognition & Synthesis", "Robotics & Autonomous Systems",
+             "Knowledge Representation & Reasoning", "Planning & Decision Making", "Generative AI",
+             "Semiconductors", "Cloud & Data Infrastructure", "Data Rettrieval & Processing System", "Platform & Frameworks", "Deployment & Support")
+
 source("istraxfunctions.R")
 
 # Get all unique technologies from techmap
@@ -64,12 +69,14 @@ all_techs <- c((techmap %>% distinct(technology))$technology, "All")
 green_classes_d=setdiff(green_classes,"Green Technology")
 battery_classes_d=setdiff(battery_classes,"Battery Technology")
 hard_to_abate_classes_d=setdiff(hard_to_abate_classes,"Hard to Abate Sector Decarbonization")
+ai_classes_d=setdiff(ai_classes,"AI")
 
 other_techs <- c(setdiff(all_techs, c(green_classes, battery_classes,hard_to_abate_classes)),"Green Technology","Battery Technology","Hard to Abate Sector Decarbonization")
 
 grouped_techs <- list(
   "Broad Technology Categories"                         = as.list(setNames(other_techs, other_techs)),
   "Detailed Green technologies"                         = as.list(setNames(green_classes_d, green_classes_d)),
+  "AI subcategories"                                    = as.list(setNames(ai_classes_d, ai_classes_d)),
   "Detailed Battery technologies"                       = as.list(setNames(battery_classes_d, battery_classes_d)),
   "Detailed Hard to Abate Sector Decarbonization Technologies" = as.list(setNames(hard_to_abate_classes_d, hard_to_abate_classes_d))
   

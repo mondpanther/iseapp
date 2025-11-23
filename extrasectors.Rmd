@@ -137,9 +137,6 @@ if(!"Any battery" %in% techs){
 
 
 ```{r}
-
-
-
 library(readxl)
 tech_df <- read_excel("hard_to_abate.xlsx") %>% 
   rename(detail=technology,technology=sector) %>% 
@@ -183,6 +180,62 @@ techs=techmap %>% distinct(technology)
 if(!"Aviation Decarbonisation" %in% techs){
   techmap=techmap %>% bind_rows(tech_classes)
   
+  write_parquet(techmap,"techmap.parquet")
+}
+
+
+```
+
+
+
+
+# AI
+
+```{r}
+library(readxl)
+tech_df <- read_excel("New_Sector_mapping.xlsx",sheet="AI") %>% 
+  rename(CPC=`CPC/IPC Codes`) %>% 
+  rename(technology=`Sub-Technology`) %>% filter(!is.na(technology))
+  
+  
+
+tech_df_expanded <- tech_df %>%
+  separate_rows(CPC, sep = ",")%>%
+  mutate(cpc_class_symbol = trimws(CPC))
+
+setDT(tech_df_expanded)
+tech_df_expanded[, cpc_class_symbol := stri_replace_all_fixed(cpc_class_symbol, " ", "")]
+
+
+tech_df %>% 
+  distinct(technology) %>% 
+  pull(technology) %>% 
+  paste0('"', ., '"') %>%
+  paste(collapse = ", ") %>% cat()
+
+
+
+tech_classes=cpcs %>% inner_join(tech_df_expanded %>% select(technology,cpc_class_symbol)) 
+
+#all=tech_classes %>% distinct(docdb_family_id) %>% mutate(technology="Any Hard to Abate technology")
+#tech_classes=tech_classes %>% bind_rows(all)
+tech_classes=tech_classes %>% select(docdb_family_id,technology)
+
+
+
+```
+
+
+
+```{r}
+
+
+techmap <- read_parquet("techmap.parquet")
+techs=techmap %>% distinct(technology)
+
+if(!"Machine Learning" %in% techs){
+  techmap=techmap %>% bind_rows(tech_classes)
+  techmap=techmap %>% distinct()
   write_parquet(techmap,"techmap.parquet")
 }
 
