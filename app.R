@@ -10,6 +10,7 @@ library(plotly)
 library(arrow)
 library(dplyr)
 library(data.table)
+library(shinycssloaders)
 
 
 #rsconnect::writeManifest()
@@ -333,7 +334,7 @@ ui <- fluidPage(
   # Wrap the first plot in a collapsible container
   tags$div(
     id = "plot1Container",
-    plotOutput("avstrax_plot1", height = "600px")
+    withSpinner(plotOutput("avstrax_plot1", height = "600px"), type = 4, color = "#3498db")
   ),
   
   inputPanel(
@@ -362,10 +363,10 @@ ui <- fluidPage(
       value = 100,  # default starting value
       width = "250px"
     )
-    
+
   ),
-  
-  plotOutput("avstrax_plot2", height = "600px")
+
+  withSpinner(plotOutput("avstrax_plot2", height = "600px"), type = 4, color = "#3498db")
   
 )
 
