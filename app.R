@@ -301,6 +301,7 @@ ui <- fluidPage(
 
   
   
+  
   inputPanel(
     selectizeInput(
       inputId = "country",
