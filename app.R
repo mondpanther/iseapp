@@ -10,6 +10,7 @@ library(plotly)
 library(arrow)
 library(dplyr)
 library(data.table)
+library(shinycssloaders)
 
 
 #rsconnect::writeManifest()
@@ -84,18 +85,18 @@ grouped_techs <- list(
 )
 
 toflow_choices <- c(
-  "Global Returns" = "istrax_global",
+  "Global Returns"   = "istrax_global",
   "National Returns" = "istrax_nationalkey_2009_2018",
   "Returns to LMICs" = "istrax_EMDE",
   "Returns to LMICs (excl. China)" = "istrax_EMDENOCN",
   "Returns to LMICs (excl. China & India)" = "istrax_EMDENOCNIN",
-  "Returns to HICs" = "istrax_HIC",
-  "Returns to the EU" = "istrax_EU",
-  "Returns to US" = "istrax_US",
-  "Returns to China" = "istrax_CN",
-  "Returns to UK" = "istrax_GB",
+  "Returns to HICs"    = "istrax_HIC",
+  "Returns to the EU"  = "istrax_EU",
+  "Returns to US"      = "istrax_US",
+  "Returns to China"   = "istrax_CN",
+  "Returns to UK"      = "istrax_GB",
   "Returns to Austria" = "istrax_AT",
-  "Returns to France" = "istrax_FR"
+  "Returns to France"  = "istrax_FR"
   
 )
 
@@ -333,7 +334,7 @@ ui <- fluidPage(
   # Wrap the first plot in a collapsible container
   tags$div(
     id = "plot1Container",
-    plotOutput("avstrax_plot1", height = "600px")
+    withSpinner(plotOutput("avstrax_plot1", height = "600px"), type = 4, color = "#3498db")
   ),
   
   inputPanel(
@@ -362,10 +363,10 @@ ui <- fluidPage(
       value = 100,  # default starting value
       width = "250px"
     )
-    
+
   ),
-  
-  plotOutput("avstrax_plot2", height = "600px")
+
+  withSpinner(plotOutput("avstrax_plot2", height = "600px"), type = 4, color = "#3498db")
   
 )
 
