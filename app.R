@@ -10,8 +10,8 @@ library(plotly)
 library(arrow)
 library(dplyr)
 library(data.table)
-library(shinycssloaders)
 
+library(shinycssloaders) 
 
 #rsconnect::writeManifest()
 
@@ -300,7 +300,7 @@ ui <- fluidPage(
   
 
   
-  
+   
   
   inputPanel(
     selectizeInput(
