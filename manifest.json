@@ -9,6 +9,11 @@
     "content_category": null,
     "has_parameters": false
   },
+  "environment": {
+    "r": {
+      "requires": "~=4.4.0"
+    }
+  },
   "packages": {
     "DBI": {
       "Source": "CRAN",
@@ -39,7 +44,7 @@
         "Maintainer": "Kirill Müller <kirill@cynkra.com>",
         "Repository": "CRAN",
         "Date/Publication": "2024-06-02 21:50:02 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 01:28:41 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 13:13:28 UTC; windows"
       }
     },
     "R6": {
@@ -66,7 +71,7 @@
         "Maintainer": "Winston Chang <winston@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2025-02-15 00:50:02 UTC",
-        "Built": "R 4.4.3; ; 2025-09-17 00:43:38 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 13:12:55 UTC; windows"
       }
     },
     "RColorBrewer": {
@@ -112,9 +117,9 @@
         "Packaged": "2025-01-11 20:21:25 UTC; edd",
         "Author": "Dirk Eddelbuettel [aut, cre] (<https://orcid.org/0000-0001-6419-907X>),\n  Romain Francois [aut] (<https://orcid.org/0000-0002-2444-4226>),\n  JJ Allaire [aut] (<https://orcid.org/0000-0003-0174-9868>),\n  Kevin Ushey [aut] (<https://orcid.org/0000-0003-2880-7407>),\n  Qiang Kou [aut] (<https://orcid.org/0000-0001-6786-5453>),\n  Nathan Russell [aut],\n  Iñaki Ucar [aut] (<https://orcid.org/0000-0001-6403-5550>),\n  Doug Bates [aut] (<https://orcid.org/0000-0001-8316-9503>),\n  John Chambers [aut]",
         "Maintainer": "Dirk Eddelbuettel <edd@debian.org>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2025-01-12 16:10:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 01:41:34 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-03-05 23:32:28 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -145,9 +150,9 @@
         "Packaged": "2024-11-06 17:18:31 UTC; hadleywickham",
         "Author": "Object-Oriented Programming Working Group [cph],\n  Davis Vaughan [aut],\n  Jim Hester [aut] (<https://orcid.org/0000-0002-2739-7082>),\n  Tomasz Kalinowski [aut],\n  Will Landau [aut],\n  Michael Lawrence [aut],\n  Martin Maechler [aut] (<https://orcid.org/0000-0002-8685-9910>),\n  Luke Tierney [aut],\n  Hadley Wickham [aut, cre] (<https://orcid.org/0000-0003-4757-117X>)",
         "Maintainer": "Hadley Wickham <hadley@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-11-07 12:50:02 UTC",
-        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-09-17 00:43:41 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2024-11-08 04:48:24 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -179,9 +184,9 @@
         "Packaged": "2025-01-05 15:42:56 UTC; jkeane",
         "Author": "Neal Richardson [aut],\n  Ian Cook [aut],\n  Nic Crane [aut],\n  Dewey Dunnington [aut] (<https://orcid.org/0000-0002-9415-4582>),\n  Romain François [aut] (<https://orcid.org/0000-0002-2444-4226>),\n  Jonathan Keane [aut, cre],\n  Dragoș Moldovan-Grünfeld [aut],\n  Jeroen Ooms [aut],\n  Jacob Wujciak-Jens [aut],\n  Javier Luraschi [ctb],\n  Karl Dunkle Werner [ctb] (<https://orcid.org/0000-0003-0523-7309>),\n  Jeffrey Wong [ctb],\n  Apache Arrow [aut, cph]",
         "Maintainer": "Jonathan Keane <jkeane@gmail.com>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2025-01-08 06:40:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 02:58:34 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-01-09 04:30:32 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -209,7 +214,7 @@
         "Maintainer": "Jeroen Ooms <jeroenooms@gmail.com>",
         "Repository": "CRAN",
         "Date/Publication": "2024-10-04 07:20:03 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 02:32:51 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 13:57:00 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -233,7 +238,7 @@
         "Maintainer": "Hadley Wickham <hadley@rstudio.com>",
         "Repository": "CRAN",
         "Date/Publication": "2019-03-21 14:53:46 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 01:42:03 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 13:13:29 UTC; windows"
       }
     },
     "backports": {
@@ -309,9 +314,9 @@
         "RoxygenNote": "7.3.2",
         "NeedsCompilation": "yes",
         "Packaged": "2024-11-27 08:15:13 UTC; ripley",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-12-03 13:45:44 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 01:41:36 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-03-06 01:10:22 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -341,7 +346,7 @@
         "Maintainer": "Michael Chirico <michaelchirico4@gmail.com>",
         "Repository": "CRAN",
         "Date/Publication": "2025-01-16 16:00:07 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 02:32:50 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 13:56:59 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -370,7 +375,7 @@
         "Maintainer": "Kirill Müller <kirill@cynkra.com>",
         "Repository": "CRAN",
         "Date/Publication": "2023-03-17 12:00:06 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 02:38:38 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 14:48:21 UTC; windows"
       }
     },
     "broom": {
@@ -399,9 +404,9 @@
         "Packaged": "2024-09-26 19:48:33 UTC; simoncouch",
         "Author": "David Robinson [aut],\n  Alex Hayes [aut] (<https://orcid.org/0000-0002-4985-5160>),\n  Simon Couch [aut, cre] (<https://orcid.org/0000-0001-5676-5107>),\n  Posit Software, PBC [cph, fnd],\n  Indrajeet Patil [ctb] (<https://orcid.org/0000-0003-1995-6531>),\n  Derek Chiu [ctb],\n  Matthieu Gomez [ctb],\n  Boris Demeshev [ctb],\n  Dieter Menne [ctb],\n  Benjamin Nutter [ctb],\n  Luke Johnston [ctb],\n  Ben Bolker [ctb],\n  Francois Briatte [ctb],\n  Jeffrey Arnold [ctb],\n  Jonah Gabry [ctb],\n  Luciano Selzer [ctb],\n  Gavin Simpson [ctb],\n  Jens Preussner [ctb],\n  Jay Hesselberth [ctb],\n  Hadley Wickham [ctb],\n  Matthew Lincoln [ctb],\n  Alessandro Gasparini [ctb],\n  Lukasz Komsta [ctb],\n  Frederick Novometsky [ctb],\n  Wilson Freitas [ctb],\n  Michelle Evans [ctb],\n  Jason Cory Brunson [ctb],\n  Simon Jackson [ctb],\n  Ben Whalley [ctb],\n  Karissa Whiting [ctb],\n  Yves Rosseel [ctb],\n  Michael Kuehn [ctb],\n  Jorge Cimentada [ctb],\n  Erle Holgersen [ctb],\n  Karl Dunkle Werner [ctb] (<https://orcid.org/0000-0003-0523-7309>),\n  Ethan Christensen [ctb],\n  Steven Pav [ctb],\n  Paul PJ [ctb],\n  Ben Schneider [ctb],\n  Patrick Kennedy [ctb],\n  Lily Medina [ctb],\n  Brian Fannin [ctb],\n  Jason Muhlenkamp [ctb],\n  Matt Lehman [ctb],\n  Bill Denney [ctb] (<https://orcid.org/0000-0002-5759-428X>),\n  Nic Crane [ctb],\n  Andrew Bates [ctb],\n  Vincent Arel-Bundock [ctb] (<https://orcid.org/0000-0003-2042-7063>),\n  Hideaki Hayashi [ctb],\n  Luis Tobalina [ctb],\n  Annie Wang [ctb],\n  Wei Yang Tham [ctb],\n  Clara Wang [ctb],\n  Abby Smith [ctb] (<https://orcid.org/0000-0002-3207-0375>),\n  Jasper Cooper [ctb] (<https://orcid.org/0000-0002-8639-3188>),\n  E Auden Krauska [ctb] (<https://orcid.org/0000-0002-1466-5850>),\n  Alex Wang [ctb],\n  Malcolm Barrett [ctb] (<https://orcid.org/0000-0003-0299-5825>),\n  Charles Gray [ctb] (<https://orcid.org/0000-0002-9978-011X>),\n  Jared Wilber [ctb],\n  Vilmantas Gegzna [ctb] (<https://orcid.org/0000-0002-9500-5167>),\n  Eduard Szoecs [ctb],\n  Frederik Aust [ctb] (<https://orcid.org/0000-0003-4900-788X>),\n  Angus Moore [ctb],\n  Nick Williams [ctb],\n  Marius Barth [ctb] (<https://orcid.org/0000-0002-3421-6665>),\n  Bruna Wundervald [ctb] (<https://orcid.org/0000-0001-8163-220X>),\n  Joyce Cahoon [ctb] (<https://orcid.org/0000-0001-7217-4702>),\n  Grant McDermott [ctb] (<https://orcid.org/0000-0001-7883-8573>),\n  Kevin Zarca [ctb],\n  Shiro Kuriwaki [ctb] (<https://orcid.org/0000-0002-5687-2647>),\n  Lukas Wallrich [ctb] (<https://orcid.org/0000-0003-2121-5177>),\n  James Martherus [ctb] (<https://orcid.org/0000-0002-8285-3300>),\n  Chuliang Xiao [ctb] (<https://orcid.org/0000-0002-8466-9398>),\n  Joseph Larmarange [ctb],\n  Max Kuhn [ctb],\n  Michal Bojanowski [ctb],\n  Hakon Malmedal [ctb],\n  Clara Wang [ctb],\n  Sergio Oller [ctb],\n  Luke Sonnet [ctb],\n  Jim Hester [ctb],\n  Ben Schneider [ctb],\n  Bernie Gray [ctb] (<https://orcid.org/0000-0001-9190-6032>),\n  Mara Averick [ctb],\n  Aaron Jacobs [ctb],\n  Andreas Bender [ctb],\n  Sven Templer [ctb],\n  Paul-Christian Buerkner [ctb],\n  Matthew Kay [ctb],\n  Erwan Le Pennec [ctb],\n  Johan Junkka [ctb],\n  Hao Zhu [ctb],\n  Benjamin Soltoff [ctb],\n  Zoe Wilkinson Saldana [ctb],\n  Tyler Littlefield [ctb],\n  Charles T. Gray [ctb],\n  Shabbh E. Banks [ctb],\n  Serina Robinson [ctb],\n  Roger Bivand [ctb],\n  Riinu Ots [ctb],\n  Nicholas Williams [ctb],\n  Nina Jakobsen [ctb],\n  Michael Weylandt [ctb],\n  Lisa Lendway [ctb],\n  Karl Hailperin [ctb],\n  Josue Rodriguez [ctb],\n  Jenny Bryan [ctb],\n  Chris Jarvis [ctb],\n  Greg Macfarlane [ctb],\n  Brian Mannakee [ctb],\n  Drew Tyre [ctb],\n  Shreyas Singh [ctb],\n  Laurens Geffert [ctb],\n  Hong Ooi [ctb],\n  Henrik Bengtsson [ctb],\n  Eduard Szocs [ctb],\n  David Hugh-Jones [ctb],\n  Matthieu Stigler [ctb],\n  Hugo Tavares [ctb] (<https://orcid.org/0000-0001-9373-2726>),\n  R. Willem Vervoort [ctb],\n  Brenton M. Wiernik [ctb],\n  Josh Yamamoto [ctb],\n  Jasme Lee [ctb],\n  Taren Sanders [ctb] (<https://orcid.org/0000-0002-4504-6008>),\n  Ilaria Prosdocimi [ctb] (<https://orcid.org/0000-0001-8565-094X>),\n  Daniel D. Sjoberg [ctb] (<https://orcid.org/0000-0003-0862-2018>),\n  Alex Reinhart [ctb] (<https://orcid.org/0000-0002-6658-514X>)",
         "Maintainer": "Simon Couch <simon.couch@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-09-26 21:00:13 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 03:44:06 UTC; windows"
+        "Built": "R 4.4.0; ; 2024-09-27 04:27:23 UTC; windows"
       }
     },
     "bslib": {
@@ -434,7 +439,7 @@
         "Maintainer": "Carson Sievert <carson@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2025-01-30 23:20:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 02:55:59 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 14:48:06 UTC; windows"
       }
     },
     "cachem": {
@@ -461,7 +466,7 @@
         "Maintainer": "Winston Chang <winston@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2024-05-16 09:50:11 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 02:32:50 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 13:56:58 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -491,7 +496,7 @@
         "Maintainer": "Gábor Csárdi <csardi.gabor@gmail.com>",
         "Repository": "CRAN",
         "Date/Publication": "2024-03-25 13:30:06 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 02:22:36 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 14:16:30 UTC; windows"
       }
     },
     "cellranger": {
@@ -518,7 +523,7 @@
         "Maintainer": "Jennifer Bryan <jenny@stat.ubc.ca>",
         "Repository": "CRAN",
         "Date/Publication": "2016-07-27 03:17:48",
-        "Built": "R 4.4.2; ; 2025-02-09 03:15:33 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 15:30:42 UTC; windows"
       }
     },
     "cli": {
@@ -544,9 +549,9 @@
         "Packaged": "2024-06-21 17:24:00 UTC; gaborcsardi",
         "Author": "Gábor Csárdi [aut, cre],\n  Hadley Wickham [ctb],\n  Kirill Müller [ctb],\n  Salim Brüggemann [ctb] (<https://orcid.org/0000-0002-5329-5987>),\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Gábor Csárdi <csardi.gabor@gmail.com>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-06-21 21:00:07 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-06 01:31:20 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-03-06 01:42:43 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -576,7 +581,7 @@
         "Maintainer": "Matthew Lincoln <matthew.d.lincoln@gmail.com>",
         "Repository": "CRAN",
         "Date/Publication": "2022-02-22 00:58:45 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 01:41:36 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 13:13:20 UTC; windows"
       }
     },
     "commonmark": {
@@ -602,7 +607,7 @@
         "Maintainer": "Jeroen Ooms <jeroenooms@gmail.com>",
         "Repository": "CRAN",
         "Date/Publication": "2025-07-07 13:40:02 UTC",
-        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-09-17 00:43:45 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 13:12:56 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -631,7 +636,7 @@
         "Maintainer": "Hadley Wickham <hadley@rstudio.com>",
         "Repository": "CRAN",
         "Date/Publication": "2023-02-01 08:20:06 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 02:23:31 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 14:16:54 UTC; windows"
       }
     },
     "countrycode": {
@@ -657,9 +662,9 @@
         "Packaged": "2024-03-22 15:18:14 UTC; vincent",
         "Author": "Vincent Arel-Bundock [aut, cre]\n    (<https://orcid.org/0000-0003-2042-7063>),\n  CJ Yetman [ctb] (<https://orcid.org/0000-0001-5099-9500>),\n  Nils Enevoldsen [ctb] (<https://orcid.org/0000-0001-7195-4117>),\n  Etienne Bacher [ctb] (<https://orcid.org/0000-0002-9271-5075>),\n  Samuel Meichtry [ctb] (<https://orcid.org/0000-0003-2165-791X>)",
         "Maintainer": "Vincent Arel-Bundock <vincent.arel-bundock@umontreal.ca>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-03-22 16:10:19 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 01:52:15 UTC; windows"
+        "Built": "R 4.4.0; ; 2024-04-25 18:20:32 UTC; windows"
       }
     },
     "cpp11": {
@@ -688,7 +693,7 @@
         "Maintainer": "Davis Vaughan <davis@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2025-03-03 23:20:02 UTC",
-        "Built": "R 4.4.3; ; 2025-04-07 00:32:11 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 13:12:57 UTC; windows"
       }
     },
     "crayon": {
@@ -715,7 +720,7 @@
         "Maintainer": "Gábor Csárdi <csardi.gabor@gmail.com>",
         "Repository": "CRAN",
         "Date/Publication": "2024-06-20 13:00:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 01:41:35 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 13:12:56 UTC; windows"
       }
     },
     "crosstalk": {
@@ -739,9 +744,9 @@
         "Packaged": "2023-11-22 16:29:50 UTC; cpsievert",
         "Author": "Joe Cheng [aut],\n  Carson Sievert [aut, cre] (<https://orcid.org/0000-0002-4958-2844>),\n  Posit Software, PBC [cph, fnd],\n  jQuery Foundation [cph] (jQuery library and jQuery UI library),\n  jQuery contributors [ctb, cph] (jQuery library; authors listed in\n    inst/www/shared/jquery-AUTHORS.txt),\n  Mark Otto [ctb] (Bootstrap library),\n  Jacob Thornton [ctb] (Bootstrap library),\n  Bootstrap contributors [ctb] (Bootstrap library),\n  Twitter, Inc [cph] (Bootstrap library),\n  Brian Reavis [ctb, cph] (selectize.js library),\n  Kristopher Michael Kowal [ctb, cph] (es5-shim library),\n  es5-shim contributors [ctb, cph] (es5-shim library),\n  Denis Ineshin [ctb, cph] (ion.rangeSlider library),\n  Sami Samhuri [ctb, cph] (Javascript strftime library)",
         "Maintainer": "Carson Sievert <carson@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2023-11-23 08:50:07 UTC",
-        "Built": "R 4.4.3; ; 2025-04-26 01:18:50 UTC; windows"
+        "Built": "R 4.4.0; ; 2024-04-25 20:40:47 UTC; windows"
       }
     },
     "curl": {
@@ -768,9 +773,9 @@
         "Packaged": "2025-01-23 12:31:51 UTC; jeroen",
         "Author": "Jeroen Ooms [aut, cre] (<https://orcid.org/0000-0002-4035-0289>),\n  Hadley Wickham [ctb],\n  Posit Software, PBC [cph]",
         "Maintainer": "Jeroen Ooms <jeroenooms@gmail.com>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2025-01-23 18:40:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-06 01:31:29 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-01-24 04:36:26 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -796,9 +801,9 @@
         "Packaged": "2024-12-04 23:18:02 UTC; tysonbarrett",
         "Author": "Tyson Barrett [aut, cre] (<https://orcid.org/0000-0002-2137-1391>),\n  Matt Dowle [aut],\n  Arun Srinivasan [aut],\n  Jan Gorecki [aut],\n  Michael Chirico [aut] (<https://orcid.org/0000-0003-0787-087X>),\n  Toby Hocking [aut] (<https://orcid.org/0000-0002-3146-0865>),\n  Benjamin Schwendinger [aut] (<https://orcid.org/0000-0003-3315-8114>),\n  Pasha Stetsenko [ctb],\n  Tom Short [ctb],\n  Steve Lianoglou [ctb],\n  Eduard Antonyan [ctb],\n  Markus Bonsch [ctb],\n  Hugh Parsonage [ctb],\n  Scott Ritchie [ctb],\n  Kun Ren [ctb],\n  Xianying Tan [ctb],\n  Rick Saporta [ctb],\n  Otto Seiskari [ctb],\n  Xianghui Dong [ctb],\n  Michel Lang [ctb],\n  Watal Iwasaki [ctb],\n  Seth Wenchel [ctb],\n  Karl Broman [ctb],\n  Tobias Schmidt [ctb],\n  David Arenburg [ctb],\n  Ethan Smith [ctb],\n  Francois Cocquemas [ctb],\n  Matthieu Gomez [ctb],\n  Philippe Chataignon [ctb],\n  Nello Blaser [ctb],\n  Dmitry Selivanov [ctb],\n  Andrey Riabushenko [ctb],\n  Cheng Lee [ctb],\n  Declan Groves [ctb],\n  Daniel Possenriede [ctb],\n  Felipe Parages [ctb],\n  Denes Toth [ctb],\n  Mus Yaramaz-David [ctb],\n  Ayappan Perumal [ctb],\n  James Sams [ctb],\n  Martin Morgan [ctb],\n  Michael Quinn [ctb],\n  @javrucebo [ctb],\n  @marc-outins [ctb],\n  Roy Storey [ctb],\n  Manish Saraswat [ctb],\n  Morgan Jacob [ctb],\n  Michael Schubmehl [ctb],\n  Davis Vaughan [ctb],\n  Leonardo Silvestri [ctb],\n  Jim Hester [ctb],\n  Anthony Damico [ctb],\n  Sebastian Freundt [ctb],\n  David Simons [ctb],\n  Elliott Sales de Andrade [ctb],\n  Cole Miller [ctb],\n  Jens Peder Meldgaard [ctb],\n  Vaclav Tlapak [ctb],\n  Kevin Ushey [ctb],\n  Dirk Eddelbuettel [ctb],\n  Tony Fischetti [ctb],\n  Ofek Shilon [ctb],\n  Vadim Khotilovich [ctb],\n  Hadley Wickham [ctb],\n  Bennet Becker [ctb],\n  Kyle Haynes [ctb],\n  Boniface Christian Kamgang [ctb],\n  Olivier Delmarcell [ctb],\n  Josh O'Brien [ctb],\n  Dereck de Mezquita [ctb],\n  Michael Czekanski [ctb],\n  Dmitry Shemetov [ctb],\n  Nitish Jha [ctb],\n  Joshua Wu [ctb],\n  Iago Giné-Vázquez [ctb],\n  Anirban Chetia [ctb],\n  Doris Amoakohene [ctb],\n  Ivan Krylov [ctb]",
         "Maintainer": "Tyson Barrett <t.barrett88@gmail.com>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-12-06 15:10:10 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 01:41:37 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2024-12-07 04:32:06 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -830,9 +835,9 @@
         "Packaged": "2024-03-15 17:27:18 UTC; hadleywickham",
         "Author": "Hadley Wickham [aut, cre],\n  Maximilian Girlich [aut],\n  Edgar Ruiz [aut],\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Hadley Wickham <hadley@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-03-19 17:00:05 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 03:43:58 UTC; windows"
+        "Built": "R 4.4.0; ; 2024-04-25 21:28:25 UTC; windows"
       }
     },
     "digest": {
@@ -857,9 +862,9 @@
         "Packaged": "2024-08-19 12:16:05 UTC; edd",
         "Author": "Dirk Eddelbuettel [aut, cre] (<https://orcid.org/0000-0001-6419-907X>),\n  Antoine Lucas [ctb],\n  Jarek Tuszynski [ctb],\n  Henrik Bengtsson [ctb] (<https://orcid.org/0000-0002-7579-5165>),\n  Simon Urbanek [ctb] (<https://orcid.org/0000-0003-2297-1732>),\n  Mario Frasca [ctb],\n  Bryan Lewis [ctb],\n  Murray Stokely [ctb],\n  Hannes Muehleisen [ctb],\n  Duncan Murdoch [ctb],\n  Jim Hester [ctb],\n  Wush Wu [ctb] (<https://orcid.org/0000-0001-5180-0567>),\n  Qiang Kou [ctb] (<https://orcid.org/0000-0001-6786-5453>),\n  Thierry Onkelinx [ctb] (<https://orcid.org/0000-0001-8804-4216>),\n  Michel Lang [ctb] (<https://orcid.org/0000-0001-9754-0393>),\n  Viliam Simko [ctb],\n  Kurt Hornik [ctb] (<https://orcid.org/0000-0003-4198-9911>),\n  Radford Neal [ctb] (<https://orcid.org/0000-0002-2473-3407>),\n  Kendon Bell [ctb] (<https://orcid.org/0000-0002-9093-8312>),\n  Matthew de Queljoe [ctb],\n  Dmitry Selivanov [ctb],\n  Ion Suruceanu [ctb],\n  Bill Denney [ctb],\n  Dirk Schumacher [ctb],\n  András Svraka [ctb],\n  Sergey Fedorov [ctb],\n  Will Landau [ctb] (<https://orcid.org/0000-0003-1878-3253>),\n  Floris Vanderhaeghe [ctb] (<https://orcid.org/0000-0002-6378-6229>),\n  Kevin Tappe [ctb],\n  Harris McGehee [ctb],\n  Tim Mastny [ctb],\n  Aaron Peikert [ctb] (<https://orcid.org/0000-0001-7813-818X>),\n  Mark van der Loo [ctb] (<https://orcid.org/0000-0002-9807-4686>),\n  Chris Muir [ctb] (<https://orcid.org/0000-0003-2555-3878>),\n  Moritz Beller [ctb] (<https://orcid.org/0000-0003-4852-0526>),\n  Sebastian Campbell [ctb],\n  Winston Chang [ctb] (<https://orcid.org/0000-0002-1576-2126>),\n  Dean Attali [ctb] (<https://orcid.org/0000-0002-5645-3493>),\n  Michael Chirico [ctb] (<https://orcid.org/0000-0003-0787-087X>),\n  Kevin Ushey [ctb]",
         "Maintainer": "Dirk Eddelbuettel <edd@debian.org>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-08-19 14:10:07 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 01:41:35 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2024-08-20 04:36:33 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -891,7 +896,7 @@
         "Maintainer": "Hadley Wickham <hadley@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2023-11-17 16:50:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 03:15:30 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 15:30:39 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -919,9 +924,9 @@
         "Packaged": "2023-03-21 14:31:40 UTC; hadleywickham",
         "Author": "Hadley Wickham [cre, aut],\n  Maximilian Girlich [aut],\n  Mark Fairbanks [aut],\n  Ryan Dickerson [aut],\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Hadley Wickham <hadley@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2023-03-22 13:10:05 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 03:00:09 UTC; windows"
+        "Built": "R 4.4.0; ; 2024-04-25 00:03:51 UTC; windows"
       }
     },
     "evaluate": {
@@ -947,9 +952,9 @@
         "Packaged": "2025-01-10 22:27:28 UTC; hadleywickham",
         "Author": "Hadley Wickham [aut, cre],\n  Yihui Xie [aut] (<https://orcid.org/0000-0003-0645-5666>),\n  Michael Lawrence [ctb],\n  Thomas Kluyver [ctb],\n  Jeroen Ooms [ctb],\n  Barret Schloerke [ctb],\n  Adam Ryczkowski [ctb],\n  Hiroaki Yutani [ctb],\n  Michel Lang [ctb],\n  Karolis Koncevičius [ctb],\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Hadley Wickham <hadley@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2025-01-10 23:00:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 01:41:33 UTC; windows"
+        "Built": "R 4.4.0; ; 2025-01-11 04:49:01 UTC; windows"
       }
     },
     "fansi": {
@@ -977,7 +982,7 @@
         "Maintainer": "Brodie Gaslam <brodie.gaslam@yahoo.com>",
         "Repository": "CRAN",
         "Date/Publication": "2023-12-08 03:30:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 01:41:33 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 13:14:07 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -1004,7 +1009,7 @@
         "Maintainer": "Thomas Lin Pedersen <thomas.pedersen@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2024-05-13 09:33:09 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 01:41:35 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 13:12:55 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -1029,7 +1034,7 @@
         "Maintainer": "Winston Chang <winston@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2024-05-15 09:00:07 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 01:41:35 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 13:12:55 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -1059,7 +1064,7 @@
         "Maintainer": "Richard Iannone <rich@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2024-11-16 17:30:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 02:41:12 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 14:16:26 UTC; windows"
       }
     },
     "forcats": {
@@ -1087,9 +1092,9 @@
         "Packaged": "2023-01-27 14:11:11 UTC; hadleywickham",
         "Author": "Hadley Wickham [aut, cre],\n  RStudio [cph, fnd]",
         "Maintainer": "Hadley Wickham <hadley@rstudio.com>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2023-01-29 22:20:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 03:15:34 UTC; windows"
+        "Built": "R 4.4.0; ; 2024-04-25 20:26:01 UTC; windows"
       }
     },
     "fs": {
@@ -1120,9 +1125,9 @@
         "Packaged": "2024-10-28 22:30:40 UTC; gaborcsardi",
         "Author": "Jim Hester [aut],\n  Hadley Wickham [aut],\n  Gábor Csárdi [aut, cre],\n  libuv project contributors [cph] (libuv library),\n  Joyent, Inc. and other Node contributors [cph] (libuv library),\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Gábor Csárdi <csardi.gabor@gmail.com>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-10-30 08:40:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 01:41:37 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2024-10-31 04:27:47 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -1151,9 +1156,9 @@
         "Packaged": "2023-07-20 18:17:52 UTC; jenny",
         "Author": "Jennifer Bryan [aut, cre] (<https://orcid.org/0000-0002-6983-2759>),\n  Craig Citro [aut],\n  Hadley Wickham [aut] (<https://orcid.org/0000-0003-4757-117X>),\n  Google Inc [cph],\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Jennifer Bryan <jenny@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2023-07-20 18:50:08 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 02:39:05 UTC; windows"
+        "Built": "R 4.4.0; ; 2024-04-25 00:12:27 UTC; windows"
       }
     },
     "generics": {
@@ -1179,9 +1184,9 @@
         "Packaged": "2022-07-05 14:52:13 UTC; davis",
         "Author": "Hadley Wickham [aut, cre],\n  Max Kuhn [aut],\n  Davis Vaughan [aut],\n  RStudio [cph]",
         "Maintainer": "Hadley Wickham <hadley@rstudio.com>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2022-07-05 19:40:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 01:41:34 UTC; windows"
+        "Built": "R 4.4.0; ; 2025-03-06 01:02:15 UTC; windows"
       }
     },
     "ggplot2": {
@@ -1214,7 +1219,7 @@
         "Maintainer": "Thomas Lin Pedersen <thomas.pedersen@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2025-09-11 07:10:02 UTC",
-        "Built": "R 4.4.3; ; 2025-10-13 10:26:21 UTC; windows"
+        "Built": "R 4.4.2; ; 2025-11-23 15:27:35 UTC; windows"
       }
     },
     "gitlink": {
@@ -1242,7 +1247,7 @@
         "Maintainer": "Cole Arendt <cole@rstudio.com>",
         "Repository": "CRAN",
         "Date/Publication": "2019-07-23 12:20:02 UTC",
-        "Built": "R 4.4.3; ; 2025-10-13 09:53:37 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 14:02:18 UTC; windows"
       }
     },
     "glue": {
@@ -1272,7 +1277,7 @@
         "Maintainer": "Jennifer Bryan <jenny@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2024-09-30 22:30:01 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 01:41:35 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 13:12:55 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -1301,9 +1306,9 @@
         "Packaged": "2023-06-11 05:34:24 UTC; jenny",
         "Author": "Lucy D'Agostino McGowan [aut],\n  Jennifer Bryan [aut, cre] (<https://orcid.org/0000-0002-6983-2759>),\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Jennifer Bryan <jenny@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2023-06-11 19:30:08 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 02:49:01 UTC; windows"
+        "Built": "R 4.4.0; ; 2024-04-25 00:13:58 UTC; windows"
       }
     },
     "googlesheets4": {
@@ -1331,9 +1336,9 @@
         "Packaged": "2023-06-11 01:11:05 UTC; jenny",
         "Author": "Jennifer Bryan [cre, aut] (<https://orcid.org/0000-0002-6983-2759>),\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Jennifer Bryan <jenny@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2023-06-11 04:00:02 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 03:00:09 UTC; windows"
+        "Built": "R 4.4.0; ; 2024-04-25 00:16:04 UTC; windows"
       }
     },
     "gtable": {
@@ -1363,7 +1368,7 @@
         "Maintainer": "Thomas Lin Pedersen <thomas.pedersen@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2024-10-25 13:20:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 02:41:09 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 14:16:27 UTC; windows"
       }
     },
     "haven": {
@@ -1392,9 +1397,9 @@
         "Packaged": "2023-11-30 13:28:43 UTC; hadleywickham",
         "Author": "Hadley Wickham [aut, cre],\n  Evan Miller [aut, cph] (Author of included ReadStat code),\n  Danny Smith [aut],\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Hadley Wickham <hadley@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2023-11-30 15:10:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 03:55:03 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-03-04 05:19:21 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -1423,7 +1428,7 @@
         "Maintainer": "Yihui Xie <xie@yihui.name>",
         "Repository": "CRAN",
         "Date/Publication": "2024-05-26 20:00:03 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 02:32:50 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 13:56:59 UTC; windows"
       }
     },
     "hms": {
@@ -1451,9 +1456,9 @@
         "Packaged": "2023-03-21 16:52:11 UTC; kirill",
         "Author": "Kirill Müller [aut, cre] (<https://orcid.org/0000-0002-1416-3412>),\n  R Consortium [fnd],\n  RStudio [fnd]",
         "Maintainer": "Kirill Müller <kirill@cynkra.com>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2023-03-21 18:10:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 02:55:57 UTC; windows"
+        "Built": "R 4.4.0; ; 2025-03-06 01:15:15 UTC; windows"
       }
     },
     "htmltools": {
@@ -1484,7 +1489,7 @@
         "Maintainer": "Carson Sievert <carson@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2024-04-04 05:03:00 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 02:32:52 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-12 02:35:10 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -1513,7 +1518,7 @@
         "Maintainer": "Carson Sievert <carson@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2023-12-06 06:00:06 UTC",
-        "Built": "R 4.4.3; ; 2025-03-06 02:57:50 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 15:30:41 UTC; windows"
       }
     },
     "httpuv": {
@@ -1541,9 +1546,9 @@
         "Packaged": "2024-03-25 21:06:08 UTC; cpsievert",
         "Author": "Joe Cheng [aut],\n  Winston Chang [aut, cre],\n  Posit, PBC fnd [cph],\n  Hector Corrada Bravo [ctb],\n  Jeroen Ooms [ctb],\n  Andrzej Krzemienski [cph] (optional.hpp),\n  libuv project contributors [cph] (libuv library, see src/libuv/AUTHORS\n    file),\n  Joyent, Inc. and other Node contributors [cph] (libuv library, see\n    src/libuv/AUTHORS file; and http-parser library, see\n    src/http-parser/AUTHORS file),\n  Niels Provos [cph] (libuv subcomponent: tree.h),\n  Internet Systems Consortium, Inc. [cph] (libuv subcomponent: inet_pton\n    and inet_ntop, contained in src/libuv/src/inet.c),\n  Alexander Chemeris [cph] (libuv subcomponent: stdint-msvc2008.h (from\n    msinttypes)),\n  Google, Inc. [cph] (libuv subcomponent: pthread-fixes.c),\n  Sony Mobile Communcations AB [cph] (libuv subcomponent:\n    pthread-fixes.c),\n  Berkeley Software Design Inc. [cph] (libuv subcomponent:\n    android-ifaddrs.h, android-ifaddrs.c),\n  Kenneth MacKay [cph] (libuv subcomponent: android-ifaddrs.h,\n    android-ifaddrs.c),\n  Emergya (Cloud4all, FP7/2007-2013, grant agreement no 289016) [cph]\n    (libuv subcomponent: android-ifaddrs.h, android-ifaddrs.c),\n  Steve Reid [aut] (SHA-1 implementation),\n  James Brown [aut] (SHA-1 implementation),\n  Bob Trower [aut] (base64 implementation),\n  Alexander Peslyak [aut] (MD5 implementation),\n  Trantor Standard Systems [cph] (base64 implementation),\n  Igor Sysoev [cph] (http-parser)",
         "Maintainer": "Winston Chang <winston@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-03-26 05:50:06 UTC",
-        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-03-06 02:37:56 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-04-09 05:07:24 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -1572,7 +1577,7 @@
         "Maintainer": "Hadley Wickham <hadley@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2023-08-15 09:00:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 02:55:58 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 14:48:05 UTC; windows"
       }
     },
     "ids": {
@@ -1597,7 +1602,7 @@
         "Maintainer": "Rich FitzJohn <rich.fitzjohn@gmail.com>",
         "Repository": "CRAN",
         "Date/Publication": "2017-05-31 08:49:59 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 02:38:46 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 14:48:26 UTC; windows"
       }
     },
     "isoband": {
@@ -1626,7 +1631,7 @@
         "Maintainer": "Hadley Wickham <hadley@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2022-12-20 10:00:13 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 01:41:35 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 13:12:56 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -1651,7 +1656,7 @@
         "Maintainer": "Carson Sievert <carson@rstudio.com>",
         "Repository": "CRAN",
         "Date/Publication": "2021-04-26 17:10:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 02:41:12 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 14:16:27 UTC; windows"
       }
     },
     "jsonlite": {
@@ -1677,7 +1682,7 @@
         "Author": "Jeroen Ooms [aut, cre] (<https://orcid.org/0000-0002-4035-0289>),\n  Duncan Temple Lang [ctb],\n  Lloyd Hilaiel [cph] (author of bundled libyajl)",
         "Repository": "CRAN",
         "Date/Publication": "2025-03-27 06:40:02 UTC",
-        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-03-28 00:50:49 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 13:12:57 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -1706,9 +1711,9 @@
         "Packaged": "2024-11-06 23:10:53 UTC; runner",
         "Author": "Yihui Xie [aut, cre] (<https://orcid.org/0000-0003-0645-5666>),\n  Abhraneel Sarma [ctb],\n  Adam Vogt [ctb],\n  Alastair Andrew [ctb],\n  Alex Zvoleff [ctb],\n  Amar Al-Zubaidi [ctb],\n  Andre Simon [ctb] (the CSS files under inst/themes/ were derived from\n    the Highlight package http://www.andre-simon.de),\n  Aron Atkins [ctb],\n  Aaron Wolen [ctb],\n  Ashley Manton [ctb],\n  Atsushi Yasumoto [ctb] (<https://orcid.org/0000-0002-8335-495X>),\n  Ben Baumer [ctb],\n  Brian Diggs [ctb],\n  Brian Zhang [ctb],\n  Bulat Yapparov [ctb],\n  Cassio Pereira [ctb],\n  Christophe Dervieux [ctb],\n  David Hall [ctb],\n  David Hugh-Jones [ctb],\n  David Robinson [ctb],\n  Doug Hemken [ctb],\n  Duncan Murdoch [ctb],\n  Elio Campitelli [ctb],\n  Ellis Hughes [ctb],\n  Emily Riederer [ctb],\n  Fabian Hirschmann [ctb],\n  Fitch Simeon [ctb],\n  Forest Fang [ctb],\n  Frank E Harrell Jr [ctb] (the Sweavel package at inst/misc/Sweavel.sty),\n  Garrick Aden-Buie [ctb],\n  Gregoire Detrez [ctb],\n  Hadley Wickham [ctb],\n  Hao Zhu [ctb],\n  Heewon Jeon [ctb],\n  Henrik Bengtsson [ctb],\n  Hiroaki Yutani [ctb],\n  Ian Lyttle [ctb],\n  Hodges Daniel [ctb],\n  Jacob Bien [ctb],\n  Jake Burkhead [ctb],\n  James Manton [ctb],\n  Jared Lander [ctb],\n  Jason Punyon [ctb],\n  Javier Luraschi [ctb],\n  Jeff Arnold [ctb],\n  Jenny Bryan [ctb],\n  Jeremy Ashkenas [ctb, cph] (the CSS file at\n    inst/misc/docco-classic.css),\n  Jeremy Stephens [ctb],\n  Jim Hester [ctb],\n  Joe Cheng [ctb],\n  Johannes Ranke [ctb],\n  John Honaker [ctb],\n  John Muschelli [ctb],\n  Jonathan Keane [ctb],\n  JJ Allaire [ctb],\n  Johan Toloe [ctb],\n  Jonathan Sidi [ctb],\n  Joseph Larmarange [ctb],\n  Julien Barnier [ctb],\n  Kaiyin Zhong [ctb],\n  Kamil Slowikowski [ctb],\n  Karl Forner [ctb],\n  Kevin K. Smith [ctb],\n  Kirill Mueller [ctb],\n  Kohske Takahashi [ctb],\n  Lorenz Walthert [ctb],\n  Lucas Gallindo [ctb],\n  Marius Hofert [ctb],\n  Martin Modrák [ctb],\n  Michael Chirico [ctb],\n  Michael Friendly [ctb],\n  Michal Bojanowski [ctb],\n  Michel Kuhlmann [ctb],\n  Miller Patrick [ctb],\n  Nacho Caballero [ctb],\n  Nick Salkowski [ctb],\n  Niels Richard Hansen [ctb],\n  Noam Ross [ctb],\n  Obada Mahdi [ctb],\n  Pavel N. Krivitsky [ctb] (<https://orcid.org/0000-0002-9101-3362>),\n  Pedro Faria [ctb],\n  Qiang Li [ctb],\n  Ramnath Vaidyanathan [ctb],\n  Richard Cotton [ctb],\n  Robert Krzyzanowski [ctb],\n  Rodrigo Copetti [ctb],\n  Romain Francois [ctb],\n  Ruaridh Williamson [ctb],\n  Sagiru Mati [ctb] (<https://orcid.org/0000-0003-1413-3974>),\n  Scott Kostyshak [ctb],\n  Sebastian Meyer [ctb],\n  Sietse Brouwer [ctb],\n  Simon de Bernard [ctb],\n  Sylvain Rousseau [ctb],\n  Taiyun Wei [ctb],\n  Thibaut Assus [ctb],\n  Thibaut Lamadon [ctb],\n  Thomas Leeper [ctb],\n  Tim Mastny [ctb],\n  Tom Torsney-Weir [ctb],\n  Trevor Davis [ctb],\n  Viktoras Veitas [ctb],\n  Weicheng Zhu [ctb],\n  Wush Wu [ctb],\n  Zachary Foster [ctb],\n  Zhian N. Kamvar [ctb] (<https://orcid.org/0000-0003-1458-7108>),\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Yihui Xie <xie@yihui.name>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-11-08 09:30:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 02:41:12 UTC; windows"
+        "Built": "R 4.4.0; ; 2024-11-09 04:40:32 UTC; windows"
       }
     },
     "labeling": {
@@ -1756,9 +1761,9 @@
         "Packaged": "2024-11-27 22:51:17 UTC; jcheng",
         "Author": "Winston Chang [aut, cre],\n  Joe Cheng [aut],\n  Charlie Gao [aut] (<https://orcid.org/0000-0002-0750-061X>),\n  Posit Software, PBC [cph],\n  Marcus Geelnard [ctb, cph] (TinyCThread library,\n    https://tinycthread.github.io/),\n  Evan Nemerson [ctb, cph] (TinyCThread library,\n    https://tinycthread.github.io/)",
         "Maintainer": "Winston Chang <winston@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-11-27 23:40:02 UTC",
-        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-03-06 02:07:55 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-01-13 10:05:34 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -1783,7 +1788,7 @@
         "Maintainer": "Hadley Wickham <hadley@rstudio.com>",
         "Repository": "CRAN",
         "Date/Publication": "2019-03-15 17:50:07 UTC",
-        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-04-26 00:28:34 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 13:13:29 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -1813,7 +1818,7 @@
         "Maintainer": "Lionel Henry <lionel@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2023-11-07 10:10:10 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 02:32:51 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 13:56:58 UTC; windows"
       }
     },
     "lubridate": {
@@ -1847,7 +1852,7 @@
         "Author": "Vitalie Spinu [aut, cre],\n  Garrett Grolemund [aut],\n  Hadley Wickham [aut],\n  Davis Vaughan [ctb],\n  Ian Lyttle [ctb],\n  Imanuel Costigan [ctb],\n  Jason Law [ctb],\n  Doug Mitarotonda [ctb],\n  Joseph Larmarange [ctb],\n  Jonathan Boiser [ctb],\n  Chel Hee Lee [ctb]",
         "Repository": "CRAN",
         "Date/Publication": "2024-12-08 12:10:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 02:32:58 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 14:16:30 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -1875,9 +1880,9 @@
         "Packaged": "2022-03-29 09:34:37 UTC; lionel",
         "Author": "Stefan Milton Bache [aut, cph] (Original author and creator of\n    magrittr),\n  Hadley Wickham [aut],\n  Lionel Henry [cre],\n  RStudio [cph, fnd]",
         "Maintainer": "Lionel Henry <lionel@rstudio.com>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2022-03-30 07:30:09 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 01:41:35 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-03-06 03:30:06 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -1903,7 +1908,7 @@
         "Maintainer": "Winston Chang <winston@rstudio.com>",
         "Repository": "CRAN",
         "Date/Publication": "2021-11-26 16:11:10 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 02:41:11 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 14:16:27 UTC; windows"
       }
     },
     "mime": {
@@ -1926,9 +1931,9 @@
         "Packaged": "2021-09-28 02:06:04 UTC; yihui",
         "Author": "Yihui Xie [aut, cre] (<https://orcid.org/0000-0003-0645-5666>),\n  Jeffrey Horner [ctb],\n  Beilei Bian [ctb]",
         "Maintainer": "Yihui Xie <xie@yihui.name>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2021-09-28 05:00:05 UTC",
-        "Built": "R 4.4.0; x86_64-w64-mingw32; 2024-04-23 00:24:00 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2024-04-25 19:47:07 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -1958,7 +1963,7 @@
         "Maintainer": "Hadley Wickham <hadley@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2023-03-22 13:00:07 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 04:02:56 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 16:51:10 UTC; windows"
       }
     },
     "openssl": {
@@ -1984,9 +1989,9 @@
         "Packaged": "2025-02-03 10:27:29 UTC; jeroen",
         "Author": "Jeroen Ooms [aut, cre] (<https://orcid.org/0000-0002-4035-0289>),\n  Oliver Keyes [ctb]",
         "Maintainer": "Jeroen Ooms <jeroenooms@gmail.com>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2025-02-03 14:20:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 02:41:23 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-02-04 04:35:50 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -2013,9 +2018,9 @@
         "NeedsCompilation": "no",
         "Packaged": "2024-09-16 08:14:08 UTC; thomas",
         "Author": "Thomas Lin Pedersen [cre, aut]\n    (<https://orcid.org/0000-0002-5147-4711>)",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-09-16 09:30:02 UTC",
-        "Built": "R 4.4.3; ; 2025-03-02 14:51:12 UTC; windows"
+        "Built": "R 4.4.0; ; 2024-09-17 04:31:24 UTC; windows"
       }
     },
     "pillar": {
@@ -2046,9 +2051,9 @@
         "Packaged": "2025-01-07 10:10:11 UTC; kirill",
         "Author": "Kirill Müller [aut, cre] (<https://orcid.org/0000-0002-1416-3412>),\n  Hadley Wickham [aut],\n  RStudio [cph]",
         "Maintainer": "Kirill Müller <kirill@cynkra.com>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2025-01-07 11:10:06 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 02:55:54 UTC; windows"
+        "Built": "R 4.4.0; ; 2025-01-08 04:54:22 UTC; windows"
       }
     },
     "pkgconfig": {
@@ -2072,7 +2077,7 @@
         "Packaged": "2019-09-22 08:42:40 UTC; gaborcsardi",
         "Repository": "CRAN",
         "Date/Publication": "2019-09-22 09:20:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 01:41:35 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 13:12:55 UTC; windows"
       }
     },
     "plotly": {
@@ -2100,7 +2105,7 @@
         "Maintainer": "Carson Sievert <cpsievert1@gmail.com>",
         "Repository": "CRAN",
         "Date/Publication": "2025-06-19 18:30:02 UTC",
-        "Built": "R 4.4.3; ; 2025-10-13 12:07:43 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 16:23:28 UTC; windows"
       }
     },
     "prettyunits": {
@@ -2125,7 +2130,7 @@
         "Maintainer": "Gabor Csardi <csardi.gabor@gmail.com>",
         "Repository": "CRAN",
         "Date/Publication": "2023-09-24 21:10:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 01:41:36 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 13:13:10 UTC; windows"
       }
     },
     "processx": {
@@ -2153,7 +2158,7 @@
         "Maintainer": "Gábor Csárdi <csardi.gabor@gmail.com>",
         "Repository": "CRAN",
         "Date/Publication": "2025-02-21 17:00:01 UTC",
-        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-03-04 02:07:58 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 13:57:01 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -2182,7 +2187,7 @@
         "Maintainer": "Gábor Csárdi <csardi.gabor@gmail.com>",
         "Repository": "CRAN",
         "Date/Publication": "2023-12-06 10:30:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 03:06:21 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 15:12:27 UTC; windows"
       }
     },
     "promises": {
@@ -2210,9 +2215,9 @@
         "Packaged": "2024-11-27 23:38:47 UTC; jcheng",
         "Author": "Joe Cheng [aut, cre],\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Joe Cheng <joe@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-11-28 00:40:02 UTC",
-        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-03-06 02:21:58 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-04-09 05:06:21 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -2240,9 +2245,9 @@
         "Packaged": "2025-02-18 15:40:48 UTC; gaborcsardi",
         "Author": "Jay Loden [aut],\n  Dave Daeschler [aut],\n  Giampaolo Rodola' [aut],\n  Gábor Csárdi [aut, cre],\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Gábor Csárdi <csardi.gabor@gmail.com>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2025-02-18 23:10:02 UTC",
-        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-03-04 01:29:00 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-02-19 04:22:58 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -2274,9 +2279,9 @@
         "Packaged": "2025-01-29 21:33:56 UTC; hadleywickham",
         "Author": "Hadley Wickham [aut, cre] (<https://orcid.org/0000-0003-4757-117X>),\n  Lionel Henry [aut],\n  Posit Software, PBC [cph, fnd] (03wc8by49)",
         "Maintainer": "Hadley Wickham <hadley@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2025-02-05 18:00:01 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 02:56:08 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-04-24 04:58:14 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -2309,7 +2314,7 @@
         "Author": "Thomas Lin Pedersen [cre, aut] (ORCID:\n    <https://orcid.org/0000-0002-5147-4711>),\n  Maxim Shemanarev [aut, cph] (Author of AGG),\n  Tony Juricic [ctb, cph] (Contributor to AGG),\n  Milan Marusinec [ctb, cph] (Contributor to AGG),\n  Spencer Garrett [ctb] (Contributor to AGG),\n  Posit Software, PBC [cph, fnd] (ROR: <https://ror.org/03wc8by49>)",
         "Repository": "CRAN",
         "Date/Publication": "2025-09-02 07:20:02 UTC",
-        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-09-17 02:35:20 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 15:12:32 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -2338,7 +2343,7 @@
         "Maintainer": "Hadley Wickham <hadley@rstudio.com>",
         "Repository": "CRAN",
         "Date/Publication": "2021-01-31 05:40:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 01:41:36 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 13:12:56 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -2369,9 +2374,9 @@
         "Packaged": "2024-01-10 21:03:49 UTC; jenny",
         "Author": "Hadley Wickham [aut],\n  Jim Hester [aut],\n  Romain Francois [ctb],\n  Jennifer Bryan [aut, cre] (<https://orcid.org/0000-0002-6983-2759>),\n  Shelby Bearrows [ctb],\n  Posit Software, PBC [cph, fnd],\n  https://github.com/mandreyel/ [cph] (mio library),\n  Jukka Jylänki [ctb, cph] (grisu3 implementation),\n  Mikkel Jørgensen [ctb, cph] (grisu3 implementation)",
         "Maintainer": "Jennifer Bryan <jenny@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-01-10 23:20:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 03:35:19 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-03-17 16:19:00 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -2401,9 +2406,9 @@
         "Packaged": "2023-07-05 19:59:43 UTC; jenny",
         "Author": "Hadley Wickham [aut] (<https://orcid.org/0000-0003-4757-117X>),\n  Jennifer Bryan [aut, cre] (<https://orcid.org/0000-0002-6983-2759>),\n  Posit, PBC [cph, fnd] (Copyright holder of all R code and all C/C++\n    code without explicit copyright attribution),\n  Marcin Kalicinski [ctb, cph] (Author of included RapidXML code),\n  Komarov Valery [ctb, cph] (Author of included libxls code),\n  Christophe Leitienne [ctb, cph] (Author of included libxls code),\n  Bob Colbert [ctb, cph] (Author of included libxls code),\n  David Hoerl [ctb, cph] (Author of included libxls code),\n  Evan Miller [ctb, cph] (Author of included libxls code)",
         "Maintainer": "Jennifer Bryan <jenny@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2023-07-06 22:00:09 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 03:35:19 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2024-12-05 04:56:21 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -2427,7 +2432,7 @@
         "Packaged": "2023-08-30 12:10:51 UTC; gaborcsardi",
         "Repository": "CRAN",
         "Date/Publication": "2023-08-30 16:50:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 01:41:38 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 13:13:10 UTC; windows"
       }
     },
     "rematch2": {
@@ -2453,7 +2458,7 @@
         "Maintainer": "Gábor Csárdi <csardi.gabor@gmail.com>",
         "Repository": "CRAN",
         "Date/Publication": "2020-05-01 06:50:02 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 02:58:59 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 15:30:53 UTC; windows"
       }
     },
     "reprex": {
@@ -2486,7 +2491,7 @@
         "Maintainer": "Jennifer Bryan <jenny@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2024-07-06 13:50:01 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 02:49:07 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 15:30:54 UTC; windows"
       }
     },
     "rlang": {
@@ -2515,9 +2520,9 @@
         "Packaged": "2025-01-17 08:43:17 UTC; lionel",
         "Author": "Lionel Henry [aut, cre],\n  Hadley Wickham [aut],\n  mikefc [cph] (Hash implementation based on Mike's xxhashlite),\n  Yann Collet [cph] (Author of the embedded xxHash library),\n  Posit, PBC [cph, fnd]",
         "Maintainer": "Lionel Henry <lionel@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2025-01-17 14:30:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-06 01:31:17 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-03-05 23:00:19 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -2547,9 +2552,9 @@
         "Packaged": "2024-11-01 19:32:48 UTC; runner",
         "Author": "JJ Allaire [aut],\n  Yihui Xie [aut, cre] (<https://orcid.org/0000-0003-0645-5666>),\n  Christophe Dervieux [aut] (<https://orcid.org/0000-0003-4474-2498>),\n  Jonathan McPherson [aut],\n  Javier Luraschi [aut],\n  Kevin Ushey [aut],\n  Aron Atkins [aut],\n  Hadley Wickham [aut],\n  Joe Cheng [aut],\n  Winston Chang [aut],\n  Richard Iannone [aut] (<https://orcid.org/0000-0003-3925-190X>),\n  Andrew Dunning [ctb] (<https://orcid.org/0000-0003-0464-5036>),\n  Atsushi Yasumoto [ctb, cph] (<https://orcid.org/0000-0002-8335-495X>,\n    Number sections Lua filter),\n  Barret Schloerke [ctb],\n  Carson Sievert [ctb] (<https://orcid.org/0000-0002-4958-2844>),\n  Devon Ryan [ctb] (<https://orcid.org/0000-0002-8549-0971>),\n  Frederik Aust [ctb] (<https://orcid.org/0000-0003-4900-788X>),\n  Jeff Allen [ctb],\n  JooYoung Seo [ctb] (<https://orcid.org/0000-0002-4064-6012>),\n  Malcolm Barrett [ctb],\n  Rob Hyndman [ctb],\n  Romain Lesur [ctb],\n  Roy Storey [ctb],\n  Ruben Arslan [ctb],\n  Sergio Oller [ctb],\n  Posit Software, PBC [cph, fnd],\n  jQuery UI contributors [ctb, cph] (jQuery UI library; authors listed in\n    inst/rmd/h/jqueryui/AUTHORS.txt),\n  Mark Otto [ctb] (Bootstrap library),\n  Jacob Thornton [ctb] (Bootstrap library),\n  Bootstrap contributors [ctb] (Bootstrap library),\n  Twitter, Inc [cph] (Bootstrap library),\n  Alexander Farkas [ctb, cph] (html5shiv library),\n  Scott Jehl [ctb, cph] (Respond.js library),\n  Ivan Sagalaev [ctb, cph] (highlight.js library),\n  Greg Franko [ctb, cph] (tocify library),\n  John MacFarlane [ctb, cph] (Pandoc templates),\n  Google, Inc. [ctb, cph] (ioslides library),\n  Dave Raggett [ctb] (slidy library),\n  W3C [cph] (slidy library),\n  Dave Gandy [ctb, cph] (Font-Awesome),\n  Ben Sperry [ctb] (Ionicons),\n  Drifty [cph] (Ionicons),\n  Aidan Lister [ctb, cph] (jQuery StickyTabs),\n  Benct Philip Jonsson [ctb, cph] (pagebreak Lua filter),\n  Albert Krewinkel [ctb, cph] (pagebreak Lua filter)",
         "Maintainer": "Yihui Xie <xie@yihui.name>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-11-04 12:30:09 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 03:06:22 UTC; windows"
+        "Built": "R 4.4.0; ; 2024-11-05 04:51:53 UTC; windows"
       }
     },
     "rstudioapi": {
@@ -2574,7 +2579,7 @@
         "Author": "Kevin Ushey [aut, cre],\n  JJ Allaire [aut],\n  Hadley Wickham [aut],\n  Gary Ritchie [aut],\n  RStudio [cph]",
         "Repository": "CRAN",
         "Date/Publication": "2024-10-22 22:40:02 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 01:28:50 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 13:12:57 UTC; windows"
       }
     },
     "rvest": {
@@ -2603,9 +2608,9 @@
         "Packaged": "2024-02-12 17:13:26 UTC; hadleywickham",
         "Author": "Hadley Wickham [aut, cre],\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Hadley Wickham <hadley@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-02-12 20:10:02 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 02:48:35 UTC; windows"
+        "Built": "R 4.4.0; ; 2024-04-25 21:24:30 UTC; windows"
       }
     },
     "sass": {
@@ -2634,7 +2639,7 @@
         "Maintainer": "Carson Sievert <carson@rstudio.com>",
         "Repository": "CRAN",
         "Date/Publication": "2025-04-11 19:50:02 UTC",
-        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-09-17 01:49:23 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 14:16:28 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -2665,7 +2670,7 @@
         "Maintainer": "Thomas Lin Pedersen <thomas.pedersen@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2025-04-24 11:00:02 UTC",
-        "Built": "R 4.4.3; ; 2025-09-17 01:49:19 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 14:16:27 UTC; windows"
       }
     },
     "selectr": {
@@ -2691,7 +2696,7 @@
         "Maintainer": "Simon Potter <simon@sjp.co.nz>",
         "Repository": "CRAN",
         "Date/Publication": "2019-11-20 07:30:03 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 02:38:43 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 14:48:25 UTC; windows"
       }
     },
     "shiny": {
@@ -2721,7 +2726,7 @@
         "Maintainer": "Winston Chang <winston@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2025-07-03 06:20:02 UTC",
-        "Built": "R 4.4.3; ; 2025-09-17 02:35:22 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 15:12:24 UTC; windows"
       }
     },
     "sourcetools": {
@@ -2745,7 +2750,7 @@
         "Packaged": "2023-01-31 18:03:04 UTC; kevin",
         "Repository": "CRAN",
         "Date/Publication": "2023-02-01 10:10:02 UTC",
-        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-03-06 01:30:30 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 13:12:57 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -2773,9 +2778,9 @@
         "NeedsCompilation": "yes",
         "Packaged": "2024-05-06 12:50:25 UTC; gagolews",
         "License_is_FOSS": "yes",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-05-06 15:00:02 UTC",
-        "Built": "R 4.4.0; x86_64-w64-mingw32; 2024-05-06 23:50:54 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2024-05-07 04:34:26 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -2804,9 +2809,9 @@
         "Packaged": "2023-11-14 15:03:52 UTC; hadleywickham",
         "Author": "Hadley Wickham [aut, cre, cph],\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Hadley Wickham <hadley@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2023-11-14 23:10:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 02:55:56 UTC; windows"
+        "Built": "R 4.4.0; ; 2024-04-25 20:18:44 UTC; windows"
       }
     },
     "sys": {
@@ -2832,7 +2837,7 @@
         "Maintainer": "Jeroen Ooms <jeroenooms@gmail.com>",
         "Repository": "CRAN",
         "Date/Publication": "2024-10-04 09:40:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 01:41:41 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 13:12:56 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -2864,9 +2869,9 @@
         "Packaged": "2025-04-30 17:13:44 UTC; thomas",
         "Author": "Thomas Lin Pedersen [aut, cre] (ORCID:\n    <https://orcid.org/0000-0002-5147-4711>),\n  Jeroen Ooms [aut] (ORCID: <https://orcid.org/0000-0002-4035-0289>),\n  Devon Govett [aut] (Author of font-manager),\n  Posit Software, PBC [cph, fnd] (ROR: <https://ror.org/03wc8by49>)",
         "Maintainer": "Thomas Lin Pedersen <thomas.pedersen@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2025-04-30 17:50:02 UTC",
-        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-05-24 02:56:58 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-05-01 04:27:17 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -2896,9 +2901,9 @@
         "Packaged": "2025-01-20 08:47:24 UTC; thomas",
         "Author": "Thomas Lin Pedersen [cre, aut]\n    (<https://orcid.org/0000-0002-5147-4711>),\n  Posit, PBC [cph, fnd]",
         "Maintainer": "Thomas Lin Pedersen <thomas.pedersen@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2025-01-20 11:00:01 UTC",
-        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-03-04 02:22:36 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-05-01 04:54:29 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -2930,7 +2935,7 @@
         "Maintainer": "Carson Sievert <carson@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2025-09-29 23:40:03 UTC",
-        "Built": "R 4.4.3; ; 2025-10-13 10:31:02 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 14:24:28 UTC; windows"
       }
     },
     "tibble": {
@@ -2962,9 +2967,9 @@
         "Packaged": "2023-03-19 09:23:10 UTC; kirill",
         "Author": "Kirill Müller [aut, cre] (<https://orcid.org/0000-0002-1416-3412>),\n  Hadley Wickham [aut],\n  Romain Francois [ctb],\n  Jennifer Bryan [ctb],\n  RStudio [cph, fnd]",
         "Maintainer": "Kirill Müller <kirill@cynkra.com>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2023-03-20 06:30:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 03:06:21 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2024-04-25 20:22:42 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -2996,7 +3001,7 @@
         "Maintainer": "Hadley Wickham <hadley@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2024-01-24 14:50:09 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 03:35:18 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 15:52:27 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -3027,7 +3032,7 @@
         "Maintainer": "Lionel Henry <lionel@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2024-03-11 14:10:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 02:55:54 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 14:48:05 UTC; windows"
       }
     },
     "tidyverse": {
@@ -3056,7 +3061,7 @@
         "Maintainer": "Hadley Wickham <hadley@rstudio.com>",
         "Repository": "CRAN",
         "Date/Publication": "2023-02-22 09:20:06 UTC",
-        "Built": "R 4.4.3; ; 2025-03-04 04:03:17 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 17:03:42 UTC; windows"
       }
     },
     "timechange": {
@@ -3083,7 +3088,7 @@
         "Maintainer": "Vitalie Spinu <spinuvit@gmail.com>",
         "Repository": "CRAN",
         "Date/Publication": "2024-01-18 09:20:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 01:42:06 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 13:56:58 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -3108,9 +3113,9 @@
         "Packaged": "2024-11-01 14:22:24 UTC; yihui",
         "Author": "Yihui Xie [aut, cre, cph] (<https://orcid.org/0000-0003-0645-5666>),\n  Posit Software, PBC [cph, fnd],\n  Christophe Dervieux [ctb] (<https://orcid.org/0000-0003-4474-2498>),\n  Devon Ryan [ctb] (<https://orcid.org/0000-0002-8549-0971>),\n  Ethan Heinzen [ctb],\n  Fernando Cagua [ctb]",
         "Maintainer": "Yihui Xie <xie@yihui.name>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2024-11-01 15:10:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 02:32:50 UTC; windows"
+        "Built": "R 4.4.0; ; 2024-11-02 04:31:24 UTC; windows"
       }
     },
     "tzdb": {
@@ -3139,7 +3144,7 @@
         "Maintainer": "Davis Vaughan <davis@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2025-03-15 22:50:02 UTC",
-        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-04-07 00:32:23 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 13:13:21 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -3165,9 +3170,9 @@
         "Packaged": "2023-10-22 13:43:19 UTC; kirill",
         "Author": "Patrick O. Perry [aut, cph],\n  Kirill Müller [cre],\n  Unicode, Inc. [cph, dtc] (Unicode Character Database)",
         "Maintainer": "Kirill Müller <kirill@cynkra.com>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2023-10-22 21:50:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 01:41:34 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2024-04-25 19:46:43 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -3221,7 +3226,7 @@
         "Maintainer": "Davis Vaughan <davis@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2023-12-01 23:50:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 02:41:12 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-15 14:16:29 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -3249,7 +3254,7 @@
         "Author": "Simon Garnier [aut, cre],\n  Noam Ross [ctb, cph],\n  Bob Rudis [ctb, cph],\n  Marco Sciaini [ctb, cph],\n  Antônio Pedro Camargo [ctb, cph],\n  Cédric Scherer [ctb, cph]",
         "Repository": "CRAN",
         "Date/Publication": "2023-05-02 23:50:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 01:41:35 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 13:12:56 UTC; windows"
       }
     },
     "vroom": {
@@ -3280,9 +3285,9 @@
         "Packaged": "2023-12-05 16:46:59 UTC; jenny",
         "Author": "Jim Hester [aut] (<https://orcid.org/0000-0002-2739-7082>),\n  Hadley Wickham [aut] (<https://orcid.org/0000-0003-4757-117X>),\n  Jennifer Bryan [aut, cre] (<https://orcid.org/0000-0002-6983-2759>),\n  Shelby Bearrows [ctb],\n  https://github.com/mandreyel/ [cph] (mio library),\n  Jukka Jylänki [cph] (grisu3 implementation),\n  Mikkel Jørgensen [cph] (grisu3 implementation),\n  Posit Software, PBC [cph, fnd]",
         "Maintainer": "Jennifer Bryan <jenny@posit.co>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2023-12-05 23:50:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 03:15:34 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-03-17 16:15:20 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -3313,7 +3318,7 @@
         "Maintainer": "Lionel Henry <lionel@posit.co>",
         "Repository": "CRAN",
         "Date/Publication": "2024-10-28 13:30:02 UTC",
-        "Built": "R 4.4.2; ; 2025-02-09 01:41:36 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 13:12:57 UTC; windows"
       }
     },
     "xfun": {
@@ -3339,9 +3344,9 @@
         "Packaged": "2025-01-07 14:01:22 UTC; runner",
         "Author": "Yihui Xie [aut, cre, cph] (<https://orcid.org/0000-0003-0645-5666>),\n  Wush Wu [ctb],\n  Daijiang Li [ctb],\n  Xianying Tan [ctb],\n  Salim Brüggemann [ctb] (<https://orcid.org/0000-0002-5329-5987>),\n  Christophe Dervieux [ctb]",
         "Maintainer": "Yihui Xie <xie@yihui.name>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2025-01-07 15:20:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-02-09 01:41:35 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-01-08 04:33:04 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -3371,9 +3376,9 @@
         "Packaged": "2025-02-28 00:30:13 UTC; jeroen",
         "Author": "Hadley Wickham [aut],\n  Jim Hester [aut],\n  Jeroen Ooms [aut, cre],\n  Posit Software, PBC [cph, fnd],\n  R Foundation [ctb] (Copy of R-project homepage cached as example)",
         "Maintainer": "Jeroen Ooms <jeroenooms@gmail.com>",
-        "Repository": "CRAN",
+        "Repository": "RSPM",
         "Date/Publication": "2025-02-28 16:10:01 UTC",
-        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-03-04 02:08:02 UTC; windows",
+        "Built": "R 4.4.0; x86_64-w64-mingw32; 2025-03-05 20:21:50 UTC; windows",
         "Archs": "x64"
       }
     },
@@ -3399,7 +3404,7 @@
         "Packaged": "2019-04-21 10:56:51 UTC; dsco036",
         "Author": "David B. Dahl [aut],\n  David Scott [aut, cre],\n  Charles Roosen [aut],\n  Arni Magnusson [aut],\n  Jonathan Swinton [aut],\n  Ajay Shah [ctb],\n  Arne Henningsen [ctb],\n  Benno Puetz [ctb],\n  Bernhard Pfaff [ctb],\n  Claudio Agostinelli [ctb],\n  Claudius Loehnert [ctb],\n  David Mitchell [ctb],\n  David Whiting [ctb],\n  Fernando da Rosa [ctb],\n  Guido Gay [ctb],\n  Guido Schulz [ctb],\n  Ian Fellows [ctb],\n  Jeff Laake [ctb],\n  John Walker [ctb],\n  Jun Yan [ctb],\n  Liviu Andronic [ctb],\n  Markus Loecher [ctb],\n  Martin Gubri [ctb],\n  Matthieu Stigler [ctb],\n  Robert Castelo [ctb],\n  Seth Falcon [ctb],\n  Stefan Edwards [ctb],\n  Sven Garbade [ctb],\n  Uwe Ligges [ctb]",
         "Date/Publication": "2019-04-21 12:20:03 UTC",
-        "Built": "R 4.4.3; ; 2025-03-06 01:30:27 UTC; windows"
+        "Built": "R 4.4.3; ; 2025-11-15 13:12:56 UTC; windows"
       }
     },
     "yaml": {
@@ -3422,7 +3427,7 @@
         "Packaged": "2024-07-22 15:44:18 UTC; garbetsp",
         "Repository": "CRAN",
         "Date/Publication": "2024-07-26 15:10:02 UTC",
-        "Built": "R 4.4.2; x86_64-w64-mingw32; 2025-01-04 01:25:50 UTC; windows",
+        "Built": "R 4.4.3; x86_64-w64-mingw32; 2025-11-10 01:46:01 UTC; windows",
         "Archs": "x64"
       }
     }
@@ -3431,44 +3436,107 @@
     ".gitattributes": {
       "checksum": "dcb240655dcbf79b8706d11c8c2a169c"
     },
+    ".Rprofile": {
+      "checksum": "64905e5563e5a5160149eac32e3c07d8"
+    },
     "app.R": {
-      "checksum": "169506cecfda3d66ac31cd0fdc6dc0aa"
+      "checksum": "c49f78b74f673529ed9bc9962ff52e22"
+    },
+    "checking.nb.html": {
+      "checksum": "da3366068e825c150ae12330c546f13d"
+    },
+    "checking.Rmd": {
+      "checksum": "c0feb961706262f014970f3bf8c68ed1"
     },
     "countrymap.parquet": {
       "checksum": "95bcab6ac458c42b534c9542a48f7015"
     },
+    "examples.xlsx": {
+      "checksum": "f620a39d2ee2de1380484b45c6c5960a"
+    },
+    "extrasectors.nb.html": {
+      "checksum": "01b8deb6d930efb898354136d710e328"
+    },
+    "extrasectors.Rmd": {
+      "checksum": "215b90fce3f28eb4f6c2c622bc6efe5a"
+    },
+    "extrasectorshelper.R": {
+      "checksum": "c35ed5b72ff4cb1a4961f56f5d15c507"
+    },
+    "globe.R": {
+      "checksum": "6826527e2e85f1e3f685aeac3a32e9d0"
+    },
+    "hard_to_abate.xlsx": {
+      "checksum": "cdcf941b2dde8d63fcda4669adba72be"
+    },
+    "iseapp_examples_scrapbook.docx": {
+      "checksum": "7ceaf295de0afac32b797cd1eb24cc91"
+    },
+    "istraxes/istrax_AT.parquet": {
+      "checksum": "ede5c9ac799f9116f52c5dcd9d63f7a7"
+    },
     "istraxes/istrax_CN.parquet": {
-      "checksum": "f06cf62becb8426399183e5f73ddbc3a"
+      "checksum": "a86603e468f8d389f577054e71db0dc3"
+    },
+    "istraxes/istrax_DE.parquet": {
+      "checksum": "2e882f58ef3ad8cdd8a52cc04c2c4ff7"
     },
     "istraxes/istrax_EMDE.parquet": {
-      "checksum": "1c9066ded1d383bffebadc7bbdd46399"
+      "checksum": "26fcb336a91807e7e40c83124f8dbe30"
     },
     "istraxes/istrax_EMDEexCN.parquet": {
-      "checksum": "47d8214fc012ab4c031f90f5a0ec6bb2"
+      "checksum": "ce8e54369446b2d0bfbec5ab59603ae0"
     },
     "istraxes/istrax_EMDEexCNIN.parquet": {
-      "checksum": "47ae8329b93c141db737d57f23906fb6"
+      "checksum": "a421acb1972b263d6d5dbae90c108ae8"
+    },
+    "istraxes/istrax_EMDENOCN.parquet": {
+      "checksum": "37a9b37fe6f09abd807f38ca8000ecdf"
+    },
+    "istraxes/istrax_EMDENOCNIN.parquet": {
+      "checksum": "10744eb0710e9d46f6a0454ea8903991"
     },
     "istraxes/istrax_EU.parquet": {
-      "checksum": "58eacf22905b63168db1a70744d87ddb"
+      "checksum": "8c124cfa2e9c71e4b5efb85ad4b9555d"
+    },
+    "istraxes/istrax_FR.parquet": {
+      "checksum": "221e875dddf83d185e5ffed65f9f12c0"
+    },
+    "istraxes/istrax_GB.parquet": {
+      "checksum": "b951116bc4a8750004b0a378ce5469d7"
     },
     "istraxes/istrax_global.parquet": {
-      "checksum": "c7fd867f2f1bdb7020b58067953a5170"
+      "checksum": "040f0a1acf0008125a9d1bfc541bff2d"
     },
     "istraxes/istrax_HIC.parquet": {
-      "checksum": "11dca02f0a3d093201cbdb3120eead4e"
+      "checksum": "43f9b82c42ecba3ef555c36b6c9dd548"
     },
     "istraxes/istrax_IN.parquet": {
-      "checksum": "3daebf0975a3ae0e212a82d14e171b6d"
+      "checksum": "d4eea7b2689b2a04e19630ba9078db38"
     },
     "istraxes/istrax_nationalkey_2009_2018.parquet": {
-      "checksum": "318a4957ea4cb2840818ac3d414f21ef"
+      "checksum": "f41b32276eeeca0501d7df1094628092"
+    },
+    "istraxes/istrax_US.parquet": {
+      "checksum": "86ef5695bcddd057b011becdd6edb0f9"
     },
     "istraxfunctions.R": {
-      "checksum": "36402c662b1bf839b055ebbd9500dac0"
+      "checksum": "44aa9e2742b2b6e5d68324043c1b356e"
+    },
+    "New_Sector_Mapping.xlsx": {
+      "checksum": "603c84588c44beb5feada7e70cc36ee2"
+    },
+    "README.md": {
+      "checksum": "bc27e55c7b48dd3b8ee618ef487beff9"
+    },
+    "renv.lock": {
+      "checksum": "ffadb33789ebc3e2d75b76d5eaa40d5d"
     },
     "techmap.parquet": {
-      "checksum": "069fa7d1dcf4b59ec4dac0a3c9f100fe"
+      "checksum": "c31b0cf34718c79918e6f94e4bc55169"
+    },
+    "world_connections_map.png": {
+      "checksum": "cff195232e63390f5668792b57543e4f"
     }
   },
   "users": null
