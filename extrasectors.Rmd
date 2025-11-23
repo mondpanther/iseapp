@@ -133,4 +133,41 @@ if(!"Any battery" %in% techs){
 ```
 
 
+# Hard to abate sectors
 
+
+```{r}
+
+
+
+library(readxl)
+tech_df <- read_excel("hard_to_abate.xlsx") %>% 
+  rename(detail=technology,technology=sector) %>% 
+  mutate(technology=paste0(technology," Decarbonisation"))
+
+
+tech_df_expanded <- tech_df %>%
+  separate_rows(CPC, sep = ";")%>%
+  mutate(cpc_class_symbol = trimws(CPC))
+
+setDT(tech_df_expanded)
+tech_df_expanded[, cpc_class_symbol := stri_replace_all_fixed(cpc_class_symbol, " ", "")]
+
+
+tech_df %>% 
+  distinct(technology) %>% 
+  pull(technology) %>% 
+  paste0('"', ., '"') %>%
+  paste(collapse = ", ") %>% cat()
+
+
+
+tech_classes=cpcs %>% inner_join(tech_df_expanded %>% select(technology,cpc_class_symbol)) 
+
+all=tech_classes %>% distinct(docdb_family_id) %>% mutate(technology="Any Hard to Abate technology")
+tech_classes=tech_classes %>% bind_rows(all)
+tech_classes=tech_classes %>% select(docdb_family_id,technology)
+
+
+
+```

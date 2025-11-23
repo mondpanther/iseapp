@@ -39,6 +39,10 @@ battery_classes=c("Any battery technology", "Lithium Extraction & Processing", "
                   "Electric Vehicles & Mobility", "Battery Recycling & Recovery")
 
 
+hard_to_abate_classes=c("Aviation Decarbonisation", "Cement & Concrete Decarbonisation",
+                        "Chemicals & Plastics Decarbonisation", "Shipping Decarbonisation",
+                        "Steel & Iron Decarbonisation")
+
 source("istraxfunctions.R")
 
 # Get all unique technologies from techmap
