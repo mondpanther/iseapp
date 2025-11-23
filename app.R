@@ -9,6 +9,7 @@ library(countrycode)
 library(plotly)
 library(arrow)
 library(dplyr)
+library(data.table)
 
 
 #rsconnect::writeManifest()
@@ -91,6 +92,7 @@ toflow_choices <- c(
   "Returns to HICs" = "istrax_HIC",
   "Returns to the EU" = "istrax_EU",
   "Returns to US" = "istrax_US",
+  "Returns to China" = "istrax_CN",
   "Returns to UK" = "istrax_GB",
   "Returns to Austria" = "istrax_AT",
   "Returns to France" = "istrax_FR"
