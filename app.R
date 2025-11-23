@@ -39,9 +39,24 @@ battery_classes=c("Any battery technology", "Lithium Extraction & Processing", "
                   "Electric Vehicles & Mobility", "Battery Recycling & Recovery")
 
 
+hard_to_abate_classes=c("Aviation Decarbonisation", "Cement & Concrete Decarbonisation",
+                        "Chemicals & Plastics Decarbonisation", "Shipping Decarbonisation",
+                        "Steel & Iron Decarbonisation")
+
 source("istraxfunctions.R")
 
-grouped_techs=c(as.list((techmap %>% distinct(technology))$technology),"All")
+# Get all unique technologies from techmap
+all_techs <- c((techmap %>% distinct(technology))$technology, "All")
+
+# Create grouped technology choices
+# Separate technologies into green, battery, and other categories
+other_techs <- setdiff(all_techs, c(green_classes, battery_classes))
+
+grouped_techs <- list(
+  "Green technologies" = as.list(setNames(green_classes, green_classes)),
+  "Battery technologies" = as.list(setNames(battery_classes, battery_classes)),
+  "Other technologies" = as.list(setNames(other_techs, other_techs))
+)
 
 toflow_choices <- c(
   "Global Returns" = "istrax_global",

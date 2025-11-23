@@ -39,4 +39,3 @@ battery_df <- data.frame(
   stringsAsFactors = FALSE
 )
 
-# View the data frame
