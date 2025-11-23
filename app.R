@@ -23,23 +23,32 @@ countrymap <- read_parquet("countrymap.parquet")
 #}
 
 techmap <- read_parquet("techmap.parquet")
-
+#techmap %>% distinct(technology) %>% pull(technology)
 
 techmap=countrymap %>%
   select(docdb_family_id) %>% 
   distinct() %>% 
   mutate(technology = "All") %>% bind_rows(techmap)
 
-green_classes <- c("Green Energy", "Green Transport", "Circular Economy", "Green Manufacturing",
-                   "Adaptation", "Green Housing", "Green ICT", "Green Agriculture",
-                   "GHG Capture", "Any Green technology")
+# Correct
+setDT(techmap)
+techmap[, technology := fcase(
+  technology == "Any Green technology", "Green Technology",
+  technology == "Any battery technology", "Battery Technology",
+  technology == "Any Hard to Abate technology", "Hard to Abate Sector Decarbonization",
+  default = technology
+)]
 
-battery_classes=c("Any battery technology", "Lithium Extraction & Processing", "Graphite & Carbon Materials", "Cathode Materials", "Anode Materials",
+green_classes <- c("Green Technology","Green Energy", "Green Transport", "Circular Economy", "Green Manufacturing",
+                   "Adaptation", "Green Housing", "Green ICT", "Green Agriculture",
+                   "GHG Capture")
+
+battery_classes=c("Battery Technology", "Lithium Extraction & Processing", "Graphite & Carbon Materials", "Cathode Materials", "Anode Materials",
                   "Electrolytes & Additives", "Separators", "Battery Cell Design & Assembly", "Battery Management Systems (BMS)", 
                   "Electric Vehicles & Mobility", "Battery Recycling & Recovery")
 
 
-hard_to_abate_classes=c("Aviation Decarbonisation", "Cement & Concrete Decarbonisation",
+hard_to_abate_classes=c("Hard to Abate Sector Decarbonization", "Aviation Decarbonisation", "Cement & Concrete Decarbonisation",
                         "Chemicals & Plastics Decarbonisation", "Shipping Decarbonisation",
                         "Steel & Iron Decarbonisation")
 
@@ -50,12 +59,20 @@ all_techs <- c((techmap %>% distinct(technology))$technology, "All")
 
 # Create grouped technology choices
 # Separate technologies into green, battery, and other categories
-other_techs <- setdiff(all_techs, c(green_classes, battery_classes))
+
+
+green_classes_d=setdiff(green_classes,"Green Technology")
+battery_classes_d=setdiff(battery_classes,"Battery Technology")
+hard_to_abate_classes_d=setdiff(hard_to_abate_classes,"Hard to Abate Sector Decarbonization")
+
+other_techs <- c(setdiff(all_techs, c(green_classes, battery_classes,hard_to_abate_classes)),"Green Technology","Battery Technology","Hard to Abate Sector Decarbonization")
 
 grouped_techs <- list(
-  "Green technologies" = as.list(setNames(green_classes, green_classes)),
-  "Battery technologies" = as.list(setNames(battery_classes, battery_classes)),
-  "Other technologies" = as.list(setNames(other_techs, other_techs))
+  "Broad Technology Categories"                         = as.list(setNames(other_techs, other_techs)),
+  "Detailed Green technologies"                         = as.list(setNames(green_classes_d, green_classes_d)),
+  "Detailed Battery technologies"                       = as.list(setNames(battery_classes_d, battery_classes_d)),
+  "Detailed Hard to Abate Sector Decarbonization Technologies" = as.list(setNames(hard_to_abate_classes_d, hard_to_abate_classes_d))
+  
 )
 
 toflow_choices <- c(
@@ -295,7 +312,7 @@ ui <- fluidPage(
       inputId = "tech_categories_plot1",
       label = "Technology categories",
       choices = grouped_techs,
-      selected = c("Other","AI","Any Green"),
+      selected = c("Other","AI","Green Technology"),
       multiple = TRUE,
       options = list(placeholder = 'Choose one or more technology categories...')
     )
@@ -315,7 +332,7 @@ ui <- fluidPage(
       inputId = "techs",
       label = "Technology categories",
       choices = grouped_techs,
-      selected = "Any Green",
+      selected = "Green Technology",
       multiple = TRUE,
       options = list(placeholder = 'Choose one or more technology categories...')
     ),

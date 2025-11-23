@@ -171,3 +171,20 @@ tech_classes=tech_classes %>% select(docdb_family_id,technology)
 
 
 ```
+
+
+
+```{r}
+
+
+techmap <- read_parquet("techmap.parquet")
+techs=techmap %>% distinct(technology)
+
+if(!"Aviation Decarbonisation" %in% techs){
+  techmap=techmap %>% bind_rows(tech_classes)
+  
+  write_parquet(techmap,"techmap.parquet")
+}
+
+
+```
