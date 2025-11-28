@@ -1,0 +1,570 @@
+---
+title: "Does istrax create growth?"
+output: html_document
+date: "2025-11-25"
+---
+
+
+
+
+
+
+```{r}
+
+if (Sys.info()["nodename"] == "PCACL-9RVSQ74") {
+  datad="C:\\Users\\rmartin7\\OneDrive - WBG\\projects\\PRINZGlobal\\imperial_college_visualization\\01_data"
+  localbig="C:\\Users\\rmartin7\\OneDrive - Imperial College London\\inglobe"
+  localbigwb="C:\\Users\\rmartin7\\OneDrive - WBG\\projects\\inglobe"
+  datad="C:\\Users\\rmartin7\\OneDrive - WBG\\projects\\PRINZGlobal\\imperial_college_visualization\\03_outputs\\"
+
+}
+
+
+library(dplyr)
+```
+
+
+# Load data
+
+
+
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+if (Sys.info()["nodename"] == "PCACL-9RVSQ74") {
+  #datad="C:\\Users\\rmartin7\\OneDrive - WBG\\projects\\PRINZGlobal\\imperial_college_visualization\\01_data"
+  datad="C:\\Users\\rmartin7\\OneDrive - WBG\\projects\\PRINZGlobal\\imperial_college_visualization\\03_outputs\\"
+  
+  fromWatson="C:\\Users\\rmartin7\\OneDrive - WBG\\projects\\PRINZGlobal\\data\\patent_data\\patbis2021\\data\\fromWATSON\\"
+
+}
+
+
+```
+
+```{r}
+library(arrow)
+cites=read_parquet(paste0(datad,"citenet_notself_processed.parquet"))
+library(collapse)
+cites <- fcount(cites, cited_docdb_family_id)
+ library(data.table)
+setnames(cites, "N", "cites")
+
+cites=cites %>% rename(docdb_family_id=cited_docdb_family_id)
+
+```
+
+
+
+```{r}
+
+library(rlang)
+library(readr)
+
+
+
+
+  jurl=paste0(fromWatson,"innos_istraxfield_nationalkey_1999_2008.dsv")
+  #jurl=paste0(fromWatson,"innos_ctry_indicators_1999_2008.dsv")
+  national0=read_tsv(jurl) %>% 
+    rename(ev_nat0=ev,cost=costpvyear_1999_2008,istrax_nat0=istrax) %>%
+    select(docdb_family_id,ctry_code,pv,ev_nat0,cost,starts_with("istrax_")) %>% 
+    mutate(period=0)
+
+  jurl=paste0(fromWatson,"innos_istraxfield_global_1999_2008.dsv")
+  global0=read_tsv(jurl) %>% rename(ev_glob0=ev,istrax_glob0=istrax) %>% 
+    select(docdb_family_id, ev_glob0,starts_with("istrax_"))
+
+
+  
+  
+    period0a=national0 %>% left_join(global0) %>% left_join(cites)
+    period0a=period0a %>% 
+      mutate(cites = replace_na(cites, 0))%>% 
+      group_by(ctry_code) %>% 
+      summarize(pv0=sum(pv),
+              cites0=sum(cites),
+              innos0=n(),
+              ev_glob0=sum(ev_glob0),
+              istrax_nat0=mean(istrax_nat0),
+              istrax_glob0=mean(istrax_glob0),
+              ev_nat0=sum(ev_nat0),cost0=sum(cost)) %>% 
+      mutate(natsh0=ev_nat0/ev_glob0,
+           avnat0=ev_nat0/cost0,
+           avglob0=ev_glob0/cost0,pvOcost0=pv0/cost0)
+  
+  
+  ##################### period 1
+    
+  jurl=paste0(fromWatson,"innos_istraxfield_nationalkey_2009_2018.dsv")
+  national1=read_tsv(jurl) %>% rename(ev_nat1=ev,pv1=pv,istrax_nat1=istrax,cost1=costpvyear_2009_2018) %>% 
+    select(docdb_family_id,ctry_code,pv1,ev_nat1,starts_with("istrax_"),cost1) %>% 
+    mutate(period=1)
+  
+  
+  jurl=paste0(fromWatson,"innos_istraxfield_global_2009_2018.dsv")
+  global1=read_tsv(jurl) %>% rename(ev_glob1=ev,istrax_glob1=istrax) %>% 
+    select(docdb_family_id, ev_glob1,starts_with("istrax_"))
+
+
+  
+  
+    period1a=national1 %>% left_join(global1) %>% left_join(cites)
+    period1a=period1a %>% 
+      mutate(cites = replace_na(cites, 0))%>% 
+      group_by(ctry_code) %>% 
+      summarize(pv1=sum(pv1),
+              cites1=sum(cites),
+              innos1=n(),
+              ev_glob1=sum(ev_glob1),
+              istrax_nat1=mean(istrax_nat1),
+              istrax_glob1=mean(istrax_glob1),
+              ev_nat1=sum(ev_nat1),cost1=sum(cost1)) %>% 
+      mutate(natsh1=ev_nat1/ev_glob1,
+           avnat1=ev_nat1/cost1,
+           avglob1=ev_glob1/cost1,pvOcost1=pv1/cost1)
+
+  
+  
+  #period1a=national1  %>% group_by(ctry_code) %>% summarize(innos1=n(),pv1=sum(pv1),ev_nat1=sum(ev_nat1),ev_glob1=sum(ev_glob1))
+  
+```
+
+
+
+
+## Build a big countrymap
+
+```{r}
+library(arrow)
+countrymap9918=national0  %>% bind_rows(national1) %>% select(docdb_family_id,ctry_code,period) %>% distinct()
+write_parquet(countrymap9918,"countrymap9918.parquet")
+
+
+```
+
+
+
+
+# Combine the period
+
+```{r}
+  
+  p0p1=period1a %>% inner_join(period0a) %>% mutate(lninnos0=log(innos0),lninnos1=log(innos1),DEL=(innos1-innos0) ,DELgr=(innos1-innos0)/innos0)
+
+
+```
+
+
+# Add gdp related data
+
+
+```{r}    
+#url="../../data/patent_data/patbis2021/data/fromWATSON/innos_ctry_indicators.dsv"
+
+
+#url="../../data/patent_data/patbis2021/data/fromWATSON/innos_istraxfield_nationalkey_2009_2018.dsv"
+#  jurl=paste0(fromWatson,"innos_ctry_indicators.dsv")
+#  altnation1 <- read_tsv(jurl)
+  
+  
+#  jurl=paste0(fromWatson,"innos_ctry_indicators_1999_2008.dsv")
+#  altnation0 <- read_tsv(jurl)
+
+library(WDI)
+library(data.table)
+library(dplyr)
+
+# Fetch BOTH total GDP growth AND per capita GDP growth for 2009-2018
+gdp_data <- WDI(
+  indicator = c("NY.GDP.MKTP.KD.ZG",     # Total GDP growth
+                "NY.GDP.PCAP.KD.ZG"),    # Per capita GDP growth
+  start = 2009,
+  end   = 2018,
+  extra = TRUE
+)
+
+# Fetch population and GDP per capita for 2008
+baseline_data <- WDI(
+  indicator = c("SP.POP.TOTL", "NY.GDP.PCAP.KD"),  
+  start = 2008,
+  end = 2008,
+  extra = TRUE
+)
+
+# Convert and calculate averages
+dt <- as.data.table(gdp_data)
+avg_growth <- dt[, .(
+  avg_gdp_growth = mean(NY.GDP.MKTP.KD.ZG, na.rm = TRUE),
+  avg_gdp_pc_growth = mean(NY.GDP.PCAP.KD.ZG, na.rm = TRUE),  # Added this
+  n_years = sum(!is.na(NY.GDP.MKTP.KD.ZG))
+), by = .(iso2c, country)]
+
+# Convert baseline data to data.table and select 2008 values
+baseline_dt <- as.data.table(baseline_data)
+baseline_dt <- baseline_dt[year == 2008, 
+                           .(iso2c, 
+                             population_2008 = SP.POP.TOTL,
+                             gdp_per_capita_2008 = NY.GDP.PCAP.KD/1000)]
+
+# Merge with avg_growth
+avg_growth <- merge(avg_growth, baseline_dt, by = "iso2c", all.x = TRUE)
+
+# Rename iso2c to ctry_code
+avg_growth <- avg_growth %>% rename(ctry_code = iso2c)
+
+
+p0p1=p0p1 %>% left_join(avg_growth)
+
+
+p0p1=p0p1 %>% mutate(DD=avg_gdp_growth/
+        (gdp_per_capita_2008),
+        DD_pc=avg_gdp_pc_growth/gdp_per_capita_2008,
+        citesOpop0=cites0/population_2008,
+        citesOinnos0=cites0/innos0,
+        
+        ev_globOpop0=ev_glob0/population_2008,
+        ev_natOpop0=ev_nat0/population_2008,
+        ev_globOpop1=ev_glob1/population_2008,
+        
+        ev_globOinnos0=ev_glob0/innos0,
+        ev_natOinnos0=ev_nat0/innos0,
+
+        innosOpop0=innos0/population_2008,
+        innosOpop1=innos1/population_2008,
+        avnatOpop0=avnat0/population_2008,
+        pvOpop1=pv1/population_2008
+        )
+
+
+
+
+library(dplyr)
+
+# World Bank income classifications (2024/2025)
+income_classification <- tibble::tribble(
+  ~income_group, ~ctry_code,
+  "High income", c("AD", "AE", "AG", "AR", "AU", "AT", "AW", "BE", "BH", "BM", "BS", "BW", "CA", "CH", "CL", "CN", "CW", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GB", "GI", "GR", "GU", "HK", "HR", "HU", "IE", "IL", "IM", "IS", "IT", "JP", "KR", "KW", "KY", "LI", "LT", "LU", "LV", "MC", "MP", "MT", "MO", "NL", "NO", "NZ", "OM", "PA", "PL", "PR", "PT", "QA", "RO", "SA", "SC", "SG", "SI", "SK", "SM", "SE", "TC", "TT", "TW", "UY", "US", "VI", "VG"),
+  "Upper middle income", c("AL", "AM", "AZ", "BY", "BZ", "BR", "BG", "CO", "CR", "CU", "DM", "DO", "EC", "FJ", "GA", "GD", "GE", "GQ", "GT", "GY", "ID", "IQ", "IR", "JM", "JO", "KZ", "LB", "LC", "LY", "MK", "MU", "MV", "MX", "MY", "NA", "PE", "PY", "RU", "RS", "SR", "SV", "TH", "TM", "TO", "TR", "VE", "ZA", "ME", "XK", "ST", "VC", "WS"),
+  "Lower middle income", c("AO", "BD", "BJ", "BO", "BT", "CI", "CM", "CG", "CV", "DZ", "EG", "GH", "HN", "HT", "IN", "KE", "KG", "KH", "KI", "LA", "LK", "LS", "MA", "MD", "MN", "MM", "MR", "NG", "NI", "NP", "PK", "PG", "PH", "PS", "SB", "SN", "TJ", "TL", "TN", "TZ", "UA", "UZ", "VN", "VU", "ZM", "ZW"),
+  "Low income", c("AF", "BF", "BI", "CD", "CF", "ER", "ET", "GM", "GN", "GW", "KM", "LR", "MG", "ML", "MW", "MZ", "NE", "RW", "SD", "SL", "SO", "SS", "SY", "TD", "TG", "UG", "YE")
+) %>%
+  tidyr::unnest(ctry_code)
+
+# Add income classification to your dataframe
+p0p1 <- p0p1 %>%
+  left_join(income_classification, by = "ctry_code")
+
+
+
+p0p1filter=p0p1 %>% filter(innos0>=100)
+
+```
+
+
+
+# Regressions
+
+
+```{r}
+
+  library(fixest)
+  
+    feols(innosOpop1~gdp_per_capita_2008+innosOpop0+
+            
+                      avnat0+avglob0+citesOpop0+innosOpop0,p0p1filter) %>% summary()
+
+
+    feols(pvOpop1~gdp_per_capita_2008+innosOpop0+
+                      avnat0+avglob0+pvOcost0+citesOpop0+innosOpop0,p0p1filter) %>% summary()
+
+    
+    feols(avglob1~gdp_per_capita_2008+innosOpop0+
+                      avnat0+avglob0+pvOcost0
+          +citesOpop0
+          +innosOpop0,p0p1filter) %>% summary()
+      
+
+
+
+    
+
+    
+    feols(innosOpop1~gdp_per_capita_2008+innosOpop0+avnat0+
+                      avglob0+pvOcost0+citesOpop0+innosOpop0,p0p1filter) %>% summary()
+
+      
+```
+
+
+
+
+```{r}
+
+
+
+###################
+
+library(fixest)
+library(modelsummary)
+
+# Run your regressions and store them
+m2 <- feols(avg_gdp_growth ~ #log(gdp_per_capita_2008)
+            +gdp_per_capita_2008
+            +avglob0
+            #+avglob1
+            #+avnat0
+            #+ev_globOinnos0
+            +log(population_2008)
+            #+ev_globOinnos0
+            #+ev_natOinnos0
+            #+log( citesOinnos0)
+            #+log(citesOpop0)
+            #+ log(innosOpop0)
+            |   income_group
+            ,  p0p1filter %>% mutate(sum=pvOcost0+avglob0) #%>% filter(income_group!="High income")
+            )
+m2 %>% summary()
+
+
+
+m2 <- feols(DD_pc  ~ log(gdp_per_capita_2008)
+            +avglob0
+            #+avnat0
+            #+log(population_2008)
+            #+ev_globOinnos0
+            #+ev_natOinnos0
+            + citesOinnos0
+            #+ innosOpop0
+            | income_group
+            ,  p0p1filter %>% mutate(sum=pvOcost0+avglob0) %>% filter(innos0>10))
+m2 %>% summary()
+```
+
+
+```{r}
+m1 <- feols(avg_gdp_growth ~ avglob0, p0p1filter)
+m1 %>% summary()
+
+m2 <- feols(avg_gdp_growth ~ gdp_per_capita_2008 + avglob0, p0p1filter)
+m2 %>% summary()
+
+m3 <- feols(avg_gdp_growth ~ gdp_per_capita_2008 + avglob0 + 
+            citesOinnos0 + innosOpop0+citesOpop0
+            , p0p1filter)
+m3 %>% summary()
+
+m4 <- feols(avg_gdp_growth ~ gdp_per_capita_2008  + 
+            citesOinnos0+ innosOpop0+citesOpop0
+            , p0p1filter)
+m4 %>% summary()
+
+m5 <- feols(avg_gdp_growth ~ gdp_per_capita_2008 + avglob0 + 
+            citesOinnos0+ innosOpop0+citesOpop0
+            , p0p1 %>% filter(innos0>=50))
+
+# Create regression table
+modelsummary(
+  list(m1, m2, m3, m4,m5),
+  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
+  gof_map = c("nobs", "r.squared", "adj.r.squared", "rmse"),
+  coef_rename = c(
+    "avglob0" = "Spillover return",
+    "gdp_per_capita_2008" = "GDP per capita (2008)",
+    "citesOpop0" = "Citations per Population",
+    "citesOinnos0" = "Average citations",
+    "innosOpop0" = "Innovations per Population"
+  ),
+  title = "Determinants of GDP Growth (2009-2018)"
+)
+
+# Create descriptive statistics table
+variables_to_summarize <- c("avg_gdp_growth", "avglob0", 
+                            "gdp_per_capita_2008", "citesOpop0", "innosOpop0")
+
+datasummary_skim(
+  p0p1filter[, variables_to_summarize],
+  title = "Descriptive Statistics",
+  histogram = FALSE
+)
+
+
+
+
+
+#############
+library(fixest)
+library(modelsummary)
+library(flextable)
+library(officer)
+
+# Run models (same as above)
+models <- list("(1)" = m1, "(2)" = m2, "(3)" = m3, "(4)" = m4, "(5)" = m5)
+
+# Create regression table
+reg_table <- modelsummary(
+  models,
+  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
+  gof_map = c("nobs", "r.squared", "adj.r.squared"),
+  coef_rename = c(
+    "avglob0" = "Spillover return",
+    "gdp_per_capita_2008" = "GDP per capita (2008)",
+    "citesOpop0" = "Citations per Population",
+    "citesOinnos0" = "Average citations",
+    "innosOpop0" = "Innovations per Population"
+  ),
+  notes = list("Robust standard errors in parentheses.", 
+               "* p<0.1, ** p<0.05, *** p<0.01"),
+  output = "flextable"
+) %>% autofit()
+
+# Create descriptive statistics table
+desc_table <- datasummary_skim(
+  p0p1filter[, variables_to_summarize],
+  histogram = FALSE,
+  output = "flextable"
+) %>% autofit()
+
+# Combine into one Word document
+doc <- read_docx() %>%
+  body_add_par("Table 1: Determinants of GDP Growth (2009-2018)", 
+               style = "heading 1") %>%
+  body_add_flextable(reg_table) %>%
+  body_add_break() %>%
+  body_add_par("Table 2: Descriptive Statistics", 
+               style = "heading 1") %>%
+  body_add_flextable(desc_table)
+
+print(doc, target = "analysis_tables.docx")
+
+
+
+```
+## figure 
+
+```{r}
+
+p0p1filter %>% 
+  ggplot(aes(x = avglob0, y = avg_gdp_growth, 
+             alpha = log(innos0), size = log(innos0))) +
+  geom_point() + 
+  geom_smooth(method = "lm") +
+  geom_text_repel(aes(label = country), 
+                  size = 3,
+                  max.overlaps = Inf,
+                  alpha = 1)+
+  theme_minimal()+  theme(legend.position = "none")+
+  xlab("Average spillover return 1999-2008")+
+  ylab("Average GDP growth 2009-2018")
+
+
+
+
+
+```
+
+# extra figures
+
+```{r}
+
+p0p1filter %>% filter(income_group!="High income") %>% 
+  ggplot(aes(x = avglob0, y = avg_gdp_pc_growth, 
+             alpha = log(innos0), size = log(innos0))) +
+  geom_point() + 
+  geom_smooth(method = "lm") +
+  geom_text_repel(aes(label = country), 
+                  size = 3,
+                  max.overlaps = Inf,
+                  alpha = 1)+
+  theme_minimal()+  theme(legend.position = "none")+
+  xlab("Average spillover return 1999-2008")+
+  ylab("Average GDP growth 2009-2018")
+
+
+
+
+
+```
+
+
+
+```{r}
+
+p0p1filter %>% 
+    ggplot(aes( x = citesOinnos0, y = avg_gdp_growth,
+             alpha = log(innos0), size = log(innos0))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  geom_text_repel(aes(label = country), 
+                  size = 3,
+                  max.overlaps = Inf,
+                  alpha = 1)+
+  theme_minimal()+
+  theme(legend.position = "none")+
+  xlab("Average citations ")+
+  ylab("Average GDP growth 2009-2018")
+
+
+
+
+p0p1filter %>% 
+    ggplot(aes( x = citesOpop0, y = avglob0,
+             alpha = log(innos0), size = log(innos0))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  geom_text_repel(aes(label = country), 
+                  size = 3,
+                  max.overlaps = Inf,
+                  alpha = 1)+
+    theme(legend.position = "none")+
+    theme_minimal()
+    #xlab("Average Spillover Return per R&D invested")+
+    #ylab("Average GDP growth 2009-2018")
+
+
+
+
+library(ggplot2)
+library(ggrepel)
+p0p1filter %>% 
+    ggplot(aes( x = avglob0, y = DD_pc,
+             alpha = log(innos0), size = log(innos0))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  geom_text_repel(aes(label = country), 
+                  size = 3,
+                  max.overlaps = Inf,
+                  alpha = 1)+
+    theme(legend.position = "none")+
+    theme_minimal()
+    #xlab("Average Spillover Return per R&D invested")+
+    #ylab("Average GDP growth 2009-2018")
+
+
+
+
+library(ggplot2)
+library(ggrepel)
+p0p1filter %>% 
+    ggplot(aes( x = avg_gdp_growth, y = avg_gdp_pc_growth,
+             alpha = log(innos0), size = log(innos0))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  geom_text_repel(aes(label = country), 
+                  size = 3,
+                  max.overlaps = Inf,
+                  alpha = 1)+
+    theme(legend.position = "none")+
+    theme_minimal()
+    #xlab("Average Spillover Return per R&D invested")+
+    #ylab("Average GDP growth 2009-2018")
+
+
+
+
+
+```
