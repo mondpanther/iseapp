@@ -145,6 +145,13 @@ countrymap9918=national0  %>% bind_rows(national1) %>% select(docdb_family_id,ct
 write_parquet(countrymap9918,"countrymap9918.parquet")
 
 
+countrymap=read_parquet("countrymap.parquet")
+
+countrymap9918=read_parquet("countrymap9918.parquet")
+library(fst)
+#write_fst(countrymap,"countrymap.fst",compress=100)
+#write_fst(countrymap9918,"countrymap9918.fst",compress=100)
+
 ```
 
 

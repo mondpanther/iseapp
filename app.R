@@ -19,12 +19,12 @@ library(shinycssloaders)
 # Load data
 
 #files <- list.files(path="istraxes", pattern = "parquet$", full.names = TRUE)
-countrymap <- read_parquet("countrymap.parquet")
+countrymap <- read_fst("countrymap.fst")
 #for (ff in files) {
 #  patchar_countrymap <- patchar_countrymap %>% left_join(read_parquet(ff))
 #}
 
-techmap <- read_parquet("techmap.parquet")
+techmap <- read_fst("techmap.fst")
 #techmap %>% distinct(technology) %>% pull(technology)
 
 techmap=countrymap %>%
@@ -386,9 +386,9 @@ server <- function(input, output) {
     req(input$toflow)
     
     
-    path <- paste0("./istraxes/", input$toflow,".parquet")
+    path <- paste0("./istraxes/", input$toflow,".fst")
     #path <- paste0("./istraxes/istrax_global.parquet")
-    patchar_countrymap <- countrymap %>% left_join(read_parquet(path))
+    patchar_countrymap <- countrymap %>% left_join(read_fst(path))
 
   })
   

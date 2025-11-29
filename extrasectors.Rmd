@@ -572,15 +572,17 @@ tech_classes=tech_classes %>% select(docdb_family_id,technology)
 
 ```{r}
 
-
+library(fst)
 techmap <- read_parquet("techmap.parquet")
 techs=techmap %>% distinct(technology)
 
 if(!"Machine Learning" %in% techs){
   techmap=techmap %>% bind_rows(tech_classes)
   techmap=techmap %>% distinct()
-  write_parquet(techmap,"techmap.parquet")
+  #write_parquet(techmap,"techmap.parquet")
+  write_fst(techmap,"techmap.fst")
 }
+
 
 
 ```
