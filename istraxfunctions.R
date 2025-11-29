@@ -70,7 +70,9 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
   #classes=techmap
   classlist=(classes %>% distinct(technology))$technology
 
-
+  #toflow="Return on x"
+  ylab=ifelse(grepl("Return", toflow ),"Return in %","Millions of $")
+  
   # Filter by country and year
   filtered <- pdata %>%
     filter(ctry_code %in% country_code )  %>%
@@ -113,7 +115,7 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
     labs(
       title = "Spillover returns",
       x = "Technology",
-      y = "Return in %",
+      y = ylab,
       fill = "Technology"
     ) +
     theme_minimal() +
