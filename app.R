@@ -407,6 +407,7 @@ server <- function(input, output) {
       need(exists("patchar_countrymap"), "Object 'patchar_countrymap' not found."),
       need(exists("techmap"), "Object 'techmap' not found."),
       need(exists("green_classes"), "Object 'green_classes' not found."),
+      need(exists("battery_classes"), "Object 'battery_classes' not found."),
       need(exists("custom_colors"), "Object 'custom_colors' not found.")
     )
 
@@ -437,7 +438,8 @@ server <- function(input, output) {
       green_classes = green_classes,
       country_code = selected_countries,
       toflow = input$toflow,
-      custom_colors = custom_colors
+      custom_colors = custom_colors,
+      battery_classes = battery_classes
     ) + ggtitle("")
 
     p
@@ -459,6 +461,7 @@ server <- function(input, output) {
       need(exists("patchar_countrymap"), "Object 'patchar_countrymap' not found."),
       need(exists("techmap"), "Object 'techmap' not found."),
       need(exists("green_classes"), "Object 'green_classes' not found."),
+      need(exists("battery_classes"), "Object 'battery_classes' not found."),
       need(exists("custom_colors"), "Object 'custom_colors' not found.")
     )
   

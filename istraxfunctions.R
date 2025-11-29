@@ -6,7 +6,7 @@ library(tidyr)
 
 
 # Define custom colors
-custom_colors <- c("green" = "forestgreen", "other" = "gray70")
+custom_colors <- c("green" = "forestgreen", "battery" = "yellow", "other" = "gray70")
 
 
 
@@ -17,11 +17,11 @@ custom_colors <- c("green" = "forestgreen", "other" = "gray70")
 ### functions
 
 #### agregate the data...
-compute_avstrax <- function(data, istrax_var, classes, green_classes) {
+compute_avstrax <- function(data, istrax_var, classes, green_classes, battery_classes = NULL) {
   library(dplyr)
-  
+
   istrax_sym <- rlang::sym(istrax_var)
-  
+
   avstrax <- data %>%
     select(docdb_family_id, !!istrax_sym) %>%
     rename(istrax = !!istrax_sym) %>%
@@ -43,31 +43,32 @@ compute_avstrax <- function(data, istrax_var, classes, green_classes) {
       .groups = "drop"
     ) %>%
     mutate(
-      greenclass = ifelse(technology %in% green_classes, "green", "other")
+      greenclass = ifelse(technology %in% green_classes, "green",
+                          ifelse(!is.null(battery_classes) && technology %in% battery_classes, "battery", "other"))
     )
-  
+
   return(avstrax)
 }
 
 
 
 #### Draw the plots
-plot_avstrax_by_country <- function(pdata, classes, green_classes, country_code, toflow, custom_colors) {
+plot_avstrax_by_country <- function(pdata, classes, green_classes, country_code, toflow, custom_colors, battery_classes = NULL) {
   library(dplyr)
   library(ggplot2)
-  
+
   library(patchwork)
   #classes=techmap
   classlist=(classes %>% distinct(technology))$technology
-  
-  
+
+
   # Filter by country and year
   filtered <- pdata %>%
     filter(ctry_code %in% country_code )  %>%
     distinct()
-  
+
   # Compute avstrax
-  avstrax <- compute_avstrax(filtered, toflow, classes, green_classes)
+  avstrax <- compute_avstrax(filtered, toflow, classes, green_classes, battery_classes)
   
   # Extract mean for "All"
   allmean <- avstrax %>%
