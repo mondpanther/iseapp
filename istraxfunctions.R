@@ -278,7 +278,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   
 
   # Create the plot
-  
+  ylab=ifelse(grepl("strax", toflow ),"Return in %","Millions of $")
   
   p <- ggplot(avstrax, aes(x = country_name)) +
     geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax)) +
@@ -287,7 +287,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
     labs(
       title = "Spillover returns",
       x = "Country",
-      y = "Return in %",
+      y = ylab,
       fill = "Country"
     ) +
     theme_minimal() +

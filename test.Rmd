@@ -1,0 +1,41 @@
+---
+title: "fff"
+output: html_document
+date: "2025-11-29"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+The formula is
+
+$$\frac{1}{c}\times EV \times \left(\alpha-\alpha \times I\{PV>2 c\}+I\{PV<2 c\}\right) $$
+
+$$=\frac{1}{c}\times EV \times \left(\alpha-\alpha \times I\{PV>2 c\}+\left(1-I\{PV>2 c\}\right)\right) $$
+
+$$=\frac{1}{c}\times EV \times \left(1+\alpha-\left(\alpha+1\right) \times I\{PV>2 c\}\right) $$
+
+$$ISTRAX_i=\frac{\alpha+1}{c}\times EV_i \times\left(1-  I\{PV_i>2 c\}\right) $$
+
+## combine EVs

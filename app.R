@@ -141,7 +141,8 @@ spillovers=list(
 )
 
 
-toflow_choices <- list("Marginal Returns"= marginal,"Average Returns"=average,"Average Spillovers"=spillovers)
+toflow_choices <- list("Marginal Returns"= marginal,#"Average Returns"=average,
+                       "Average Spillovers"=spillovers)
 
 
 get_available_iso2 <- function() {
