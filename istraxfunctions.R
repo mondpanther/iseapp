@@ -50,8 +50,7 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
       greenclass = ifelse(technology %in% unlist(colorings["green"]), "green",
                           ifelse( technology %in% unlist(colorings["battery"]), "battery", 
                                   ifelse( technology %in% unlist(colorings["hard_to_abate"]), "hard to abate", ifelse( technology %in% colorings["ai"], "AI", "other")))))
-  hard_to_abate_classes
-
+ 
   return(avstrax)
 }
 
