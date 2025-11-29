@@ -6,7 +6,11 @@ library(tidyr)
 
 
 # Define custom colors
-custom_colors <- c("green" = "forestgreen", "battery" = "yellow", "other" = "gray70","hard to abate"="blue","AI"="orange")
+custom_colors <- c("green" = "forestgreen", 
+                   "battery" = "yellow", 
+                   "other" = "gray70",
+                   "hard to abate"="blue",
+                   "AI"="orange")
 
 
 
@@ -49,7 +53,12 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
     mutate(
       greenclass = ifelse(technology %in% unlist(colorings["green"]), "green",
                           ifelse( technology %in% unlist(colorings["battery"]), "battery", 
-                                  ifelse( technology %in% unlist(colorings["hard_to_abate"]), "hard to abate", ifelse( technology %in% colorings["ai"], "AI", "other")))))
+                                  ifelse( technology %in% unlist(colorings["hard_to_abate"]), "hard to abate",
+                                          ifelse( technology %in% unlist(colorings["ai"]), "AI", "other")
+                                        )
+                                )
+                          )
+      )
  
   return(avstrax)
 }

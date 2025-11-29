@@ -14,7 +14,7 @@ library(fst)
 library(shinycssloaders) 
 
 #rsconnect::writeManifest()
-
+enableBookmarking(store = "url")
 
 # Load data
 
@@ -224,7 +224,7 @@ expand_country_selection <- function(selected) {
 
 
 # Define UI
-ui <- fluidPage(
+ui <- function(request){fluidPage(
   
   
   
@@ -300,6 +300,7 @@ ui <- fluidPage(
     )
   ),
 
+  bookmarkButton("Bookmark data view...."),
   # Add CSS and JavaScript for collapsible plot
   tags$style(HTML("
     .plot-toggle {
@@ -417,11 +418,15 @@ ui <- fluidPage(
   withSpinner(plotOutput("avstrax_plot2", height = "600px"), type = 4, color = "#3498db")
   
 )
+}
 
+  
+  
 # Define server
 server <- function(input, output) {
   
-
+  #colorings=list(green=green_classes,battery=battery_classes,hard_to_abate=hard_to_abate_classes,ai=ai_classes)
+  
   
   
   #for (ff in files) {
@@ -438,7 +443,7 @@ server <- function(input, output) {
     patchar_countrymap <- countrymap %>% left_join(read_fst(path))
 
   })
-  
+
   
   
   
@@ -478,6 +483,7 @@ server <- function(input, output) {
     }
 
     #selected_countries="VN"  ;input=list(); input$toflow="istrax_global"
+    #colorings=list(green=green_classes,battery=battery_classes,hard_to_abate=hard_to_abate_classes,ai=ai_classes)
     
     p <- plot_avstrax_by_country(
       pdata = patchar_countrymap(),
