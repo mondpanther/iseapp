@@ -6,7 +6,7 @@ library(tidyr)
 
 
 # Define custom colors
-custom_colors <- c("green" = "forestgreen", "battery" = "yellow", "other" = "gray70")
+custom_colors <- c("green" = "forestgreen", "battery" = "yellow", "other" = "gray70","hard to abate"="blue","AI"="orange")
 
 
 
@@ -17,7 +17,8 @@ custom_colors <- c("green" = "forestgreen", "battery" = "yellow", "other" = "gra
 ### functions
 
 #### agregate the data...
-compute_avstrax <- function(data, istrax_var, classes, green_classes, battery_classes = NULL) {
+compute_avstrax <- function(data, istrax_var, classes#, green_classes, battery_classes = NULL,hard_to_abate_classes=NULL,
+                            ) {
   library(dplyr)
 
   istrax_sym <- rlang::sym(istrax_var)
@@ -44,8 +45,9 @@ compute_avstrax <- function(data, istrax_var, classes, green_classes, battery_cl
     ) %>%
     mutate(
       greenclass = ifelse(technology %in% green_classes, "green",
-                          ifelse(!is.null(battery_classes) && technology %in% battery_classes, "battery", "other"))
-    )
+                          ifelse( technology %in% battery_classes, "battery", 
+                                  ifelse( technology %in% hard_to_abate_classes, "hard to abate", ifelse( technology %in% ai_classes, "AI", "other")))))
+  hard_to_abate_classes
 
   return(avstrax)
 }
@@ -53,7 +55,12 @@ compute_avstrax <- function(data, istrax_var, classes, green_classes, battery_cl
 
 
 #### Draw the plots
-plot_avstrax_by_country <- function(pdata, classes, green_classes, country_code, toflow, custom_colors, battery_classes = NULL) {
+plot_avstrax_by_country <- function(pdata, classes, #green_classes,
+                                    country_code, toflow, 
+                                    custom_colors#,
+                                    #battery_classes = NULL,
+                                    #hard_to_abate_classes=NULL
+                                    ) {
   library(dplyr)
   library(ggplot2)
 
@@ -68,7 +75,8 @@ plot_avstrax_by_country <- function(pdata, classes, green_classes, country_code,
     distinct()
 
   # Compute avstrax
-  avstrax <- compute_avstrax(filtered, toflow, classes, green_classes, battery_classes)
+  avstrax <- compute_avstrax(filtered, toflow, classes#, green_classes, battery_classes,hard_to_abate_classes
+                             )
   
   # Extract mean for "All"
   allmean <- avstrax %>%
@@ -154,7 +162,8 @@ plot_avstrax_by_country <- function(pdata, classes, green_classes, country_code,
 
 
 
-compute_avstrax_for_techs <- function(data, istrax_var, classes, green_classes) {
+compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
+                                      ) {
   #data=patchar_countrymap;istrax_var="istrax_global"; classes=filtered; green_classes=green_classes;classes=data.frame()
   
   
@@ -164,7 +173,7 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes, green_classes) 
   istrax_sym <- rlang::sym(istrax_var)
   
   
-  # If not filter classes are selected we taka all
+  # If not filter classes are selected we take all
   if(nrow(classes)==0){
      filtereddata=data  
      print("aaaaa")
@@ -206,7 +215,8 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes, green_classes) 
 
 
 
-plot_avstrax_by_technology <- function(pdata, classes, green_classes, technologies, toflow, custom_colors,topn=20,mininno=5) {
+plot_avstrax_by_technology <- function(pdata, classes, #green_classes, 
+                                       technologies, toflow, custom_colors,topn=20,mininno=5) {
   #mininno=30;topn=20;  pdata=patchar_countrymap;toflow="istrax_global"; classes=techmap; green_classes=green_classes; technologies="Green Energy"
 
   library(dplyr)
@@ -220,7 +230,7 @@ plot_avstrax_by_technology <- function(pdata, classes, green_classes, technologi
   
   if("All Innovations" %in% technologies) filtered=data.frame()
   # Compute avstrax
-  avstrax <- compute_avstrax_for_techs(pdata, toflow, filtered, green_classes)
+  avstrax <- compute_avstrax_for_techs(pdata, toflow, filtered)#, green_classes)
   
   
   
