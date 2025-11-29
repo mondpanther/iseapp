@@ -88,7 +88,8 @@ grouped_techs <- list(
   
 )
 
-toflow_choices <- c(
+
+marginal  =list(
   "Marginal Global Returns"   = "istrax_global",
   "Marginal National Returns" = "istrax_nationalkey_2009_2018",
   "Marginal Returns to LMICs" = "istrax_EMDE",
@@ -101,8 +102,11 @@ toflow_choices <- c(
   "Marginal Returns to China"   = "istrax_CN",
   "Marginal Returns to UK"      = "istrax_GB",
   "Marginal Returns to Austria" = "istrax_AT",
-  "Marginal Returns to France"  = "istrax_FR",
+  "Marginal Returns to France"  = "istrax_FR"
   
+)
+
+average   =list(
   "Average Global Returns"   = "avstrax_global",
   "Average National Returns" = "avstrax_nationalkey_2009_2018",
   "Average Returns to LMICs" = "avstrax_EMDE",
@@ -115,8 +119,11 @@ toflow_choices <- c(
   "Average Returns to China"   = "avstrax_CN",
   "Average Returns to UK"      = "avstrax_GB",
   "Average Returns to Austria" = "avstrax_AT",
-  "Average Returns to France"  = "avstrax_FR",
+  "Average Returns to France"  = "avstrax_FR"
   
+)
+  
+spillovers=list(
   "Average Global Spillovers"   = "ev_global",
   "Average National Spillovers" = "ev_nationalkey_2009_2018",
   "Average Spillovers to LMICs" = "ev_EMDE",
@@ -131,8 +138,11 @@ toflow_choices <- c(
   "Average Spillovers to Austria" = "ev_AT",
   "Average Spillovers to France"  = "ev_FR"
   
-  
 )
+
+
+toflow_choices <- list("Marginal Returns"= marginal,"Average Returns"=average,"Average Spillovers"=spillovers)
+
 
 get_available_iso2 <- function() {
   candidates <- c("country_code", "iso2c", "iso2")
@@ -346,11 +356,13 @@ ui <- fluidPage(
       options = list(placeholder = 'Choose one or more countries or groups...')
     ),
 
-    selectInput(
+    selectizeInput(
       inputId = "toflow",
       label = "Return flow",
       choices = toflow_choices,
-      selected = "istrax_global"
+      selected = "istrax_global",
+      multiple = FALSE,
+      options = list(placeholder = 'Choose a return flow...')
     ),
 
     selectizeInput(
