@@ -71,7 +71,8 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
   classlist=(classes %>% distinct(technology))$technology
 
   #toflow="Return on x"
-  ylab=ifelse(grepl("Return", toflow ),"Return in %","Millions of $")
+  #ylab=ifelse(grepl("Return", toflow ),"Return in %","Millions of $")
+  ylab=ifelse(grepl("strax", toflow ),"Return in %","Millions of $")
   
   # Filter by country and year
   filtered <- pdata %>%
