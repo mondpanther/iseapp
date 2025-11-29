@@ -300,7 +300,7 @@ ui <- function(request){fluidPage(
     )
   ),
 
-  bookmarkButton("Bookmark data view...."),
+  bookmarkButton("Bookmark current data view...."),
   # Add CSS and JavaScript for collapsible plot
   tags$style(HTML("
     .plot-toggle {
