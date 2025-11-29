@@ -219,7 +219,7 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
     summarise(
       mean = mean(istrax*scaler, na.rm = TRUE),
       innos = n(),
-      sem = sd(istrax*sclaer, na.rm = TRUE) / sqrt(n()),
+      sem = sd(istrax*scaler, na.rm = TRUE) / sqrt(n()),
       .groups = "drop"
     ) #%>%
     #mutate(
