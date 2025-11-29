@@ -276,8 +276,8 @@ ui <- function(request){fluidPage(
   
   tags$details(
     tags$summary("▶ About this tool", class = "toggle-summary"),
-    tags$p(
-      "This tool supports the development of an innovation strategy at various scopes
+    tags$br(),
+    tags$p("This tool supports the development of an innovation strategy at various scopes
      for either governments or (impact) investors.
      It examines where marginal spillover from innovation are highest and
      thus there is a case for further investments in R&D.
