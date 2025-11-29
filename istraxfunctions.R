@@ -84,7 +84,7 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
   #toflow="Return on x"
   #ylab=ifelse(grepl("Return", toflow ),"Return in %","Millions of $")
   ylab=ifelse(grepl("strax", toflow ),"Return in %","Millions of $")
-  scaler=ifelse(grepl("strax", toflow ),100,1)
+  #scaler=ifelse(grepl("strax", toflow ),100,1)
   # Filter by country and year
   filtered <- pdata %>%
     filter(ctry_code %in% country_code )  %>%
@@ -199,7 +199,7 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
     filtereddata=data %>% inner_join(classes %>% select(docdb_family_id)%>% distinct())
   }
   
-  scaler=ifelse()
+  #scaler=ifelse()
   avstrax <- filtereddata %>% 
     select(docdb_family_id, !!istrax_sym, ctry_code) %>%
     rename(istrax = !!istrax_sym) %>%
