@@ -415,7 +415,7 @@ server <- function(input, output) {
   patchar_countrymap <- reactive({
     req(input$toflow)
     
-    #input=list(toflow="istrax_global")
+    #input=list(toflow="avstrax_global")
     path <- paste0("./istraxes/", input$toflow,".fst")
     #path <- paste0("./istraxes/istrax_global.parquet")
     patchar_countrymap <- countrymap %>% left_join(read_fst(path))

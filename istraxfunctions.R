@@ -30,7 +30,7 @@ compute_avstrax <- function(data, istrax_var, classes#, green_classes, battery_c
     inner_join(classes, by = "docdb_family_id") %>%
     bind_rows(
       data %>%
-        select(docdb_family_id, starts_with("istrax")) %>%
+        #select(docdb_family_id, starts_with("istrax")) %>%
         rename(istrax = !!istrax_sym) %>%
         distinct() %>%
         mutate(technology = "All")
