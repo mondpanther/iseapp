@@ -73,6 +73,10 @@ battery_classes_d=setdiff(battery_classes,"Battery Technology")
 hard_to_abate_classes_d=setdiff(hard_to_abate_classes,"Hard to Abate Sector Decarbonization")
 ai_classes_d=setdiff(ai_classes,"AI")
 
+
+colorings=list(green=green_classes,battery=battery_classes,hard_to_abate=hard_to_abate_classes,ai=ai_classes)
+
+
 other_techs <- c(setdiff(all_techs, c(green_classes, battery_classes,hard_to_abate_classes)),"Green Technology","Battery Technology","Hard to Abate Sector Decarbonization")
 
 grouped_techs <- list(
@@ -468,7 +472,8 @@ server <- function(input, output) {
       #green_classes = green_classes,
       country_code = selected_countries,
       toflow = input$toflow,
-      custom_colors = custom_colors
+      custom_colors = custom_colors,
+      colorings=colorings
       #battery_classes = battery_classes,
       #hard_to_abate_classes = hard_to_abate_classes
     ) + ggtitle("")

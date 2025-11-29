@@ -17,10 +17,13 @@ custom_colors <- c("green" = "forestgreen", "battery" = "yellow", "other" = "gra
 ### functions
 
 #### agregate the data...
-compute_avstrax <- function(data, istrax_var, classes#, green_classes, battery_classes = NULL,hard_to_abate_classes=NULL,
+compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_classes, battery_classes = NULL,hard_to_abate_classes=NULL,
                             ) {
   library(dplyr)
 
+  
+  
+  
   istrax_sym <- rlang::sym(istrax_var)
 
   avstrax <- data %>%
@@ -44,9 +47,9 @@ compute_avstrax <- function(data, istrax_var, classes#, green_classes, battery_c
       .groups = "drop"
     ) %>%
     mutate(
-      greenclass = ifelse(technology %in% green_classes, "green",
-                          ifelse( technology %in% battery_classes, "battery", 
-                                  ifelse( technology %in% hard_to_abate_classes, "hard to abate", ifelse( technology %in% ai_classes, "AI", "other")))))
+      greenclass = ifelse(technology %in% unlist(colorings["green"]), "green",
+                          ifelse( technology %in% unlist(colorings["battery"]), "battery", 
+                                  ifelse( technology %in% unlist(colorings["hard_to_abate"]), "hard to abate", ifelse( technology %in% colorings["ai"], "AI", "other")))))
   hard_to_abate_classes
 
   return(avstrax)
@@ -57,7 +60,7 @@ compute_avstrax <- function(data, istrax_var, classes#, green_classes, battery_c
 #### Draw the plots
 plot_avstrax_by_country <- function(pdata, classes, #green_classes,
                                     country_code, toflow, 
-                                    custom_colors#,
+                                    custom_colors,colorings=NULL
                                     #battery_classes = NULL,
                                     #hard_to_abate_classes=NULL
                                     ) {
@@ -75,7 +78,7 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
     distinct()
 
   # Compute avstrax
-  avstrax <- compute_avstrax(filtered, toflow, classes#, green_classes, battery_classes,hard_to_abate_classes
+  avstrax <- compute_avstrax(filtered, toflow, classes,colorings#, green_classes, battery_classes,hard_to_abate_classes
                              )
   
   # Extract mean for "All"
