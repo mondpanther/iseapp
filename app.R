@@ -11,7 +11,6 @@ library(arrow)
 library(dplyr)
 library(data.table)
 library(fst)
-
 library(shinycssloaders) 
 
 #rsconnect::writeManifest()
@@ -86,18 +85,48 @@ grouped_techs <- list(
 )
 
 toflow_choices <- c(
-  "Global Returns"   = "istrax_global",
-  "National Returns" = "istrax_nationalkey_2009_2018",
-  "Returns to LMICs" = "istrax_EMDE",
-  "Returns to LMICs (excl. China)" = "istrax_EMDENOCN",
-  "Returns to LMICs (excl. China & India)" = "istrax_EMDENOCNIN",
-  "Returns to HICs"    = "istrax_HIC",
-  "Returns to the EU"  = "istrax_EU",
-  "Returns to US"      = "istrax_US",
-  "Returns to China"   = "istrax_CN",
-  "Returns to UK"      = "istrax_GB",
-  "Returns to Austria" = "istrax_AT",
-  "Returns to France"  = "istrax_FR"
+  "Marginal Global Returns"   = "istrax_global",
+  "Marginal National Returns" = "istrax_nationalkey_2009_2018",
+  "Marginal Returns to LMICs" = "istrax_EMDE",
+  "Marginal Returns to LMICs (excl. China)" = "istrax_EMDENOCN",
+  "Marginal Returns to LMICs (excl. China & India)" = "istrax_EMDENOCNIN",
+  "Marginal Returns to HICs"    = "istrax_HIC",
+  "Marginal Returns to the EU"  = "istrax_EU",
+  "Marginal Returns to the EU"  = "istrax_EU",
+  "Marginal Returns to US"      = "istrax_US",
+  "Marginal Returns to China"   = "istrax_CN",
+  "Marginal Returns to UK"      = "istrax_GB",
+  "Marginal Returns to Austria" = "istrax_AT",
+  "Marginal Returns to France"  = "istrax_FR",
+  
+  "Average Global Returns"   = "avstrax_global",
+  "Average National Returns" = "avstrax_nationalkey_2009_2018",
+  "Average Returns to LMICs" = "avstrax_EMDE",
+  "Average Returns to LMICs (excl. China)" = "avstrax_EMDENOCN",
+  "Average Returns to LMICs (excl. China & India)" = "avstrax_EMDENOCNIN",
+  "Average Returns to HICs"    = "avstrax_HIC",
+  "Average Returns to the EU"  = "avstrax_EU",
+  "Average Returns to the EU"  = "avstrax_EU",
+  "Average Returns to US"      = "avstrax_US",
+  "Average Returns to China"   = "avstrax_CN",
+  "Average Returns to UK"      = "avstrax_GB",
+  "Average Returns to Austria" = "avstrax_AT",
+  "Average Returns to France"  = "avstrax_FR",
+  
+  "Average Global Spillovers"   = "ev_global",
+  "Average National Spillovers" = "ev_nationalkey_2009_2018",
+  "Average Spillovers to LMICs" = "ev_EMDE",
+  "Average Spillovers to LMICs (excl. China)" = "ev_EMDENOCN",
+  "Average Spillovers to LMICs (excl. China & India)" = "ev_EMDENOCNIN",
+  "Average Spillovers to HICs"    = "ev_HIC",
+  "Average Spillovers to the EU"  = "ev_EU",
+  "Average Spillovers to the EU"  = "ev_EU",
+  "Average Spillovers to US"      = "ev_US",
+  "Average Spillovers to China"   = "ev_CN",
+  "Average Spillovers to UK"      = "ev_GB",
+  "Average Spillovers to Austria" = "ev_AT",
+  "Average Spillovers to France"  = "ev_FR"
+  
   
 )
 
@@ -386,7 +415,7 @@ server <- function(input, output) {
   patchar_countrymap <- reactive({
     req(input$toflow)
     
-    
+    #input=list(toflow="avstrax_global")
     path <- paste0("./istraxes/", input$toflow,".fst")
     #path <- paste0("./istraxes/istrax_global.parquet")
     patchar_countrymap <- countrymap %>% left_join(read_fst(path))
@@ -406,9 +435,9 @@ server <- function(input, output) {
       need(exists("plot_avstrax_by_country"), "Function 'plot_avstrax_by_country' not found in the environment."),
       need(exists("patchar_countrymap"), "Object 'patchar_countrymap' not found."),
       need(exists("techmap"), "Object 'techmap' not found."),
-      need(exists("green_classes"), "Object 'green_classes' not found."),
+      need(exists("green_classes"),   "Object 'green_classes' not found."),
       need(exists("battery_classes"), "Object 'battery_classes' not found."),
-      need(exists("custom_colors"), "Object 'custom_colors' not found.")
+      need(exists("custom_colors"),   "Object 'custom_colors' not found.")
     )
 
     # Filter techmap based on selected technology categories
@@ -432,14 +461,16 @@ server <- function(input, output) {
     }
 
     #selected_countries="VN"  ;input=list(); input$toflow="istrax_global"
+    
     p <- plot_avstrax_by_country(
       pdata = patchar_countrymap(),
       classes = filtered_techmap,
-      green_classes = green_classes,
+      #green_classes = green_classes,
       country_code = selected_countries,
       toflow = input$toflow,
-      custom_colors = custom_colors,
-      battery_classes = battery_classes
+      custom_colors = custom_colors
+      #battery_classes = battery_classes,
+      #hard_to_abate_classes = hard_to_abate_classes
     ) + ggtitle("")
 
     p
@@ -471,16 +502,16 @@ server <- function(input, output) {
     #input$techs="Wireless" 
     
     # We first implement the filter from the previous diagram; i.e. we restrict to the countries selected there...
-    
+    #selected_countries="VN"
     filtered <- patchar_countrymap() %>%
       filter(ctry_code %in% selected_countries )  
     
-    
-    
+    #filtered= patchar_countrymap %>%    filter(ctry_code %in% c("VN","GB") )  
+    #input=list(techs="AI",toflow="istrax_global")
     p <- plot_avstrax_by_technology(
       pdata = filtered,
       classes = techmap,
-      green_classes = green_classes,
+      #green_classes = green_classes,
       
       #country_code = selected_countries,
       technologies=input$techs,
