@@ -30,7 +30,7 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
   
   istrax_sym <- rlang::sym(istrax_var)
   
-  scaler=ifelse(grepl("strax", istraxvar ),100,1)
+  scaler=ifelse(grepl("strax", istrax_var ),100,1)
   
   avstrax <- data %>%
     select(docdb_family_id, !!istrax_sym) %>%
