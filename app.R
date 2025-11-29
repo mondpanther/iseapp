@@ -10,7 +10,7 @@ library(plotly)
 library(arrow)
 library(dplyr)
 library(data.table)
-
+library(fst)
 library(shinycssloaders) 
 
 #rsconnect::writeManifest()
