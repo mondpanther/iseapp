@@ -89,7 +89,7 @@ grouped_techs <- list(
 )
 
 
-marginal  =list(
+marginal  = list(
   "Marginal Global Returns"   = "istrax_global",
   "Marginal National Returns" = "istrax_nationalkey_2009_2018",
   "Marginal Returns to LMICs" = "istrax_EMDE",
@@ -106,7 +106,7 @@ marginal  =list(
   
 )
 
-average   =list(
+average   = list(
   "Average Global Returns"   = "avstrax_global",
   "Average National Returns" = "avstrax_nationalkey_2009_2018",
   "Average Returns to LMICs" = "avstrax_EMDE",
@@ -123,11 +123,11 @@ average   =list(
   
 )
   
-spillovers=list(
+spillovers = list(
   "Average Global Spillovers"   = "ev_global",
   "Average National Spillovers" = "ev_nationalkey_2009_2018",
   "Average Spillovers to LMICs" = "ev_EMDE",
-  "Average Spillovers to LMICs (excl. China)" = "ev_EMDENOCN",
+  "Average Spillovers to LMICs (excl. China)"         = "ev_EMDENOCN",
   "Average Spillovers to LMICs (excl. China & India)" = "ev_EMDENOCNIN",
   "Average Spillovers to HICs"    = "ev_HIC",
   "Average Spillovers to the EU"  = "ev_EU",
@@ -141,7 +141,7 @@ spillovers=list(
 )
 
 
-toflow_choices <- list("Marginal Returns"= marginal,#"Average Returns"=average,
+toflow_choices <- list("Marginal Returns"= marginal,"Average Returns"=average,
                        "Average Spillovers"=spillovers)
 
 
@@ -364,6 +364,7 @@ ui <- function(request){fluidPage(
       choices = toflow_choices,
       selected = "istrax_global",
       multiple = FALSE,
+      width = "400px",
       options = list(placeholder = 'Choose a return flow...')
     ),
 
@@ -373,6 +374,7 @@ ui <- function(request){fluidPage(
       choices = grouped_techs,
       selected = c("Other","AI","Green Technology"),
       multiple = TRUE,
+      width = "200%",
       options = list(placeholder = 'Choose one or more technology categories...')
     )
   ),
