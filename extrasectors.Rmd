@@ -123,7 +123,8 @@ batteryclasses=batteryclasses %>% select(docdb_family_id,technology)
 
 ```{r}
 library(arrow)
-techmap <- read_parquet("techmap.parquet")
+library(fst)
+techmap <- read_fst("techmap.fst")
 techs=techmap %>% distinct(technology)
 if(!"Any battery" %in% techs){
   techmap=techmap %>% bind_rows(batteryclasses)
@@ -175,7 +176,7 @@ ok, it seems Any Green is truly Y02
 ```{r}
 
 
-countrymap9918 <- read_parquet("countrymap9918.parquet")
+countrymap9918 <- read_fst("countrymap9918.fst")
 
 countrymap9918 %>% distinct(docdb_family_id) %>% nrow()
 
@@ -196,7 +197,8 @@ library(data.table)
       share_ct = innos_ct / innos_total_c,
       share_t=innos_t/innos_total,
       
-      RTA=share_ct*2 / (share_ct+share_t)-1
+      RTA=share_ct*2 / (share_ct+share_t)-1,
+      innosh_ct=innos_ct/innos_t
       
     ) %>%
   ungroup()
@@ -243,6 +245,43 @@ tech_shares <- tech_shares %>%
   
   
 ```
+
+```{r}
+library(ggplot2)
+library(ggrepel)
+ctry="VN"
+techs=""
+
+
+
+green_classes <- c("Any Green technology","Green Energy", "Green Transport", "Circular Economy", "Green Manufacturing",
+                   "Adaptation", "Green Housing", "Green ICT", "Green Agriculture",
+                   "GHG Capture")
+
+
+fclasses=c(green_classes,"AI", "Any battery technology")
+
+ts_VN = tech_shares %>% 
+  filter(ctry_code==ctry & technology %in% fclasses) %>% 
+  mutate(color=ifelse(technology %in% green_classes, "darkgreen",
+                      ifelse(technology=="AI", "orange",
+                             ifelse(technology=="Any battery technology","gold", "gray")
+                            )
+                      )
+  )
+
+
+
+ts_VN %>% 
+  ggplot(aes(x=RTA+1, y=(innosh_ct)*100, color=color, size=innos_ct, label=technology)) +
+  geom_point(alpha=.4) +
+  geom_text_repel(size=4) +
+  geom_vline(xintercept = 1, color = "red", linetype = "dashed") +
+  theme_minimal() + xlab("Revealed technological advantage")+
+  ylab("Share in global innovation in field in %")+
+  theme(legend.position = "none")+ scale_color_identity()
+```
+
 
 
 ```{r}

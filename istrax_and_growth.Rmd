@@ -139,7 +139,7 @@ library(readr)
 
 ## Build a big countrymap
 
-```{r}
+```{r,eval=FALSE}
 library(arrow)
 countrymap9918=national0  %>% bind_rows(national1) %>% select(docdb_family_id,ctry_code,period) %>% distinct()
 write_parquet(countrymap9918,"countrymap9918.parquet")
@@ -283,9 +283,14 @@ p0p1filter=p0p1 %>% filter(innos0>=100)
   
     feols(innosOpop1~gdp_per_capita_2008+innosOpop0+
             
-                      avnat0+avglob0+citesOpop0+innosOpop0,p0p1filter) %>% summary()
+                      avnat0+avglob0+citesOpop0,p0p1filter) %>% summary()
+    feols(innosOpop1~gdp_per_capita_2008+innosOpop0+
+            
+                      avnat0+avglob0+citesOpop0,p0p1filter) %>% summary()
 
 
+
+    
     feols(pvOpop1~gdp_per_capita_2008+innosOpop0+
                       avnat0+avglob0+pvOcost0+citesOpop0+innosOpop0,p0p1filter) %>% summary()
 
@@ -322,7 +327,8 @@ library(modelsummary)
 # Run your regressions and store them
 m2 <- feols(avg_gdp_growth ~ #log(gdp_per_capita_2008)
             +gdp_per_capita_2008
-            +avglob0
+            #+avglob0
+            +istrax_nat0
             #+avglob1
             #+avnat0
             #+ev_globOinnos0
@@ -340,12 +346,13 @@ m2 %>% summary()
 
 
 m2 <- feols(DD_pc  ~ log(gdp_per_capita_2008)
-            +avglob0
+            #+avglob0
+            +(ev_globOpop0)
             #+avnat0
             #+log(population_2008)
             #+ev_globOinnos0
             #+ev_natOinnos0
-            + citesOinnos0
+            #+ citesOinnos0
             #+ innosOpop0
             | income_group
             ,  p0p1filter %>% mutate(sum=pvOcost0+avglob0) %>% filter(innos0>10))
@@ -502,7 +509,8 @@ p0p1filter %>% filter(income_group!="High income") %>%
 ```{r}
 
 p0p1filter %>% 
-    ggplot(aes( x = citesOinnos0, y = avg_gdp_growth,
+    ggplot(aes( x = ev_nat0/ev_glob0,
+                y = avg_gdp_pc_growth,
              alpha = log(innos0), size = log(innos0))) +
   geom_point() +
   geom_smooth(method = "lm") +
@@ -512,7 +520,7 @@ p0p1filter %>%
                   alpha = 1)+
   theme_minimal()+
   theme(legend.position = "none")+
-  xlab("Average citations ")+
+  xlab("xxAverage citations ")+
   ylab("Average GDP growth 2009-2018")
 
 
@@ -532,9 +540,9 @@ p0p1filter %>%
     #xlab("Average Spillover Return per R&D invested")+
     #ylab("Average GDP growth 2009-2018")
 
+```
 
-
-
+```{r}
 library(ggplot2)
 library(ggrepel)
 p0p1filter %>% 
@@ -551,9 +559,9 @@ p0p1filter %>%
     #xlab("Average Spillover Return per R&D invested")+
     #ylab("Average GDP growth 2009-2018")
 
+```
 
-
-
+```{r}
 library(ggplot2)
 library(ggrepel)
 p0p1filter %>% 
