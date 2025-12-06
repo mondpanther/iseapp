@@ -14,7 +14,8 @@ custom_colors <- c("green" = "forestgreen",
 
 
 
-
+# threshold for bars
+win_thres=0.01
 
 
 
@@ -109,8 +110,10 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
     #filter(technology != "All") %>%
     arrange(technology) %>%
     mutate(
-      linnos = log(innos),
+      linnos = log(1+innos),
       width = linnos / max(linnos),
+      #width =ifelse( innos / max(innos)>win_thres,innos / max(innos),win_thres),
+      
       xmin = as.numeric(factor(technology)) - width / 2,
       xmax = as.numeric(factor(technology)) + width / 2,
       ymin = 0,
@@ -281,8 +284,13 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
     arrange(-mean) %>% 
     head(topn)%>%
     mutate(
-      linnos = log(innos),
+      #linnos = log(innos),
+      linnos = log(1+innos),
       width = linnos / max(linnos),
+      
+      #width =ifelse( innos / max(innos)>win_thres,innos / max(innos),win_thres),
+      
+      
       xmin = as.numeric(factor(country_name)) - width / 2,
       xmax = as.numeric(factor(country_name)) + width / 2,
       ymin = 0,
