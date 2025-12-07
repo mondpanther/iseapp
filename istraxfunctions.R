@@ -10,7 +10,8 @@ custom_colors <- c("green" = "forestgreen",
                    "battery" = "yellow", 
                    "other" = "gray70",
                    "hard to abate"="blue",
-                   "AI"="orange")
+                   "AI"="orange",
+                   cpcsecs="purple")
 
 
 
@@ -57,7 +58,9 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
       greenclass = ifelse(technology %in% unlist(colorings["green"]), "green",
                           ifelse( technology %in% unlist(colorings["battery"]), "battery", 
                                   ifelse( technology %in% unlist(colorings["hard_to_abate"]), "hard to abate",
-                                          ifelse( technology %in% unlist(colorings["ai"]), "AI", "other")
+                                          ifelse( technology %in% unlist(colorings["ai"]), "AI",
+                                                  ifelse( technology %in% unlist(colorings["cpcsecs"]), "CPC Sections", "other")
+                                                )
                                         )
                                 )
                           )
@@ -71,7 +74,9 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
 #### Draw the plots
 plot_avstrax_by_country <- function(pdata, classes, #green_classes,
                                     country_code, toflow, 
-                                    custom_colors,colorings=NULL
+                                    custom_colors,
+                                    colorings=NULL,
+                                    bwidthscale="log"
                                     #battery_classes = NULL,
                                     #hard_to_abate_classes=NULL
                                     ) {
@@ -106,11 +111,20 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
   
   # Prepare data for plotting
   if(!"All" %in% classlist) avstrax=avstrax %>% filter(technology != "All") 
-  avstrax <- avstrax %>%
+  
+  
+  avstrax <- avstrax %>% 
     #filter(technology != "All") %>%
     arrange(technology) %>%
     mutate(
-      linnos = log(1+innos),
+      linnos1 = innos,
+      linnos2 = log(1+innos),
+      bwidthscale = bwidthscale,
+    ) %>% 
+    filter(innos>1) %>% 
+    mutate(
+      linnos=ifelse(bwidthscale=="log",linnos2,linnos1),
+
       width = linnos / max(linnos),
       #width =ifelse( innos / max(innos)>win_thres,innos / max(innos),win_thres),
       
@@ -236,7 +250,7 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
 
 
 plot_avstrax_by_technology <- function(pdata, classes, #green_classes, 
-                                       technologies, toflow, custom_colors,topn=20,mininno=5) {
+                                       technologies, toflow, custom_colors,topn=20,mininno=5,bwidthscale="log") {
   #mininno=30;topn=20;  pdata=patchar_countrymap;toflow="istrax_global"; classes=techmap; green_classes=green_classes; technologies="Green Energy"
 
   library(dplyr)
@@ -275,7 +289,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   
   
   
-  avstrax$ctry_code <- factor(avstrax$ctry_code, levels = avstrax$ctry_code[order(avstrax$mean)])
+  avstrax$ctry_code    <- factor(avstrax$ctry_code, levels = avstrax$ctry_code[order(avstrax$mean)])
   avstrax$country_name <- factor(avstrax$country_name, levels = avstrax$country_name[order(avstrax$mean)])
   
   avstrax <- avstrax %>%  
@@ -285,7 +299,10 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
     head(topn)%>%
     mutate(
       #linnos = log(innos),
-      linnos = log(1+innos),
+      linnos1 = innos,
+      linnos2 = log(1+innos),
+      bwidthscale=bwidthscale,
+      linnos=ifelse(bwidthscale=="log",linnos2,linnos1),      
       width = linnos / max(linnos),
       
       #width =ifelse( innos / max(innos)>win_thres,innos / max(innos),win_thres),

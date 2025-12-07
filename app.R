@@ -59,6 +59,17 @@ ai_classes=c("AI", "Machine Learning", "Deep Learning", "Natural Language Proces
              "Knowledge Representation & Reasoning", "Planning & Decision Making", "Generative AI",
              "Semiconductors", "Cloud & Data Infrastructure", "Data Rettrieval & Processing System", "Platform & Frameworks", "Deployment & Support")
 
+
+cpc_sections=c( "Human Necessities",
+                "Performing Operations; Transporting ",
+                "Chemistry; Metallurgy ",
+                "Textiles; Paper",
+                "Fixed Constructions",
+                "Mechanical Engineering; Lighting; Heating; Weapons; Blasting",
+                "Physics",
+                "Electricity",                               
+                 "General tagging of new or cross-sectional technology" )
+
 source("istraxfunctions.R")
 
 # Get all unique technologies from techmap
@@ -68,23 +79,24 @@ all_techs <- c((techmap %>% distinct(technology))$technology, "All")
 # Separate technologies into green, battery, and other categories
 
 
-green_classes_d=setdiff(green_classes,"Green Technology")
-battery_classes_d=setdiff(battery_classes,"Battery Technology")
+green_classes_d        =setdiff(green_classes,"Green Technology")
+battery_classes_d      =setdiff(battery_classes,"Battery Technology")
 hard_to_abate_classes_d=setdiff(hard_to_abate_classes,"Hard to Abate Sector Decarbonization")
-ai_classes_d=setdiff(ai_classes,"AI")
+ai_classes_d           =setdiff(ai_classes,"AI")
 
 
-colorings=list(green=green_classes,battery=battery_classes,hard_to_abate=hard_to_abate_classes,ai=ai_classes)
+colorings=list(green=green_classes,battery=battery_classes,hard_to_abate=hard_to_abate_classes,ai=ai_classes,cpcsecs=cpc_sections)
 
 
-other_techs <- c(setdiff(all_techs, c(green_classes, battery_classes,hard_to_abate_classes)),"Green Technology","Battery Technology","Hard to Abate Sector Decarbonization")
+other_techs <- c(setdiff(all_techs, c(green_classes, battery_classes,hard_to_abate_classes,cpc_sections)),"Green Technology","Battery Technology","Hard to Abate Sector Decarbonization")
 
 grouped_techs <- list(
   "Broad Technology Categories"                         = as.list(setNames(other_techs, other_techs)),
   "Detailed Green technologies"                         = as.list(setNames(green_classes_d, green_classes_d)),
   "AI subcategories"                                    = as.list(setNames(ai_classes_d, ai_classes_d)),
   "Detailed Battery technologies"                       = as.list(setNames(battery_classes_d, battery_classes_d)),
-  "Detailed Hard to Abate Sector Decarbonization Technologies" = as.list(setNames(hard_to_abate_classes_d, hard_to_abate_classes_d))
+  "Detailed Hard to Abate Sector Decarbonization Technologies" = as.list(setNames(hard_to_abate_classes_d, hard_to_abate_classes_d)),
+  "CPC Sections"                                        = as.list(setNames(cpc_sections, cpc_sections))
   
 )
 
@@ -376,6 +388,12 @@ ui <- function(request){fluidPage(
       multiple = TRUE,
       width = "200%",
       options = list(placeholder = 'Choose one or more technology categories...')
+    ),
+    radioButtons(
+      inputId = "bwidthscale:",
+      label = "Bar width scale",
+      choices = c("log", "proportional"),
+      selected = "log"
     )
   ),
 
@@ -403,7 +421,7 @@ ui <- function(request){fluidPage(
       label = "Show top n countries",
       min = 1,
       max = 200,
-      width = "250px",
+      width = "350px",
       value = 20  # default starting value
     ),
     sliderInput(
@@ -412,7 +430,7 @@ ui <- function(request){fluidPage(
       min = 1,
       max = 500,
       value = 100,  # default starting value
-      width = "250px"
+      width = "350px"
     )
 
   ),
@@ -450,7 +468,7 @@ server <- function(input, output) {
   
   
   output$avstrax_plot1 <- renderPlot({
-    req(input$country, input$toflow, input$tech_categories_plot1)
+    req(input$country, input$toflow, input$tech_categories_plot1, input$bwidthscale)
 
     selected_countries <- expand_country_selection(input$country)
     flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
@@ -494,7 +512,8 @@ server <- function(input, output) {
       country_code = selected_countries,
       toflow = input$toflow,
       custom_colors = custom_colors,
-      colorings=colorings
+      colorings=colorings,
+      bwidthscale=input$bwidthscale
       #battery_classes = battery_classes,
       #hard_to_abate_classes = hard_to_abate_classes
     ) + ggtitle("")
@@ -508,7 +527,8 @@ server <- function(input, output) {
         input$toflow,
         input$techs,
         input$topn,
-        input$mininno)
+        input$mininno,
+        input$bwidthscale)
     
     selected_countries <- expand_country_selection(input$country)
     flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
@@ -545,7 +565,8 @@ server <- function(input, output) {
       toflow = input$toflow,
       custom_colors = custom_colors,
       topn=input$topn,
-      mininno=input$mininno
+      mininno=input$mininno,
+      bwidthscale=input$bwidthscale
     ) + ggtitle("")
     
     p
