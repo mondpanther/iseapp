@@ -16,12 +16,21 @@ library(countrycode)
 library(plotly)
 library(arrow)
 library(dplyr)
+library(chattr)
 
 
-
-
+# Check if current computer is WATSON and set path accordingly
+if (Sys.info()["nodename"] == "DESKTOP-MMF34H4") {
+  fromWATSON <- "C:/Users/rmart/PRINZteam Dropbox/Ralf Martin/patbis2021/data/fromWATSON/"
+} else {
+  fromWATSON <- NULL
+}
 
 ```
+
+
+
+
 
 # Loading data
 
@@ -32,17 +41,373 @@ df <- read_parquet("countrymap.parquet")
 df=df %>% left_join(read_parquet("istraxes/istrax_global.parquet"))
 df=df %>% mutate(cit_id=istrax_global>0)
 
-names(df)
+innos_ev_global <- read_delim(paste0(fromWATSON,"innos_ev_global_2009_2018.dsv"), delim = "\t") %>% select(docdb_family_id, ev)
+
+df=df %>% left_join(innos_ev_global)
+
+
+
+```
+
+
+# Collapsing
+
+```{r}
+
+df_summary <- df %>%
+  group_by(ctry_code) %>%
+  summarise(
+    istrax_global = sum(istrax_global, na.rm = TRUE),
+    cit_id = sum(cit_id, na.rm = TRUE),
+    pats=n(),
+    mean_istrax=mean(istrax_global,na.rm=TRUE),
+    mean_ev=mean(ev,na.rm=TRUE)
+  )
+
+library(wbstats)
+
+# Get population data from World Bank
+population_2018 <- wb_data(
+  indicator = "SP.POP.TOTL",
+  start_date = 2018,
+  end_date = 2018
+) %>%
+  select(ctry_code = iso2c, population_2018 = SP.POP.TOTL) %>%
+  filter(!is.na(population_2018))
+
+
+# Get income classification data
+income_classification <- wb_countries() %>%
+  select(ctry_code = iso2c, income_level) %>%
+  mutate(high_income_2018 = income_level == "High income")
+
+# Join both datasets to df_summary
+df_summary <- df_summary %>%
+  left_join(population_2018, by = "ctry_code") %>%
+  left_join(income_classification, by = "ctry_code") %>% 
+  mutate(notHIC=income_level!="High income")
+
+
+
+df_summary=df_summary %>% mutate(patsOpop=pats/population_2018,cit_idOpop=cit_id/population_2018, istraxOpop=istrax_global/population_2018)
+
+
+
+
+# Get country names
+country_names <- wb_countries() %>%
+  select(ctry_code = iso2c, country_name = country)
+
+# Join country names to df_summary
+df_summary <- df_summary %>%
+  left_join(country_names, by = "ctry_code")
+
 
 ```
 
 
 # Analysis
 
+
+## Fraction of pats with 0 cits
+
+```{r}
+library(tidyverse)
+
+# Calculate fraction of rows where ev equals 0
+fraction_ev_zero <- df %>%
+  summarise(fraction = mean(ev == 0, na.rm = TRUE)) %>%
+  pull(fraction)
+
+fraction_ev_zero
+
+
+
+```
+
+## Fraction of pats in hihg vs low income countriies
+
+
+```{r}
+library(tidyverse)
+
+# Calculate fraction of observations by income classification
+df %>%
+  count(notHIC) %>%
+  mutate(fraction = n / sum(n))
+
+```
+
+
+## Average EV
+
+```{r}
+library(tidyverse)
+
+# Calculate HIC median and 25th percentile
+hic_median <- df_summary %>%
+  filter(notHIC == FALSE, !is.na(mean_ev)) %>%
+  summarise(median_mean_ev = median(mean_ev, na.rm = TRUE)) %>%
+  pull(median_mean_ev)
+
+hic_p25 <- df_summary %>%
+  filter(notHIC == FALSE, !is.na(mean_ev)) %>%
+  summarise(p25_mean_ev = quantile(mean_ev, 0.25, na.rm = TRUE)) %>%
+  pull(p25_mean_ev)
+
+# Chart 1: Top 20 high income countries by mean_ev
+df_summary %>%
+  filter(notHIC == FALSE, !is.na(mean_ev)) %>%
+  slice_max(mean_ev, n = 30) %>%
+  mutate(country_name = fct_reorder(country_name, mean_ev)) %>%
+  ggplot(aes(x = country_name, y = mean_ev)) +
+  geom_col() +
+  geom_hline(aes(yintercept = hic_median), color = "red", linetype = "dashed") +
+  geom_hline(aes(yintercept = hic_p25), color = "orange", linetype = "dashed") +
+  annotate("text", x = 15, y = hic_median, label = "HIC Median", vjust = -0.5, color = "red", angle = 90, size = 3) +
+  annotate("text", x = 15, y = hic_p25, label = "HIC 25th Percentile", vjust = -0.5, color = "orange", angle = 90, size = 3) +
+  coord_flip() +
+  labs(
+    title = "Top 20 High Income Countries by Average External Value",
+    x = "Country",
+    y = "Average External Value"
+  )
+
+# Chart 2: Top 20 not high income countries by mean_ev
+df_summary %>%
+  filter(notHIC == TRUE, !is.na(mean_ev)) %>%
+  slice_max(mean_ev, n = 30) %>%
+  mutate(country_name = fct_reorder(country_name, mean_ev)) %>%
+  ggplot(aes(x = country_name, y = mean_ev)) +
+  geom_col() +
+  geom_hline(aes(yintercept = hic_median), color = "red", linetype = "dashed") +
+  geom_hline(aes(yintercept = hic_p25), color = "orange", linetype = "dashed") +
+  annotate("text", x = 15, y = hic_median, label = "HIC Median", vjust = -0.5, color = "red", angle = 90, size = 3) +
+  annotate("text", x = 15, y = hic_p25, label = "HIC 25th Percentile", vjust = -0.5, color = "orange", angle = 90, size = 3) +
+  coord_flip() +
+  labs(
+    title = "Top 20 Non-High Income Countries by Average External Value",
+    x = "Country",
+    y = "Average External Value"
+  )
+
+# Chart 3: High income countries with average external value below 25th percentile
+df_summary %>%
+  filter(notHIC == FALSE, !is.na(mean_ev), mean_ev <= hic_p25) %>%
+  mutate(country_name = fct_reorder(country_name, mean_ev)) %>%
+  ggplot(aes(x = country_name, y = mean_ev)) +
+  geom_col() +
+  geom_hline(aes(yintercept = hic_median), color = "red", linetype = "dashed") +
+  geom_hline(aes(yintercept = hic_p25), color = "orange", linetype = "dashed") +
+  annotate("text", x = 5, y = hic_median, label = "HIC Median", vjust = -0.5, color = "red", angle = 90, size = 3) +
+  annotate("text", x = 5, y = hic_p25, label = "HIC 25th Percentile", vjust = -0.5, color = "orange", angle = 90, size = 3) +
+  coord_flip() +
+  labs(
+    title = "High Income Countries with Average External Value Below 25th Percentile",
+    x = "Country",
+    y = "Average External Value"
+  )
+
+```
+
+
+
+## Patent count
+
 ```{r}
 
 
+# Calculate HIC median and 25th percentile
+hic_median <- df_summary %>%
+  filter(notHIC == FALSE, !is.na(patsOpop)) %>%
+  summarise(median_patsOpop = median(patsOpop, na.rm = TRUE)) %>%
+  pull(median_patsOpop)
+
+hic_p25 <- df_summary %>%
+  filter(notHIC == FALSE, !is.na(patsOpop)) %>%
+  summarise(p25_patsOpop = quantile(patsOpop, 0.25, na.rm = TRUE)) %>%
+  pull(p25_patsOpop)
+
+# Chart 1: Top 20 high income countries by patsOpop
+df_summary %>%
+  filter(notHIC == FALSE, !is.na(patsOpop)) %>%
+  slice_max(patsOpop, n = 20) %>%
+  mutate(country_name = fct_reorder(country_name, patsOpop)) %>%
+  ggplot(aes(x = country_name, y = patsOpop)) +
+  geom_col() +
+  geom_hline(aes(yintercept = hic_median), color = "red", linetype = "dashed") +
+  geom_hline(aes(yintercept = hic_p25), color = "orange", linetype = "dashed") +
+  annotate("text", x = 15, y = hic_median, label = "HIC Median", vjust = -0.5, color = "red", angle = 90, size = 3) +
+  annotate("text", x = 15, y = hic_p25, label = "HIC 25th Percentile", vjust = -0.5, color = "orange", angle = 90, size = 3) +
+  coord_flip() +
+  labs(
+    title = "Top 20 High Income Countries by Patents per Capita",
+    x = "Country",
+    y = "Patents per Capita"
+  )
+
+# Chart 2: Top 20 not high income countries by patsOpop
+df_summary %>%
+  filter(notHIC == TRUE, !is.na(patsOpop)) %>%
+  slice_max(patsOpop, n = 20) %>%
+  mutate(country_name = fct_reorder(country_name, patsOpop)) %>%
+  ggplot(aes(x = country_name, y = patsOpop)) +
+  geom_col() +
+  geom_hline(aes(yintercept = hic_median), color = "red", linetype = "dashed") +
+  geom_hline(aes(yintercept = hic_p25), color = "orange", linetype = "dashed") +
+  annotate("text", x = 15, y = hic_median, label = "HIC Median", vjust = -0.5, color = "red", angle = 90, size = 3) +
+  annotate("text", x = 15, y = hic_p25, label = "HIC 25th Percentile", vjust = -0.5, color = "orange", angle = 90, size = 3) +
+  coord_flip() +
+  labs(
+    title = "Top 20 Non-High Income Countries by Patents per Capita",
+    x = "Country",
+    y = "Patents per Capita"
+  )
 
 
+
+
+# Calculate HIC median and 25th percentile
+hic_median <- df_summary %>%
+  filter(notHIC == FALSE, !is.na(patsOpop)) %>%
+  summarise(median_patsOpop = median(patsOpop, na.rm = TRUE)) %>%
+  pull(median_patsOpop)
+
+hic_p25 <- df_summary %>%
+  filter(notHIC == FALSE, !is.na(patsOpop)) %>%
+  summarise(p25_patsOpop = quantile(patsOpop, 0.25, na.rm = TRUE)) %>%
+  pull(p25_patsOpop)
+
+# Chart 3: High income countries with patents per capita below 25th percentile
+df_summary %>%
+  filter(notHIC == FALSE, !is.na(patsOpop), patsOpop <= hic_p25) %>%
+  mutate(country_name = fct_reorder(country_name, patsOpop)) %>%
+  ggplot(aes(x = country_name, y = patsOpop)) +
+  geom_col() +
+  geom_hline(aes(yintercept = hic_median), color = "red", linetype = "dashed") +
+  geom_hline(aes(yintercept = hic_p25), color = "orange", linetype = "dashed") +
+  annotate("text", x = 5, y = hic_median, label = "HIC Median", vjust = -0.5, color = "red", angle = 90, size = 3) +
+  annotate("text", x = 5, y = hic_p25, label = "HIC 25th Percentile", vjust = -0.5, color = "orange", angle = 90, size = 3) +
+  coord_flip() +
+  labs(
+    title = "High Income Countries with Patents per Capita Below 25th Percentile",
+    x = "Country",
+    y = "Patents per Capita"
+  )
+
+```
+
+
+
+
+
+
+
+## cited patent count
+
+```{r}
+library(tidyverse)
+
+# Calculate HIC median and 25th percentile
+hic_median <- df_summary %>%
+  filter(notHIC == FALSE, !is.na(cit_idOpop)) %>%
+  summarise(median_cit_idOpop = median(cit_idOpop, na.rm = TRUE)) %>%
+  pull(median_cit_idOpop)
+
+hic_p25 <- df_summary %>%
+  filter(notHIC == FALSE, !is.na(cit_idOpop)) %>%
+  summarise(p25_cit_idOpop = quantile(cit_idOpop, 0.25, na.rm = TRUE)) %>%
+  pull(p25_cit_idOpop)
+
+# Chart 1: Top 30 high income countries by cit_idOpop
+df_summary %>%
+  filter(notHIC == FALSE, !is.na(cit_idOpop)) %>%
+  slice_max(cit_idOpop, n = 30) %>%
+  mutate(country_name = fct_reorder(country_name, cit_idOpop)) %>%
+  ggplot(aes(x = country_name, y = cit_idOpop)) +
+  geom_col() +
+  geom_hline(aes(yintercept = hic_median), color = "red", linetype = "dashed") +
+  geom_hline(aes(yintercept = hic_p25), color = "orange", linetype = "dashed") +
+  annotate("text", x = 15, y = hic_median, label = "HIC Median", vjust = -0.5, color = "red") +
+  annotate("text", x = 15, y = hic_p25, label = "HIC 25th Percentile", vjust = -0.5, color = "orange") +
+  coord_flip() +
+  labs(
+    title = "Top 20 High Income Countries by Citations per Population",
+    x = "Country",
+    y = "Citations per Population"
+  )
+
+# Chart 2: Top 30 not high income countries by cit_idOpop
+df_summary %>%
+  filter(notHIC == TRUE, !is.na(cit_idOpop)) %>%
+  slice_max(cit_idOpop, n = 30) %>%
+  mutate(country_name = fct_reorder(country_name, cit_idOpop)) %>%
+  ggplot(aes(x = country_name, y = cit_idOpop)) +
+  geom_col() +
+  geom_hline(aes(yintercept = hic_median), color = "red", linetype = "dashed") +
+  geom_hline(aes(yintercept = hic_p25), color = "orange", linetype = "dashed") +
+  annotate("text", x = 15, y = hic_median, label = "HIC Median", vjust = -0.5, color = "red") +
+  annotate("text", x = 15, y = hic_p25, label = "HIC 25th Percentile", vjust = -0.5, color = "orange") +
+  coord_flip() +
+  labs(
+    title = "Top 20 Non-High Income Countries by Citations per Population",
+    x = "Country",
+    y = "Citations per Population"
+  )
+
+```
+
+
+# Industrial Strategy Index per capita
+
+```{r}
+library(tidyverse)
+
+# Calculate HIC median and 25th percentile
+hic_median <- df_summary %>%
+  filter(notHIC == FALSE, !is.na(istraxOpop)) %>%
+  summarise(median_istraxOpop = median(istraxOpop, na.rm = TRUE)) %>%
+  pull(median_istraxOpop)
+
+hic_p25 <- df_summary %>%
+  filter(notHIC == FALSE, !is.na(istraxOpop)) %>%
+  summarise(p25_istraxOpop = quantile(istraxOpop, 0.25, na.rm = TRUE)) %>%
+  pull(p25_istraxOpop)
+
+# Chart 1: Top 20 high income countries by istraxOpop
+df_summary %>%
+  filter(notHIC == FALSE, !is.na(istraxOpop)) %>%
+  slice_max(istraxOpop, n = 20) %>%
+  mutate(country_name = fct_reorder(country_name, istraxOpop)) %>%
+  ggplot(aes(x = country_name, y = istraxOpop)) +
+  geom_col() +
+  geom_hline(aes(yintercept = hic_median), color = "red", linetype = "dashed") +
+  geom_hline(aes(yintercept = hic_p25), color = "orange", linetype = "dashed") +
+  annotate("text", x = 15, y = hic_median, label = "HIC Median", vjust = -0.5, color = "red") +
+  annotate("text", x = 15, y = hic_p25, label = "HIC 25th Percentile", vjust = -0.5, color = "orange") +
+  coord_flip() +
+  labs(
+    title = "Top 20 High Income Countries by Industrial Strategy Index per Capita",
+    x = "Country",
+    y = "Industrial Strategy Index per Capita"
+  )
+
+# Chart 2: Top 20 not high income countries by istraxOpop
+df_summary %>%
+  filter(notHIC == TRUE, !is.na(istraxOpop)) %>%
+  slice_max(istraxOpop, n = 20) %>%
+  mutate(country_name = fct_reorder(country_name, istraxOpop)) %>%
+  ggplot(aes(x = country_name, y = istraxOpop)) +
+  geom_col() +
+  geom_hline(aes(yintercept = hic_median), color = "red", linetype = "dashed") +
+  geom_hline(aes(yintercept = hic_p25), color = "orange", linetype = "dashed") +
+  annotate("text", x = 15, y = hic_median, label = "HIC Median", vjust = -0.5, color = "red") +
+  annotate("text", x = 15, y = hic_p25, label = "HIC 25th Percentile", vjust = -0.5, color = "orange") +
+  coord_flip() +
+  labs(
+    title = "Top 20 Non-High Income Countries by Industrial Strategy Index per Capita",
+    x = "Country",
+    y = "Industrial Strategy Index per Capita"
+  )
 
 ```
