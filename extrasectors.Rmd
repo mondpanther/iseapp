@@ -855,3 +855,13 @@ if(!"Physics" %in% techs){
 
 
 ```
+
+
+
+# Write things to dropbox
+
+```{r}
+
+
+
+```

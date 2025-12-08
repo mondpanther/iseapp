@@ -12,6 +12,33 @@ library(dplyr)
 library(data.table)
 library(fst)
 library(shinycssloaders) 
+library(httr2)
+
+# Helper function to download from Dropbox
+dropbox_download <- function(path, token) {
+  request("https://content.dropboxapi.com/2/files/download") |>
+    req_headers(
+      Authorization = paste("Bearer", token),
+      `Dropbox-API-Arg` = jsonlite::toJSON(list(path = path), auto_unbox = TRUE)
+    ) |>
+    req_perform() |>
+    resp_body_raw()
+  
+  
+  
+}
+db=function(path,token){
+  raw_data <- dropbox_download(path, token)
+  temp_file <- tempfile(fileext = ".fst")
+  writeBin(raw_data, temp_file)
+  df <- read_fst(temp_file)
+  unlink(temp_file)
+  return(df)
+}
+
+token <- Sys.getenv("DROPBOX_TOKEN")
+techmap <- db("/techmap.fst", token)
+
 
 #rsconnect::writeManifest()
 enableBookmarking(store = "url")
@@ -19,12 +46,35 @@ enableBookmarking(store = "url")
 # Load data
 
 #files <- list.files(path="istraxes", pattern = "parquet$", full.names = TRUE)
-countrymap <- read_fst("countrymap.fst")
+#countrymap <- read_fst("countrymap.fst")
+countrymap <- db("/countrymap.fst", token)
+
+
+
 #for (ff in files) {
 #  patchar_countrymap <- patchar_countrymap %>% left_join(read_parquet(ff))
 #}
 
-techmap <- read_fst("techmap.fst")
+#techmap <- read_fst("techmap.fst")
+
+
+
+#df <- reactive({
+#  url <- "https://www.dropbox.com/scl/fi/j09lnxxd2wa2e1rlkywtd/techmap.fst?rlkey=rhq6w51bh9bzqz8rywmlwfuqj&st=f0napf4g&dl=1"
+  
+#  temp_file <- tempfile(fileext = ".fst")
+#  download.file(url, temp_file, mode = "wb", quiet = TRUE)
+#  techmap <- read_fst(temp_file)
+#  unlink(temp_file)
+#})
+
+
+#temp_file <- tempfile(fileext = ".fst")
+#drop_download("/techmap.fst", local_path = temp_file, overwrite = TRUE)
+#techmap <- read_fst(temp_file)
+#unlink(temp_file)
+
+
 #techmap %>% distinct(technology) %>% pull(technology)
 
 techmap=countrymap %>%
@@ -458,10 +508,13 @@ server <- function(input, output) {
     req(input$toflow)
     
     #input=list(toflow="avstrax_global")
-    path <- paste0("./istraxes/", input$toflow,".fst")
+    path <- paste0("/istraxes/", input$toflow,".fst")
     #path <- paste0("./istraxes/istrax_global.parquet")
-    patchar_countrymap <- countrymap %>% left_join(read_fst(path))
-
+    
+    ddd=db(path,token)
+    #patchar_countrymap <- countrymap %>% left_join(read_fst(path))
+    patchar_countrymap <- countrymap %>% left_join(ddd)
+    
   })
 
   
