@@ -444,6 +444,12 @@ ui <- function(request){fluidPage(
       label = "Bar width scale",
       choices = c("log", "proportional"),
       selected = "log"
+    ),
+    radioButtons(
+      inputId = "display_mode",
+      label = "Display mode",
+      choices = c("Confidence bands" = "confidence", "Quartile range" = "quartiles"),
+      selected = "confidence"
     )
   ),
 
@@ -521,7 +527,7 @@ server <- function(input, output) {
   
   
   output$avstrax_plot1 <- renderPlot({
-    req(input$country, input$toflow, input$tech_categories_plot1, input$bwidthscale)
+    req(input$country, input$toflow, input$tech_categories_plot1, input$bwidthscale, input$display_mode)
 
     selected_countries <- expand_country_selection(input$country)
     flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
@@ -566,7 +572,8 @@ server <- function(input, output) {
       toflow = input$toflow,
       custom_colors = custom_colors,
       colorings=colorings,
-      bwidthscale=input$bwidthscale
+      bwidthscale=input$bwidthscale,
+      display_mode=input$display_mode
       #battery_classes = battery_classes,
       #hard_to_abate_classes = hard_to_abate_classes
     ) + ggtitle("")
@@ -576,12 +583,13 @@ server <- function(input, output) {
   
   
   output$avstrax_plot2 <- renderPlot({
-    req(input$country, 
+    req(input$country,
         input$toflow,
         input$techs,
         input$topn,
         input$mininno,
-        input$bwidthscale)
+        input$bwidthscale,
+        input$display_mode)
     
     selected_countries <- expand_country_selection(input$country)
     flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
@@ -611,15 +619,16 @@ server <- function(input, output) {
       pdata = filtered,
       classes = techmap,
       #green_classes = green_classes,
-      
+
       #country_code = selected_countries,
       technologies=input$techs,
-      
+
       toflow = input$toflow,
       custom_colors = custom_colors,
       topn=input$topn,
       mininno=input$mininno,
-      bwidthscale=input$bwidthscale
+      bwidthscale=input$bwidthscale,
+      display_mode=input$display_mode
     ) + ggtitle("")
     
     p
