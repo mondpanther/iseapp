@@ -861,7 +861,9 @@ if(!"Physics" %in% techs){
 # Write things to dropbox
 
 ```{r}
-
+# install.packages("scales")
+library(scales)
+scales::show_col(colors()[30:50])
 
 
 ```

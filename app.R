@@ -13,6 +13,100 @@ library(data.table)
 library(fst)
 library(shinycssloaders) 
 library(httr2)
+library(rdrop2)
+source("dropbox_auth.R")
+
+############## drop box drama
+library(rdrop2)
+
+load_dropbox_token <- function(local_token_path = "dropbox_token.rds") {
+  
+  # Detect if running on Posit Connect
+  on_connect <- Sys.getenv("RSTUDIO_PRODUCT") == "CONNECT" || 
+    Sys.getenv("R_CONFIG_ACTIVE") == "rsconnect"
+  
+  if (on_connect) {
+    # Running on Posit Connect - use split token parts
+    cat("Running on Posit Connect - loading split token...\n")
+    
+    parts <- character()
+    i <- 1
+    
+    while(TRUE) {
+      var_name <- paste0("DROPBOX_TOKEN_PART", i)
+      part <- Sys.getenv(var_name)
+      
+      if(part == "") break  # No more parts found
+      
+      parts <- c(parts, part)
+      i <- i + 1
+    }
+    
+    if(length(parts) == 0) {
+      stop("No DROPBOX_TOKEN_PART variables found on Posit Connect")
+    }
+    
+    cat("Found", length(parts), "token parts\n")
+    
+    # Reassemble
+    token_base64 <- paste0(parts, collapse = "")
+    token_raw <- base64enc::base64decode(token_base64)
+    token <- unserialize(token_raw)
+    
+  } else {
+    # Running locally - load from RDS file
+    cat("Running locally - loading token from RDS file...\n")
+    
+    if(!file.exists(local_token_path)) {
+      stop("Token file not found at: ", local_token_path, 
+           "\nRun drop_auth() and save with: saveRDS(drop_auth(), '", 
+           local_token_path, "')")
+    }
+    
+    token <- readRDS(local_token_path)
+  }
+  
+  return(token)
+}
+
+# Usage in your app:
+token <- load_dropbox_token()  # Uses default path "dropbox_token.rds"
+# Or specify custom path:
+# token <- load_dropbox_token("path/to/my_token.rds")
+
+drop_acc(dtoken = token)
+############################
+
+
+
+# Function to load token with flexible number of parts
+load_dropbox_token <- function(n_parts = 3) {
+  # Get all parts dynamically
+  parts <- character(n_parts)
+  
+  for(i in 1:n_parts) {
+    var_name <- paste0("DROPBOX_TOKEN_PART", i)
+    parts[i] <- Sys.getenv(var_name)
+  }
+  
+  # Remove empty parts
+  parts <- parts[parts != ""]
+  
+  if(length(parts) == 0) {
+    stop("No DROPBOX_TOKEN_PART variables found")
+  }
+  
+  # Reassemble
+  token_base64 <- paste0(parts, collapse = "")
+  token_raw <- base64enc::base64decode(token_base64)
+  token <- unserialize(token_raw)
+  
+  return(token)
+}
+
+
+
+
 
 # Helper function to download from Dropbox
 dropbox_download <- function(path, token) {
@@ -35,6 +129,9 @@ db=function(path,token){
   unlink(temp_file)
   return(df)
 }
+
+
+
 
 token <- Sys.getenv("DROPBOX_TOKEN")
 techmap <- db("/techmap.fst", token)
@@ -449,7 +546,7 @@ ui <- function(request){fluidPage(
       inputId = "display_mode",
       label = "Display mode",
       choices = c("Confidence bands" = "confidence", "Quartile bin means" = "quartiles"),
-      selected = "confidence"
+      selected = "quartiles"
     )
   ),
 
@@ -515,7 +612,7 @@ server <- function(input, output) {
     
     #input=list(toflow="avstrax_global")
     path <- paste0("/istraxes/", input$toflow,".fst")
-    #path <- paste0("./istraxes/istrax_global.parquet")
+    #path <- paste0("/istraxes/istrax_global.fst")
     
     ddd=db(path,token)
     #patchar_countrymap <- countrymap %>% left_join(read_fst(path))
