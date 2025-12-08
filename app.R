@@ -13,38 +13,12 @@ library(data.table)
 library(fst)
 library(shinycssloaders) 
 library(httr2)
-<<<<<<< Updated upstream
-
-=======
->>>>>>> Stashed changes
-#library(rdrop2)
 source("dropbox_auth.R")
->>>>>>> Stashed changes
 
-# Helper function to download from Dropbox
-dropbox_download <- function(path, token) {
-  request("https://content.dropboxapi.com/2/files/download") |>
-    req_headers(
-      Authorization = paste("Bearer", token),
-      `Dropbox-API-Arg` = jsonlite::toJSON(list(path = path), auto_unbox = TRUE)
-    ) |>
-    req_perform() |>
-    resp_body_raw()
-  
-  
-  
-}
-db=function(path,token){
-  raw_data <- dropbox_download(path, token)
-  temp_file <- tempfile(fileext = ".fst")
-  writeBin(raw_data, temp_file)
-  df <- read_fst(temp_file)
-  unlink(temp_file)
-  return(df)
-}
 
-token <- Sys.getenv("DROPBOX_TOKEN")
-techmap <- db("/techmap.fst", token)
+techmap <- dropbox_read_fst("/techmap.fst")
+
+#techmap <- db("/techmap.fst", token)
 
 
 #rsconnect::writeManifest()
@@ -54,7 +28,7 @@ enableBookmarking(store = "url")
 
 #files <- list.files(path="istraxes", pattern = "parquet$", full.names = TRUE)
 #countrymap <- read_fst("countrymap.fst")
-countrymap <- db("/countrymap.fst", token)
+countrymap <- dropbox_read_fst("/countrymap.fst")
 
 
 
@@ -451,6 +425,12 @@ ui <- function(request){fluidPage(
       label = "Bar width scale",
       choices = c("log", "proportional"),
       selected = "log"
+    ),
+    radioButtons(
+      inputId = "display_mode",
+      label = "Display mode",
+      choices = c("Confidence bands" = "confidence", "Quartile bin means" = "quartiles"),
+      selected = "quartiles"
     )
   ),
 
@@ -516,9 +496,9 @@ server <- function(input, output) {
     
     #input=list(toflow="avstrax_global")
     path <- paste0("/istraxes/", input$toflow,".fst")
-    #path <- paste0("./istraxes/istrax_global.parquet")
+    #path <- paste0("/istraxes/istrax_global.fst")
     
-    ddd=db(path,token)
+    ddd=dropbox_read_fst(path)
     #patchar_countrymap <- countrymap %>% left_join(read_fst(path))
     patchar_countrymap <- countrymap %>% left_join(ddd)
     
@@ -528,7 +508,7 @@ server <- function(input, output) {
   
   
   output$avstrax_plot1 <- renderPlot({
-    req(input$country, input$toflow, input$tech_categories_plot1, input$bwidthscale)
+    req(input$country, input$toflow, input$tech_categories_plot1, input$bwidthscale, input$display_mode)
 
     selected_countries <- expand_country_selection(input$country)
     flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
@@ -573,7 +553,8 @@ server <- function(input, output) {
       toflow = input$toflow,
       custom_colors = custom_colors,
       colorings=colorings,
-      bwidthscale=input$bwidthscale
+      bwidthscale=input$bwidthscale,
+      display_mode=input$display_mode
       #battery_classes = battery_classes,
       #hard_to_abate_classes = hard_to_abate_classes
     ) + ggtitle("")
@@ -583,12 +564,13 @@ server <- function(input, output) {
   
   
   output$avstrax_plot2 <- renderPlot({
-    req(input$country, 
+    req(input$country,
         input$toflow,
         input$techs,
         input$topn,
         input$mininno,
-        input$bwidthscale)
+        input$bwidthscale,
+        input$display_mode)
     
     selected_countries <- expand_country_selection(input$country)
     flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
@@ -618,15 +600,16 @@ server <- function(input, output) {
       pdata = filtered,
       classes = techmap,
       #green_classes = green_classes,
-      
+
       #country_code = selected_countries,
       technologies=input$techs,
-      
+
       toflow = input$toflow,
       custom_colors = custom_colors,
       topn=input$topn,
       mininno=input$mininno,
-      bwidthscale=input$bwidthscale
+      bwidthscale=input$bwidthscale,
+      display_mode=input$display_mode
     ) + ggtitle("")
     
     p
