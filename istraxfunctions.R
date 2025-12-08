@@ -52,8 +52,9 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
       mean = mean(istrax*scaler, na.rm = TRUE),
       innos = n(),
       sem = sd(istrax*scaler, na.rm = TRUE) / sqrt(n()),
-      q1 = quantile(istrax*scaler, 0.25, na.rm = TRUE),
-      q3 = quantile(istrax*scaler, 0.75, na.rm = TRUE),
+      # Quartile bin means: mean of observations within each quartile bin
+      q1_bin_mean = mean(istrax*scaler[istrax*scaler <= quantile(istrax*scaler, 0.25, na.rm = TRUE)], na.rm = TRUE),
+      q4_bin_mean = mean(istrax*scaler[istrax*scaler >= quantile(istrax*scaler, 0.75, na.rm = TRUE)], na.rm = TRUE),
       .groups = "drop"
     ) %>%
     mutate(
@@ -146,7 +147,7 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
     p <- p + geom_errorbar(aes(x = as.numeric(factor(technology)), ymin = mean - 1.96 * sem, ymax = mean + 1.96 * sem),
                            width = 0.2, color = "black", linewidth = .4, alpha = .4)
   } else if (display_mode == "quartiles") {
-    p <- p + geom_errorbar(aes(x = as.numeric(factor(technology)), ymin = q1, ymax = q3),
+    p <- p + geom_errorbar(aes(x = as.numeric(factor(technology)), ymin = q1_bin_mean, ymax = q4_bin_mean),
                            width = 0.2, color = "black", linewidth = .4, alpha = .4)
   }
 
@@ -249,8 +250,9 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
       mean = mean(istrax*scaler, na.rm = TRUE),
       innos = n(),
       sem = sd(istrax*scaler, na.rm = TRUE) / sqrt(n()),
-      q1 = quantile(istrax*scaler, 0.25, na.rm = TRUE),
-      q3 = quantile(istrax*scaler, 0.75, na.rm = TRUE),
+      # Quartile bin means: mean of observations within each quartile bin
+      q1_bin_mean = mean(istrax*scaler[istrax*scaler <= quantile(istrax*scaler, 0.25, na.rm = TRUE)], na.rm = TRUE),
+      q4_bin_mean = mean(istrax*scaler[istrax*scaler >= quantile(istrax*scaler, 0.75, na.rm = TRUE)], na.rm = TRUE),
       .groups = "drop"
     ) #%>%
     #mutate(
@@ -341,7 +343,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
     p <- p + geom_errorbar(aes(ymin = mean - 1.96 * sem, ymax = mean + 1.96 * sem),
                            width = 0.2, color = "black", linewidth = .4, alpha = .4)
   } else if (display_mode == "quartiles") {
-    p <- p + geom_errorbar(aes(ymin = q1, ymax = q3),
+    p <- p + geom_errorbar(aes(ymin = q1_bin_mean, ymax = q4_bin_mean),
                            width = 0.2, color = "black", linewidth = .4, alpha = .4)
   }
 

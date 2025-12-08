@@ -448,7 +448,7 @@ ui <- function(request){fluidPage(
     radioButtons(
       inputId = "display_mode",
       label = "Display mode",
-      choices = c("Confidence bands" = "confidence", "Quartile range" = "quartiles"),
+      choices = c("Confidence bands" = "confidence", "Quartile bin means" = "quartiles"),
       selected = "confidence"
     )
   ),
