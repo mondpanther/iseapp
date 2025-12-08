@@ -7,7 +7,7 @@ library(tidyr)
 
 # Define custom colors
 custom_colors <- c("green" = "forestgreen", 
-                   "battery" = "yellow", 
+                   "battery" = "gold", 
                    "other" = "gray70",
                    "hard to abate"="blue",
                    "AI"="orange",
@@ -29,7 +29,7 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
 
   
   
-  
+  #data=filtered; istrax_var="istrax_global"
   istrax_sym <- rlang::sym(istrax_var)
   
   scaler=ifelse(grepl("strax", istrax_var ),100,1)
@@ -47,11 +47,26 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
         mutate(technology = "All")
     ) %>%
     distinct() %>%
-    group_by(technology) %>%
-    summarise(
-      mean = mean(istrax*scaler, na.rm = TRUE),
-      innos = n(),
-      sem = sd(istrax*scaler, na.rm = TRUE) / sqrt(n()),
+    group_by(technology) %>% 
+    mutate(q1=quantile(istrax*scaler, 0.25, na.rm = TRUE),
+           q2=quantile(istrax*scaler, 0.5, na.rm = TRUE),
+           q3=quantile(istrax*scaler, 0.75, na.rm = TRUE)
+  ) %>% 
+  summarise(
+    mean = mean(istrax*scaler, na.rm = TRUE),
+    innos = n(),
+    sem = sd(istrax*scaler, na.rm = TRUE) / sqrt(n()),
+    # Quartile bin means: mean of observations within each quartile bin
+    
+    q1_bin_mean = mean(scaler*istrax[scaler*istrax <= q1], na.rm = TRUE),
+    q2_bin_mean = mean(scaler*istrax[scaler*istrax <= q2 & scaler*istrax>=q1], na.rm = TRUE),
+    q3_bin_mean = mean(scaler*istrax[scaler*istrax <= q3 & scaler*istrax>=q2], na.rm = TRUE),
+    q4_bin_mean = mean(scaler*istrax[scaler*istrax >= q3], na.rm = TRUE),
+    
+    q0M_bin_mean= mean(scaler*istrax[scaler*istrax <= q2], na.rm = TRUE),
+    q1M_bin_mean= mean(scaler*istrax[scaler*istrax >= q2], na.rm = TRUE),
+    
+    across(c(q1,q2,q3),mean),
       .groups = "drop"
     ) %>%
     mutate(
@@ -73,10 +88,11 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
 
 #### Draw the plots
 plot_avstrax_by_country <- function(pdata, classes, #green_classes,
-                                    country_code, toflow, 
+                                    country_code, toflow,
                                     custom_colors,
                                     colorings=NULL,
-                                    bwidthscale="log"
+                                    bwidthscale="log",
+                                    display_mode="confidence"
                                     #battery_classes = NULL,
                                     #hard_to_abate_classes=NULL
                                     ) {
@@ -84,10 +100,10 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
   library(ggplot2)
 
   library(patchwork)
-  #classes=techmap
+  #classes=techmap %>% filter(technology=="All"); toflow="istrax_global"; pdata=patchar_countrymap; country_code="VN"
   classlist=(classes %>% distinct(technology))$technology
 
-  #toflow="Return on x"
+  #toflow="istrax_global"; pdata=countrymap
   #ylab=ifelse(grepl("Return", toflow ),"Return in %","Millions of $")
   ylab=ifelse(grepl("strax", toflow ),"Return in %","Millions of $")
   #scaler=ifelse(grepl("strax", toflow ),100,1)
@@ -110,6 +126,7 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
     pull(innos)
   
   # Prepare data for plotting
+  #display_mode="quartiles";bwidthscale="log"
   if(!"All" %in% classlist) avstrax=avstrax %>% filter(technology != "All") 
   
   
@@ -135,11 +152,36 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
     )
   
   # Create the plot
+  
   p=ggplot(avstrax) +
-    geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = greenclass)) +
-    geom_errorbar(aes(x = as.numeric(factor(technology)), ymin = mean - 1.96 * sem, ymax = mean + 1.96 * sem),
-                  width = 0.2, color = "black", linewidth = .4,alpha=.4) +
+    geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = greenclass))
+
+  # Add either confidence bands or quartile means based on display_mode
+  if (display_mode == "confidence") {
+    p <- p + geom_errorbar(aes(x = as.numeric(factor(technology)), ymin = mean - 1.96 * sem, ymax = mean + 1.96 * sem),
+                           width = 0.2, color = "black", linewidth = .4, alpha = .4)
+  } else if (display_mode == "quartiles") {
+    p <- p + # geom_errorbar(aes(x = as.numeric(factor(technology)),ymin = q1_bin_mean, ymax = q2_bin_mean, width = width),
+      #color = "brown",
+      #                      linewidth = .7, alpha = .5)+
+            #geom_errorbar(aes(x = as.numeric(factor(technology)),ymin = q1, ymax = q2,width = width),
+        #              color = "#3498db",
+       #               linewidth = .7, alpha = .5)+
+      
+            #geom_errorbar(aes(x = as.numeric(factor(technology)),ymin = q2, ymax = q3,width = width),
+         #           color = "#3498db",
+          #          linewidth = .7, alpha = .5)+
+      
+            geom_errorbar(aes(color=greenclass,x = as.numeric(factor(technology)),ymin = q1M_bin_mean, ymax = q4_bin_mean,width=width*1.05),
+                     linewidth = 1, alpha = .5)
+    
+    
+    
+  }
+
+  p <- p +
     scale_x_continuous(breaks = as.numeric(factor(avstrax$technology)), labels = avstrax$technology) +
+    scale_color_manual(values = custom_colors) +
     scale_fill_manual(values = custom_colors) +
     labs(
       title = "Spillover returns",
@@ -147,15 +189,16 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
       y = ylab,
       fill = "Technology"
     ) +
+    guides(color = "none")+
     theme_minimal() +
-    
+
     theme(
       axis.title.x = element_text(size = 16),
       axis.title.y = element_text(size = 16),
       axis.text.x = element_text(size = 14),
       axis.text.y = element_text(size = 14)
     )+
-    
+
     geom_hline(yintercept = allmean, linetype = "dashed", color = "black", linewidth = 1) +
     coord_flip()#+
   #paste0(as.character(innos)," Innovations")
@@ -233,10 +276,25 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
     
     distinct() %>%
     group_by(ctry_code) %>%
+    mutate(q1=quantile(istrax*scaler, 0.25, na.rm = TRUE),
+           q2=quantile(istrax*scaler, 0.5, na.rm = TRUE),
+           q3=quantile(istrax*scaler, 0.75, na.rm = TRUE)
+    ) %>% 
     summarise(
       mean = mean(istrax*scaler, na.rm = TRUE),
       innos = n(),
       sem = sd(istrax*scaler, na.rm = TRUE) / sqrt(n()),
+      # Quartile bin means: mean of observations within each quartile bin
+      
+      q1_bin_mean = mean(scaler*istrax[scaler*istrax <= q1], na.rm = TRUE),
+      q2_bin_mean = mean(scaler*istrax[scaler*istrax <= q2 & scaler*istrax>=q1], na.rm = TRUE),
+      q3_bin_mean = mean(scaler*istrax[scaler*istrax <= q3 & scaler*istrax>=q2], na.rm = TRUE),
+      q4_bin_mean = mean(scaler*istrax[scaler*istrax >= q3], na.rm = TRUE),
+      
+      q0M_bin_mean= mean(scaler*istrax[scaler*istrax <= q2], na.rm = TRUE),
+      q1M_bin_mean= mean(scaler*istrax[scaler*istrax >= q2], na.rm = TRUE),
+      
+      across(c(q1,q2,q3),mean),
       .groups = "drop"
     ) #%>%
     #mutate(
@@ -249,8 +307,9 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
 
 
 
-plot_avstrax_by_technology <- function(pdata, classes, #green_classes, 
-                                       technologies, toflow, custom_colors,topn=20,mininno=5,bwidthscale="log") {
+plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
+                                       technologies, toflow, custom_colors,topn=20,mininno=5,bwidthscale="log",
+                                       display_mode="confidence") {
   #mininno=30;topn=20;  pdata=patchar_countrymap;toflow="istrax_global"; classes=techmap; green_classes=green_classes; technologies="Green Energy"
 
   library(dplyr)
@@ -317,11 +376,42 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
 
   # Create the plot
   ylab=ifelse(grepl("strax", toflow ),"Return in %","Millions of $")
-  
+
   p <- ggplot(avstrax, aes(x = country_name)) +
-    geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax)) +
-    geom_errorbar(aes(ymin = mean - 1.96 * sem, ymax = mean + 1.96 * sem),
-                  width = 0.2, color = "black", linewidth = .4, alpha = .4) +
+    geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax))
+
+  # Add either confidence bands or quartile means based on display_mode
+  if (display_mode == "confidence") {
+    p <- p + geom_errorbar(aes(ymin = mean - 1.96 * sem, ymax = mean + 1.96 * sem),
+                           width = 0.2, color = "black", linewidth = .4, alpha = .4)
+  } else if (display_mode == "quartiles") {
+#    p <- p + 
+#         geom_errorbar(aes(ymin = q1_bin_mean, 
+#                           ymax = q2,width=width),
+#                           width = 0.2, color = "brown",
+#                           linewidth = .4, alpha = .5)+
+#        geom_errorbar(aes(ymin = q2, ymax = q4_bin_mean,width=width),
+#                      color = "brown", 
+#                      linewidth = .4, alpha = .5)
+    
+    
+    p <- p + #geom_errorbar(aes(x = as.numeric(factor(country_name)),ymin = q1_bin_mean, ymax = q2_bin_mean, width = width),
+             #               color = "brown",
+             #               linewidth = .5, alpha = .5)+
+      #geom_errorbar(aes(x = as.numeric(factor(country_name)),ymin = q2_bin_mean, ymax = q2,width = width),
+      #              color = "#3498db",
+      #              linewidth = .5, alpha = .5)+
+      
+      #geom_errorbar(aes(x = as.numeric(factor(country_name)),ymin = q2, ymax = q3_bin_mean,width = width),
+      #              color = "#3498db",
+      #              linewidth = .5, alpha = .5)+
+      
+      geom_errorbar(aes(x = as.numeric(factor(country_name)),ymin = q1M_bin_mean, ymax = q4_bin_mean,width=width),
+                    color = "#3498db",linewidth = .5, alpha = .5)
+    
+  }
+
+  p <- p +
     labs(
       title = "Spillover returns",
       x = "Country",
