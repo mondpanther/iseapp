@@ -16,7 +16,21 @@ library(httr2)
 source("dropbox_auth.R")
 
 
-techmap <- dropbox_read_fst("/techmap.fst")
+#iseapplocal=Sys.getenv("ISEAPP_PATH_LOCAL")
+localpath_fname=function(fname){
+  iseapplocal=Sys.getenv("ISEAPP_PATH_LOCAL")
+  paste0(iseapplocal,"/",fname)
+}
+
+
+pp=localpath_fname("/techmap.fst")
+if(file.exists(pp)){ 
+  techmap <- read_fst(pp)
+} else {
+  techmap <- dropbox_read_fst("/techmap.fst")}
+
+
+
 
 #techmap <- db("/techmap.fst", token)
 
@@ -28,7 +42,13 @@ enableBookmarking(store = "url")
 
 #files <- list.files(path="istraxes", pattern = "parquet$", full.names = TRUE)
 #countrymap <- read_fst("countrymap.fst")
-countrymap <- dropbox_read_fst("/countrymap.fst")
+#countrymap <- dropbox_read_fst("/countrymap.fst")
+pp=localpath_fname("/countrymap.fst")
+if(file.exists(pp)){ 
+  countrymap <- read_fst(pp)
+} else {
+  countrymap <- dropbox_read_fst("/countrymap.fst")}
+
 
 
 
@@ -429,7 +449,7 @@ ui <- function(request){fluidPage(
     radioButtons(
       inputId = "display_mode",
       label = "Display mode",
-      choices = c("Confidence bands" = "confidence", "Quartile bin means" = "quartiles"),
+      choices = c("Confidence bands" = "confidence", "Top 25th and 40th percentile bin means" = "quartiles"),
       selected = "quartiles"
     )
   ),
@@ -498,7 +518,18 @@ server <- function(input, output) {
     path <- paste0("/istraxes/", input$toflow,".fst")
     #path <- paste0("/istraxes/istrax_global.fst")
     
-    ddd=dropbox_read_fst(path)
+    #ddd=dropbox_read_fst(path)
+    
+    
+    pp=localpath_fname(path)
+    if(file.exists(pp)){ 
+      ddd <- read_fst(pp)
+    } else {
+      ddd <- dropbox_read_fst(path)}
+    
+    
+    
+    
     #patchar_countrymap <- countrymap %>% left_join(read_fst(path))
     patchar_countrymap <- countrymap %>% left_join(ddd)
     
