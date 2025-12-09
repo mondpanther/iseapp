@@ -47,8 +47,11 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
         mutate(technology = "All")
     ) %>%
     distinct() %>%
-    group_by(technology) %>% 
-    mutate(q1=quantile(istrax*scaler, 0.25, na.rm = TRUE),
+    group_by(technology) %>% arrange(technology,-istrax*scaler) %>% 
+    mutate(ppp=(1:n())/n()) %>% 
+    mutate(top25=ppp<0.25,
+           top50=ppp<0.5,
+           q1=quantile(istrax*scaler, 0.25, na.rm = TRUE),
            q2=quantile(istrax*scaler, 0.5, na.rm = TRUE),
            q3=quantile(istrax*scaler, 0.75, na.rm = TRUE)
   ) %>% 
@@ -61,12 +64,16 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
     q1_bin_mean = mean(scaler*istrax[scaler*istrax <= q1], na.rm = TRUE),
     q2_bin_mean = mean(scaler*istrax[scaler*istrax <= q2 & scaler*istrax>=q1], na.rm = TRUE),
     q3_bin_mean = mean(scaler*istrax[scaler*istrax <= q3 & scaler*istrax>=q2], na.rm = TRUE),
-    q4_bin_mean = mean(scaler*istrax[scaler*istrax >= q3], na.rm = TRUE),
+    q4_bin_mean = mean(scaler*istrax[scaler*istrax > q3], na.rm = TRUE),
     
-    q0M_bin_mean= mean(scaler*istrax[scaler*istrax <= q2], na.rm = TRUE),
-    q1M_bin_mean= mean(scaler*istrax[scaler*istrax >= q2], na.rm = TRUE),
+    q0M_bin_mean= mean(scaler*istrax[(scaler*istrax) <= q2], na.rm = TRUE),
+    q1M_bin_mean= mean(scaler*istrax[(scaler*istrax) > q2], na.rm = TRUE),
     
-    across(c(q1,q2,q3),mean),
+    top25_bin_mean= mean(scaler*istrax[top25==T], na.rm = TRUE),
+    top50_bin_mean= mean(scaler*istrax[top50==T], na.rm = TRUE),
+    
+    
+    across(c(q1,q2,q3,top25,top50),mean),
       .groups = "drop"
     ) %>%
     mutate(
@@ -172,7 +179,7 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
          #           color = "#3498db",
           #          linewidth = .7, alpha = .5)+
       
-            geom_errorbar(aes(color=greenclass,x = as.numeric(factor(technology)),ymin = q1M_bin_mean, ymax = q4_bin_mean,width=width*1.05),
+            geom_errorbar(aes(color=greenclass,x = as.numeric(factor(technology)),ymin = top50_bin_mean, ymax = top25_bin_mean,width=width*1.05),
                      linewidth = 1, alpha = .5)
     
     
