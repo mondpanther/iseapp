@@ -283,9 +283,13 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
     
     distinct() %>%
     group_by(ctry_code) %>%
+    arrange(ctry_code,-istrax*scaler)
+    mutate(ppp=(1:n())/n()) %>% 
     mutate(q1=quantile(istrax*scaler, 0.25, na.rm = TRUE),
            q2=quantile(istrax*scaler, 0.5, na.rm = TRUE),
-           q3=quantile(istrax*scaler, 0.75, na.rm = TRUE)
+           q3=quantile(istrax*scaler, 0.75, na.rm = TRUE),
+           top25=ppp<0.25,
+           top50=ppp<0.5
     ) %>% 
     summarise(
       mean = mean(istrax*scaler, na.rm = TRUE),
@@ -300,8 +304,9 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
       
       q0M_bin_mean= mean(scaler*istrax[scaler*istrax <= q2], na.rm = TRUE),
       q1M_bin_mean= mean(scaler*istrax[scaler*istrax >= q2], na.rm = TRUE),
-      
-      across(c(q1,q2,q3),mean),
+      top25_bin_mean= mean(scaler*istrax[top25==T], na.rm = TRUE),
+      top50_bin_mean= mean(scaler*istrax[top50==T], na.rm = TRUE),
+      across(c(q1,q2,q3,top25,top50),mean),
       .groups = "drop"
     ) #%>%
     #mutate(
@@ -413,7 +418,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
       #              color = "#3498db",
       #              linewidth = .5, alpha = .5)+
       
-      geom_errorbar(aes(x = as.numeric(factor(country_name)),ymin = q1M_bin_mean, ymax = q4_bin_mean,width=width),
+      geom_errorbar(aes(x = as.numeric(factor(country_name)),ymin = top50_bin_mean, ymax = top25_bin_mean,width=width),
                     color = "#3498db",linewidth = .5, alpha = .5)
     
   }
