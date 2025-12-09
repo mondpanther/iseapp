@@ -283,7 +283,7 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
     
     distinct() %>%
     group_by(ctry_code) %>%
-    arrange(ctry_code,-istrax*scaler)
+    arrange(ctry_code,-istrax*scaler) %>% 
     mutate(ppp=(1:n())/n()) %>% 
     mutate(q1=quantile(istrax*scaler, 0.25, na.rm = TRUE),
            q2=quantile(istrax*scaler, 0.5, na.rm = TRUE),
