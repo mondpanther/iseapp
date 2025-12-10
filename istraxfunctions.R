@@ -80,9 +80,9 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
       .groups = "drop"
     ) %>%
     mutate(
-      # Create Google search URL for top 3 IDs
-      top3_ids_url = paste0("window.open('https://www.google.com/search?q=",
-                            sapply(top3_ids, utils::URLencode, reserved = TRUE), "')"),
+      # Create Google search URL for top 3 IDs (use double quotes for JS to avoid HTML attribute conflicts)
+      top3_ids_url = paste0('window.open("https://www.google.com/search?q=',
+                            sapply(top3_ids, utils::URLencode, reserved = TRUE), '")'),
       greenclass = ifelse(technology %in% unlist(colorings["green"]), "green",
                           ifelse( technology %in% unlist(colorings["battery"]), "battery", 
                                   ifelse( technology %in% unlist(colorings["hard_to_abate"]), "hard to abate",
@@ -341,9 +341,9 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
       .groups = "drop"
     ) %>%
     mutate(
-      # Create Google search URL for top 3 IDs
-      top3_ids_url = paste0("window.open('https://www.google.com/search?q=",
-                            sapply(top3_ids, utils::URLencode, reserved = TRUE), "')")
+      # Create Google search URL for top 3 IDs (use double quotes for JS to avoid HTML attribute conflicts)
+      top3_ids_url = paste0('window.open("https://www.google.com/search?q=',
+                            sapply(top3_ids, utils::URLencode, reserved = TRUE), '")')
     )
 
   return(avstrax)
