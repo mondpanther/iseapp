@@ -11,8 +11,9 @@ library(arrow)
 library(dplyr)
 library(data.table)
 library(fst)
-library(shinycssloaders) 
+library(shinycssloaders)
 library(httr2)
+library(ggiraph)
 source("dropbox_auth.R")
 
 
@@ -465,7 +466,7 @@ ui <- function(request){fluidPage(
   # Wrap the first plot in a collapsible container
   tags$div(
     id = "plot1Container",
-    withSpinner(plotOutput("avstrax_plot1", height = "600px"), type = 4, color = "#3498db")
+    withSpinner(girafeOutput("avstrax_plot1", height = "600px"), type = 4, color = "#3498db")
   ),
   
   inputPanel(
@@ -497,7 +498,7 @@ ui <- function(request){fluidPage(
 
   ),
 
-  withSpinner(plotOutput("avstrax_plot2", height = "600px"), type = 4, color = "#3498db")
+  withSpinner(girafeOutput("avstrax_plot2", height = "600px"), type = 4, color = "#3498db")
   
 )
 }
@@ -543,7 +544,7 @@ server <- function(input, output) {
   
   
   
-  output$avstrax_plot1 <- renderPlot({
+  output$avstrax_plot1 <- renderGirafe({
     req(input$country, input$toflow, input$tech_categories_plot1, input$bwidthscale, input$display_mode, !is.null(input$show_top3_ids))
 
     selected_countries <- expand_country_selection(input$country)
@@ -594,13 +595,13 @@ server <- function(input, output) {
       show_top3_ids=input$show_top3_ids
       #battery_classes = battery_classes,
       #hard_to_abate_classes = hard_to_abate_classes
-    ) + ggtitle("")
+    )
 
     p
   })
-  
-  
-  output$avstrax_plot2 <- renderPlot({
+
+
+  output$avstrax_plot2 <- renderGirafe({
     req(input$country,
         input$toflow,
         input$techs,
@@ -648,8 +649,8 @@ server <- function(input, output) {
       bwidthscale=input$bwidthscale,
       display_mode=input$display_mode,
       show_top3_ids=input$show_top3_ids
-    ) + ggtitle("")
-    
+    )
+
     p
   })
   

@@ -1,6 +1,7 @@
 
 library(dplyr)
 library(tidyr)
+library(ggiraph)
 
 
 
@@ -79,6 +80,9 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
       .groups = "drop"
     ) %>%
     mutate(
+      # Create Google search URL for top 3 IDs
+      top3_ids_url = paste0("window.open('https://www.google.com/search?q=",
+                            sapply(top3_ids, utils::URLencode, reserved = TRUE), "')"),
       greenclass = ifelse(technology %in% unlist(colorings["green"]), "green",
                           ifelse( technology %in% unlist(colorings["battery"]), "battery", 
                                   ifelse( technology %in% unlist(colorings["hard_to_abate"]), "hard to abate",
@@ -187,13 +191,15 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
                      linewidth = 1, alpha = .5)
   }
 
-  # Add top 3 IDs labels inside bars if requested
+  # Add top 3 IDs labels inside bars if requested (interactive with Google search link)
   if (show_top3_ids) {
-    p <- p + geom_text(aes(x = as.numeric(factor(technology)),
-                           y = mean / 2,
-                           label = top3_ids),
-                       size = 2.5, color = "white", fontface = "bold",
-                       hjust = 0.5, vjust = 0.5)
+    p <- p + geom_text_interactive(aes(x = as.numeric(factor(technology)),
+                                        y = mean / 2,
+                                        label = top3_ids,
+                                        tooltip = paste0("Click to search: ", top3_ids),
+                                        onclick = top3_ids_url),
+                                    size = 2.5, color = "white", fontface = "bold",
+                                    hjust = 0.5, vjust = 0.5)
   }
 
   p <- p +
@@ -234,22 +240,18 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
   
   
   # Combine them
-  annotation_plot / p + plot_layout(heights = c(0.1, 1))+
-  
-  
-  
-  labs(caption = "© 2025 Innovation Strategy Explorer") +
+  combined_plot <- annotation_plot / p + plot_layout(heights = c(0.1, 1)) +
+    labs(caption = "© 2025 Innovation Strategy Explorer") +
     theme(
       plot.caption = element_text(hjust = 1, size = 10, color = "gray")
     )
-  
-  #library(cowplot)
-  
-  
-  
-  #ggdraw(p) +
-  #draw_text(paste0(as.character(innos)," Innovations"), x = 0.85, y = 0.95, size = 14)
-  
+
+  # Always return girafe object for Shiny girafeOutput compatibility
+  return(girafe(ggobj = combined_plot,
+                options = list(
+                  opts_hover(css = "cursor:pointer;fill:yellow;"),
+                  opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
+                )))
 }
 
 
@@ -322,11 +324,13 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
 
       across(c(q1,q2,q3,top25,top50),mean),
       .groups = "drop"
-    ) #%>%
-    #mutate(
-    #  greenclass = ifelse(technology %in% green_classes, "green", "other")
-    #)
-  
+    ) %>%
+    mutate(
+      # Create Google search URL for top 3 IDs
+      top3_ids_url = paste0("window.open('https://www.google.com/search?q=",
+                            sapply(top3_ids, utils::URLencode, reserved = TRUE), "')")
+    )
+
   return(avstrax)
 }
 
@@ -438,13 +442,15 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
                     color = "#3498db",linewidth = .5, alpha = .5)
   }
 
-  # Add top 3 IDs labels inside bars if requested
+  # Add top 3 IDs labels inside bars if requested (interactive with Google search link)
   if (show_top3_ids) {
-    p <- p + geom_text(aes(x = as.numeric(factor(country_name)),
-                           y = mean / 2,
-                           label = top3_ids),
-                       size = 2.5, color = "white", fontface = "bold",
-                       hjust = 0.5, vjust = 0.5)
+    p <- p + geom_text_interactive(aes(x = as.numeric(factor(country_name)),
+                                        y = mean / 2,
+                                        label = top3_ids,
+                                        tooltip = paste0("Click to search: ", top3_ids),
+                                        onclick = top3_ids_url),
+                                    size = 2.5, color = "white", fontface = "bold",
+                                    hjust = 0.5, vjust = 0.5)
   }
 
   p <- p +
@@ -473,21 +479,18 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   
   
   # Combine them
-  annotation_plot / p + plot_layout(heights = c(0.1, 1))+
-    
+  combined_plot <- annotation_plot / p + plot_layout(heights = c(0.1, 1)) +
     labs(caption = "© 2025 Innovation Strategy Explorer") +
     theme(
       plot.caption = element_text(hjust = 1, size = 10, color = "gray")
     )
-  
-  
-  #library(cowplot)
-  
-  
-  
-  #ggdraw(p) +
-  #draw_text(paste0(as.character(innos)," Innovations"), x = 0.85, y = 0.95, size = 14)
-  
+
+  # Always return girafe object for Shiny girafeOutput compatibility
+  return(girafe(ggobj = combined_plot,
+                options = list(
+                  opts_hover(css = "cursor:pointer;fill:yellow;"),
+                  opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
+                )))
 }
 
 
