@@ -451,6 +451,11 @@ ui <- function(request){fluidPage(
       label = "Display mode",
       choices = c("Confidence bands" = "confidence", "Returns for the top 25 and top 50 percent" = "quartiles"),
       selected = "quartiles"
+    ),
+    checkboxInput(
+      inputId = "show_top3_ids",
+      label = "Show top 3 patent family IDs",
+      value = FALSE
     )
   ),
 
@@ -539,7 +544,7 @@ server <- function(input, output) {
   
   
   output$avstrax_plot1 <- renderPlot({
-    req(input$country, input$toflow, input$tech_categories_plot1, input$bwidthscale, input$display_mode)
+    req(input$country, input$toflow, input$tech_categories_plot1, input$bwidthscale, input$display_mode, !is.null(input$show_top3_ids))
 
     selected_countries <- expand_country_selection(input$country)
     flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
@@ -585,7 +590,8 @@ server <- function(input, output) {
       custom_colors = custom_colors,
       colorings=colorings,
       bwidthscale=input$bwidthscale,
-      display_mode=input$display_mode
+      display_mode=input$display_mode,
+      show_top3_ids=input$show_top3_ids
       #battery_classes = battery_classes,
       #hard_to_abate_classes = hard_to_abate_classes
     ) + ggtitle("")
@@ -640,7 +646,8 @@ server <- function(input, output) {
       topn=input$topn,
       mininno=input$mininno,
       bwidthscale=input$bwidthscale,
-      display_mode=input$display_mode
+      display_mode=input$display_mode,
+      show_top3_ids=input$show_top3_ids
     ) + ggtitle("")
     
     p

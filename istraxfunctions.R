@@ -60,19 +60,21 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
     innos = n(),
     sem = sd(istrax*scaler, na.rm = TRUE) / sqrt(n()),
     # Quartile bin means: mean of observations within each quartile bin
-    
+
     q1_bin_mean = mean(scaler*istrax[scaler*istrax <= q1], na.rm = TRUE),
     q2_bin_mean = mean(scaler*istrax[scaler*istrax <= q2 & scaler*istrax>=q1], na.rm = TRUE),
     q3_bin_mean = mean(scaler*istrax[scaler*istrax <= q3 & scaler*istrax>=q2], na.rm = TRUE),
     q4_bin_mean = mean(scaler*istrax[scaler*istrax > q3], na.rm = TRUE),
-    
+
     q0M_bin_mean= mean(scaler*istrax[(scaler*istrax) <= q2], na.rm = TRUE),
     q1M_bin_mean= mean(scaler*istrax[(scaler*istrax) > q2], na.rm = TRUE),
-    
+
     top25_bin_mean= mean(scaler*istrax[top25==T], na.rm = TRUE),
     top50_bin_mean= mean(scaler*istrax[top50==T], na.rm = TRUE),
-    
-    
+
+    # Top 3 docdb_family_id values (highest istrax) as comma-separated string
+    top3_ids = paste(head(docdb_family_id[order(-istrax*scaler)], 3), collapse = ", "),
+
     across(c(q1,q2,q3,top25,top50),mean),
       .groups = "drop"
     ) %>%
@@ -99,7 +101,8 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
                                     custom_colors,
                                     colorings=NULL,
                                     bwidthscale="log",
-                                    display_mode="confidence"
+                                    display_mode="confidence",
+                                    show_top3_ids=FALSE
                                     #battery_classes = NULL,
                                     #hard_to_abate_classes=NULL
                                     ) {
@@ -182,9 +185,15 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
       
             geom_errorbar(aes(color=greenclass,x = as.numeric(factor(technology)),ymin = top50_bin_mean, ymax = top25_bin_mean,width=width*1.05),
                      linewidth = 1, alpha = .5)
-    
-    
-    
+  }
+
+  # Add top 3 IDs labels inside bars if requested
+  if (show_top3_ids) {
+    p <- p + geom_text(aes(x = as.numeric(factor(technology)),
+                           y = mean / 2,
+                           label = top3_ids),
+                       size = 2.5, color = "white", fontface = "bold",
+                       hjust = 0.5, vjust = 0.5)
   }
 
   p <- p +
@@ -297,16 +306,20 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
       innos = n(),
       sem = sd(istrax*scaler, na.rm = TRUE) / sqrt(n()),
       # Quartile bin means: mean of observations within each quartile bin
-      
+
       q1_bin_mean = mean(scaler*istrax[scaler*istrax <= q1], na.rm = TRUE),
       q2_bin_mean = mean(scaler*istrax[scaler*istrax <= q2 & scaler*istrax>=q1], na.rm = TRUE),
       q3_bin_mean = mean(scaler*istrax[scaler*istrax <= q3 & scaler*istrax>=q2], na.rm = TRUE),
       q4_bin_mean = mean(scaler*istrax[scaler*istrax >= q3], na.rm = TRUE),
-      
+
       q0M_bin_mean= mean(scaler*istrax[scaler*istrax <= q2], na.rm = TRUE),
       q1M_bin_mean= mean(scaler*istrax[scaler*istrax >= q2], na.rm = TRUE),
       top25_bin_mean= mean(scaler*istrax[top25==T], na.rm = TRUE),
       top50_bin_mean= mean(scaler*istrax[top50==T], na.rm = TRUE),
+
+      # Top 3 docdb_family_id values (highest istrax) as comma-separated string
+      top3_ids = paste(head(docdb_family_id[order(-istrax*scaler)], 3), collapse = ", "),
+
       across(c(q1,q2,q3,top25,top50),mean),
       .groups = "drop"
     ) #%>%
@@ -322,7 +335,8 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
 
 plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
                                        technologies, toflow, custom_colors,topn=20,mininno=5,bwidthscale="log",
-                                       display_mode="confidence") {
+                                       display_mode="confidence",
+                                       show_top3_ids=FALSE) {
   #mininno=30;topn=20;  pdata=patchar_countrymap;toflow="istrax_global"; classes=techmap; green_classes=green_classes; technologies="Green Energy"
 
   library(dplyr)
@@ -422,7 +436,15 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
       
       geom_errorbar(aes(x = as.numeric(factor(country_name)),ymin = top50_bin_mean, ymax = top25_bin_mean,width=width),
                     color = "#3498db",linewidth = .5, alpha = .5)
-    
+  }
+
+  # Add top 3 IDs labels inside bars if requested
+  if (show_top3_ids) {
+    p <- p + geom_text(aes(x = as.numeric(factor(country_name)),
+                           y = mean / 2,
+                           label = top3_ids),
+                       size = 2.5, color = "white", fontface = "bold",
+                       hjust = 0.5, vjust = 0.5)
   }
 
   p <- p +
