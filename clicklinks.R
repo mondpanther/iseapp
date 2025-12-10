@@ -15,4 +15,5 @@ p <- ggplot(df, aes(x = category, y = value)) +
   ) +
   theme_minimal()
 
+p
 girafe(ggobj = p)
