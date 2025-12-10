@@ -608,7 +608,8 @@ server <- function(input, output) {
         input$topn,
         input$mininno,
         input$bwidthscale,
-        input$display_mode)
+        input$display_mode,
+        !is.null(input$show_top3_ids))
     
     selected_countries <- expand_country_selection(input$country)
     flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
