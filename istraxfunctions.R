@@ -156,7 +156,7 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
       xmax = as.numeric(factor(technology)) + width / 2,
       ymin = 0,
       ymax = mean
-    )
+    ) 
   
   # Create the plot
   
@@ -165,7 +165,8 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
 
   # Add either confidence bands or quartile means based on display_mode
   if (display_mode == "confidence") {
-    p <- p + geom_errorbar(aes(x = as.numeric(factor(technology)), ymin = max( mean - 1.96 * sem,0), ymax = mean + 1.96 * sem),
+    p <- p + geom_errorbar(aes(x = as.numeric(factor(technology)), ymin = ifelse(mean- 1.96 * sem>0,mean- 1.96 * sem,0) ,
+                                                                   ymax = mean + 1.96 * sem),
                            width = 0.2, color = "black", linewidth = .4, alpha = .4)
   } else if (display_mode == "quartiles") {
     p <- p + # geom_errorbar(aes(x = as.numeric(factor(technology)),ymin = q1_bin_mean, ymax = q2_bin_mean, width = width),
@@ -394,7 +395,8 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
 
   # Add either confidence bands or quartile means based on display_mode
   if (display_mode == "confidence") {
-    p <- p + geom_errorbar(aes(ymin = max(mean - 1.96 * sem,0), ymax = mean + 1.96 * sem),
+    p <- p + geom_errorbar(aes(ymin = ifelse(mean- 1.96 * sem>0,mean- 1.96 * sem,0) ,
+                               ymax = mean + 1.96 * sem),
                            width = 0.2, color = "black", linewidth = .4, alpha = .4)
   } else if (display_mode == "quartiles") {
 #    p <- p + 
