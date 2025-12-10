@@ -152,25 +152,28 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
       linnos2 = log(1+innos),
       bwidthscale = bwidthscale,
     ) %>% 
-    filter(innos>1) %>% 
+    filter(innos>1) %>%
     mutate(
       linnos=ifelse(bwidthscale=="log",linnos2,linnos1),
 
       width = linnos / max(linnos),
       #width =ifelse( innos / max(innos)>win_thres,innos / max(innos),win_thres),
-      
-      xmin = as.numeric(factor(technology)) - width / 2,
-      xmax = as.numeric(factor(technology)) + width / 2,
+
+      # Store x position consistently for bars and error bars
+      x_pos = as.numeric(factor(technology)),
+      xmin = x_pos - width / 2,
+      xmax = x_pos + width / 2,
       ymin = 0,
       ymax = mean
-    ) 
-  
+    )
+
   # Create the plot
 
   # Use interactive bars if show_top3_ids is enabled
   if (show_top3_ids) {
     p <- ggplot(avstrax) +
       geom_rect_interactive(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = greenclass,
+                                 data_id = technology,
                                  tooltip = paste0("Top 3 IDs: ", top3_ids),
                                  onclick = top3_ids_url))
   } else {
@@ -180,27 +183,27 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
 
   # Add either confidence bands or quartile means based on display_mode
   if (display_mode == "confidence") {
-    p <- p + geom_errorbar(aes(x = as.numeric(factor(technology)), ymin = ifelse(mean- 1.96 * sem>0,mean- 1.96 * sem,0) ,
+    p <- p + geom_errorbar(aes(x = x_pos, ymin = ifelse(mean- 1.96 * sem>0,mean- 1.96 * sem,0) ,
                                                                    ymax = mean + 1.96 * sem),
                            width = 0.2, color = "black", linewidth = .4, alpha = .4)
   } else if (display_mode == "quartiles") {
-    p <- p + # geom_errorbar(aes(x = as.numeric(factor(technology)),ymin = q1_bin_mean, ymax = q2_bin_mean, width = width),
+    p <- p + # geom_errorbar(aes(x = x_pos,ymin = q1_bin_mean, ymax = q2_bin_mean, width = width),
       #color = "brown",
       #                      linewidth = .7, alpha = .5)+
-            #geom_errorbar(aes(x = as.numeric(factor(technology)),ymin = q1, ymax = q2,width = width),
+            #geom_errorbar(aes(x = x_pos,ymin = q1, ymax = q2,width = width),
         #              color = "#3498db",
        #               linewidth = .7, alpha = .5)+
-      
-            #geom_errorbar(aes(x = as.numeric(factor(technology)),ymin = q2, ymax = q3,width = width),
+
+            #geom_errorbar(aes(x = x_pos,ymin = q2, ymax = q3,width = width),
          #           color = "#3498db",
           #          linewidth = .7, alpha = .5)+
-      
-            geom_errorbar(aes(color=greenclass,x = as.numeric(factor(technology)),ymin = top50_bin_mean, ymax = top25_bin_mean,width=width*1.05),
+
+            geom_errorbar(aes(color=greenclass,x = x_pos,ymin = top50_bin_mean, ymax = top25_bin_mean,width=width*1.05),
                      linewidth = 1, alpha = .5)
   }
 
   p <- p +
-    scale_x_continuous(breaks = as.numeric(factor(avstrax$technology)), labels = avstrax$technology) +
+    scale_x_continuous(breaks = avstrax$x_pos, labels = avstrax$technology) +
     scale_color_manual(values = custom_colors) +
     scale_fill_manual(values = custom_colors) +
     labs(
@@ -379,28 +382,29 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   avstrax$ctry_code    <- factor(avstrax$ctry_code, levels = avstrax$ctry_code[order(avstrax$mean)])
   avstrax$country_name <- factor(avstrax$country_name, levels = avstrax$country_name[order(avstrax$mean)])
   
-  avstrax <- avstrax %>%  
-    filter( ctry_code!="All",innos>=mininno) %>% 
-    
-    arrange(-mean) %>% 
+  avstrax <- avstrax %>%
+    filter( ctry_code!="All",innos>=mininno) %>%
+
+    arrange(-mean) %>%
     head(topn)%>%
     mutate(
       #linnos = log(innos),
       linnos1 = innos,
       linnos2 = log(1+innos),
       bwidthscale=bwidthscale,
-      linnos=ifelse(bwidthscale=="log",linnos2,linnos1),      
+      linnos=ifelse(bwidthscale=="log",linnos2,linnos1),
       width = linnos / max(linnos),
-      
+
       #width =ifelse( innos / max(innos)>win_thres,innos / max(innos),win_thres),
-      
-      
-      xmin = as.numeric(factor(country_name)) - width / 2,
-      xmax = as.numeric(factor(country_name)) + width / 2,
+
+      # Store x position consistently for bars and error bars
+      x_pos = as.numeric(factor(country_name)),
+      xmin = x_pos - width / 2,
+      xmax = x_pos + width / 2,
       ymin = 0,
       ymax = mean
-    ) 
-  
+    )
+
 
   # Create the plot
   ylab=ifelse(grepl("strax", toflow ),"Return in %","Millions of $")
@@ -409,6 +413,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   if (show_top3_ids) {
     p <- ggplot(avstrax, aes(x = country_name)) +
       geom_rect_interactive(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
+                                 data_id = country_name,
                                  tooltip = paste0("Top 3 IDs: ", top3_ids),
                                  onclick = top3_ids_url))
   } else {
@@ -418,36 +423,37 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
 
   # Add either confidence bands or quartile means based on display_mode
   if (display_mode == "confidence") {
-    p <- p + geom_errorbar(aes(ymin = ifelse(mean- 1.96 * sem>0,mean- 1.96 * sem,0) ,
+    p <- p + geom_errorbar(aes(x = x_pos, ymin = ifelse(mean- 1.96 * sem>0,mean- 1.96 * sem,0) ,
                                ymax = mean + 1.96 * sem),
                            width = 0.2, color = "black", linewidth = .4, alpha = .4)
   } else if (display_mode == "quartiles") {
-#    p <- p + 
-#         geom_errorbar(aes(ymin = q1_bin_mean, 
+#    p <- p +
+#         geom_errorbar(aes(ymin = q1_bin_mean,
 #                           ymax = q2,width=width),
 #                           width = 0.2, color = "brown",
 #                           linewidth = .4, alpha = .5)+
 #        geom_errorbar(aes(ymin = q2, ymax = q4_bin_mean,width=width),
-#                      color = "brown", 
+#                      color = "brown",
 #                      linewidth = .4, alpha = .5)
-    
-    
-    p <- p + #geom_errorbar(aes(x = as.numeric(factor(country_name)),ymin = q1_bin_mean, ymax = q2_bin_mean, width = width),
+
+
+    p <- p + #geom_errorbar(aes(x = x_pos,ymin = q1_bin_mean, ymax = q2_bin_mean, width = width),
              #               color = "brown",
              #               linewidth = .5, alpha = .5)+
-      #geom_errorbar(aes(x = as.numeric(factor(country_name)),ymin = q2_bin_mean, ymax = q2,width = width),
+      #geom_errorbar(aes(x = x_pos,ymin = q2_bin_mean, ymax = q2,width = width),
       #              color = "#3498db",
       #              linewidth = .5, alpha = .5)+
-      
-      #geom_errorbar(aes(x = as.numeric(factor(country_name)),ymin = q2, ymax = q3_bin_mean,width = width),
+
+      #geom_errorbar(aes(x = x_pos,ymin = q2, ymax = q3_bin_mean,width = width),
       #              color = "#3498db",
       #              linewidth = .5, alpha = .5)+
-      
-      geom_errorbar(aes(x = as.numeric(factor(country_name)),ymin = top50_bin_mean, ymax = top25_bin_mean,width=width),
+
+      geom_errorbar(aes(x = x_pos, ymin = top50_bin_mean, ymax = top25_bin_mean,width=width),
                     color = "#3498db",linewidth = .5, alpha = .5)
   }
 
   p <- p +
+    scale_x_continuous(breaks = avstrax$x_pos, labels = avstrax$country_name) +
     labs(
       title = "Spillover returns",
       x = "Country",
