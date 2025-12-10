@@ -166,9 +166,17 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
     ) 
   
   # Create the plot
-  
-  p=ggplot(avstrax) +
-    geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = greenclass))
+
+  # Use interactive bars if show_top3_ids is enabled
+  if (show_top3_ids) {
+    p <- ggplot(avstrax) +
+      geom_rect_interactive(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = greenclass,
+                                 tooltip = paste0("Top 3 IDs: ", top3_ids),
+                                 onclick = top3_ids_url))
+  } else {
+    p <- ggplot(avstrax) +
+      geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = greenclass))
+  }
 
   # Add either confidence bands or quartile means based on display_mode
   if (display_mode == "confidence") {
@@ -189,17 +197,6 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
       
             geom_errorbar(aes(color=greenclass,x = as.numeric(factor(technology)),ymin = top50_bin_mean, ymax = top25_bin_mean,width=width*1.05),
                      linewidth = 1, alpha = .5)
-  }
-
-  # Add top 3 IDs labels inside bars if requested (interactive with Google search link)
-  if (show_top3_ids) {
-    p <- p + geom_text_interactive(aes(x = as.numeric(factor(technology)),
-                                        y = mean / 2,
-                                        label = top3_ids,
-                                        tooltip = paste0("Click to search: ", top3_ids),
-                                        onclick = top3_ids_url),
-                                    size = 2.5, color = "white", fontface = "bold",
-                                    hjust = 0.5, vjust = 0.5)
   }
 
   p <- p +
@@ -408,8 +405,16 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   # Create the plot
   ylab=ifelse(grepl("strax", toflow ),"Return in %","Millions of $")
 
-  p <- ggplot(avstrax, aes(x = country_name)) +
-    geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax))
+  # Use interactive bars if show_top3_ids is enabled
+  if (show_top3_ids) {
+    p <- ggplot(avstrax, aes(x = country_name)) +
+      geom_rect_interactive(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
+                                 tooltip = paste0("Top 3 IDs: ", top3_ids),
+                                 onclick = top3_ids_url))
+  } else {
+    p <- ggplot(avstrax, aes(x = country_name)) +
+      geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax))
+  }
 
   # Add either confidence bands or quartile means based on display_mode
   if (display_mode == "confidence") {
@@ -440,17 +445,6 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
       
       geom_errorbar(aes(x = as.numeric(factor(country_name)),ymin = top50_bin_mean, ymax = top25_bin_mean,width=width),
                     color = "#3498db",linewidth = .5, alpha = .5)
-  }
-
-  # Add top 3 IDs labels inside bars if requested (interactive with Google search link)
-  if (show_top3_ids) {
-    p <- p + geom_text_interactive(aes(x = as.numeric(factor(country_name)),
-                                        y = mean / 2,
-                                        label = top3_ids,
-                                        tooltip = paste0("Click to search: ", top3_ids),
-                                        onclick = top3_ids_url),
-                                    size = 2.5, color = "white", fontface = "bold",
-                                    hjust = 0.5, vjust = 0.5)
   }
 
   p <- p +
