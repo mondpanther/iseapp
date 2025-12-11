@@ -74,7 +74,7 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
     top50_bin_mean= mean(scaler*istrax[top50==T], na.rm = TRUE),
 
     # Top 3 docdb_family_id values (highest istrax) as comma-separated string
-    top3_ids = paste(head(docdb_family_id[order(-istrax*scaler)], 3), collapse = ", "),
+    top3_ids = paste(head(docdb_family_id[order(-istrax*scaler)], 5), collapse = ", "),
 
     across(c(q1,q2,q3,top25,top50),mean),
       .groups = "drop"
@@ -335,7 +335,7 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
       top50_bin_mean= mean(scaler*istrax[top50==T], na.rm = TRUE),
 
       # Top 3 docdb_family_id values (highest istrax) as comma-separated string
-      top3_ids = paste(head(docdb_family_id[order(-istrax*scaler)], 3), collapse = ", "),
+      top3_ids = paste(head(docdb_family_id[order(-istrax*scaler)], 5), collapse = ", "),
 
       across(c(q1,q2,q3,top25,top50),mean),
       .groups = "drop"

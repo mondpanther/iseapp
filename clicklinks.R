@@ -17,3 +17,15 @@ p <- ggplot(df, aes(x = category, y = value)) +
 
 p
 girafe(ggobj = p)
+
+
+
+
+
+espacenet_family_search <- function(docdb_family_id) {
+  query <- paste0("site:worldwide.espacenet.com ", docdb_family_id)
+  paste0("https://www.google.com/search?q=", URLencode(query, reserved = TRUE))
+}
+
+# Example usage
+espacenet_family_search("12345678")
