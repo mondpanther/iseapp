@@ -108,7 +108,8 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
                                     display_mode="confidence",
                                     show_top3_ids=FALSE,
                                     width_svg=10,
-                                    height_svg=6
+                                    height_svg=6,
+                                    plot_title="Spillover returns"
                                     #battery_classes = NULL,
                                     #hard_to_abate_classes=NULL
                                     ) {
@@ -212,7 +213,7 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
     scale_color_manual(values = custom_colors) +
     scale_fill_manual(values = custom_colors) +
     labs(
-      title = "Spillover returns",
+      title = plot_title,
       x = "Technology",
       y = ylab,
       fill = "Technology"
@@ -350,7 +351,8 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
                                        display_mode="confidence",
                                        show_top3_ids=FALSE,
                                        width_svg=10,
-                                       height_svg=6) {
+                                       height_svg=6,
+                                       plot_title="Spillover returns") {
   #mininno=30;topn=20;  pdata=patchar_countrymap;toflow="istrax_global"; classes=techmap; green_classes=green_classes; technologies="Green Energy"
 
   library(dplyr)
@@ -486,7 +488,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   p <- p +
     scale_x_continuous(breaks = avstrax$x_pos, labels = avstrax$country_name) +
     labs(
-      title = "Spillover returns",
+      title = plot_title,
       x = "Country",
       y = ylab,
       fill = "Country"

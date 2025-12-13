@@ -555,7 +555,8 @@ server <- function(input, output, session) {
   output$avstrax_plot1 <- renderGirafe({
     req(input$country, input$toflow, input$tech_categories_plot1, input$bwidthscale, input$display_mode, !is.null(input$show_top3_ids))
     selected_countries <- expand_country_selection(input$country)
-    flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
+    # Get the label from the nested toflow_choices list
+    flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
 
     validate(
       need(exists("plot_avstrax_by_country"), "Function 'plot_avstrax_by_country' not found in the environment."),
@@ -609,7 +610,8 @@ server <- function(input, output, session) {
       display_mode=input$display_mode,
       show_top3_ids=input$show_top3_ids,
       width_svg = width_inches,
-      height_svg = height_inches
+      height_svg = height_inches,
+      plot_title = flow_label
       #battery_classes = battery_classes,
       #hard_to_abate_classes = hard_to_abate_classes
     )
@@ -629,8 +631,9 @@ server <- function(input, output, session) {
         !is.null(input$show_top3_ids))
     
     selected_countries <- expand_country_selection(input$country)
-    flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
-    
+    # Get the label from the nested toflow_choices list
+    flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
+
     validate(
       need(exists("plot_avstrax_by_country"), "Function 'plot_avstrax_by_country' not found in the environment."),
       need(exists("patchar_countrymap"), "Object 'patchar_countrymap' not found."),
@@ -676,7 +679,8 @@ server <- function(input, output, session) {
       display_mode=input$display_mode,
       show_top3_ids=input$show_top3_ids,
       width_svg = width_inches,
-      height_svg = height_inches
+      height_svg = height_inches,
+      plot_title = flow_label
     )
 
     p
