@@ -60,6 +60,7 @@ if(any(c("appln_id","appln_filing_year")) %in% names(countrymap)){
   
 }
 countrymap=countrymap %>% left_join(first_appli)
-  
+
+dropbox_write_fst(countrymap, "countrymap.fst",compress=100)  
 
 ```
