@@ -287,22 +287,7 @@ expand_country_selection <- function(selected) {
 
 # Define UI
 ui <- function(request){fluidPage(
-  
-  tags$head(tags$script(HTML('
-    $(document).on("shiny:connected", function() {
-      function sendPlotDimensions() {
-        var plotDiv = document.getElementById("plot");
-        if (plotDiv) {
-          Shiny.setInputValue("container_width", plotDiv.offsetWidth);
-          Shiny.setInputValue("container_height", plotDiv.offsetHeight);
-        }
-      }
-      setTimeout(sendPlotDimensions, 100);
-      $(window).resize(sendPlotDimensions);
-    });
-   '))),
-  
-  
+
   # Add custom CSS
   tags$head(
     tags$style(HTML("
@@ -476,7 +461,7 @@ ui <- function(request){fluidPage(
   # Wrap the first plot in a collapsible container
   tags$div(
     id = "plot1Container",
-    withSpinner(girafeOutput("avstrax_plot1", width = "100%", height = "80vh"), type = 4, color = "#3498db")
+    withSpinner(girafeOutput("avstrax_plot1", width = "100%", height = "600px"), type = 4, color = "#3498db")
   ),
   
   inputPanel(
@@ -508,7 +493,7 @@ ui <- function(request){fluidPage(
 
   ),
 
-  withSpinner(girafeOutput("avstrax_plot2", width = "100%", height = "100%"), type = 4, color = "#3498db")
+  withSpinner(girafeOutput("avstrax_plot2", width = "100%", height = "600px"), type = 4, color = "#3498db")
   
 )
 }
@@ -552,8 +537,7 @@ server <- function(input, output) {
   
   
   output$avstrax_plot1 <- renderGirafe({
-    req(input$country, input$toflow, input$tech_categories_plot1, input$bwidthscale, input$display_mode, !is.null(input$show_top3_ids),input$container_width, input$container_height)
-    aspect <- input$container_width / input$container_height
+    req(input$country, input$toflow, input$tech_categories_plot1, input$bwidthscale, input$display_mode, !is.null(input$show_top3_ids))
     selected_countries <- expand_country_selection(input$country)
     flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
 
@@ -563,8 +547,7 @@ server <- function(input, output) {
       need(exists("techmap"), "Object 'techmap' not found."),
       need(exists("green_classes"),   "Object 'green_classes' not found."),
       need(exists("battery_classes"), "Object 'battery_classes' not found."),
-      need(exists("custom_colors"),   "Object 'custom_colors' not found."),
-      need(exists("container_width"),   "Object 'container_width' not found.")
+      need(exists("custom_colors"),   "Object 'custom_colors' not found.")
     )
 
     # Filter techmap based on selected technology categories
@@ -605,19 +588,7 @@ server <- function(input, output) {
       #hard_to_abate_classes = hard_to_abate_classes
     )
 
-    #p
-    #aspect=1
-    pp=girafe(ggobj = p,
-           #width_svg = aspect * 5,
-           #height_svg = 5,
-           options = list(
-             opts_sizing(rescale = TRUE),
-             opts_hover(css   = "cursor:pointer;fill:yellow;"),
-             opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
-           ))
-    pp
-    
-    
+    p
   })
 
 
