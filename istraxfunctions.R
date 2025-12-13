@@ -473,39 +473,16 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
     coord_flip()
   
   
-  #innos=3
-  annotation_plot <- ggplot() +
-    theme_void() +
-    annotate("text", x = 0.5, y = 0.5, label = paste0(as.character(innos)," Innovations"), size=5 ) +
-    theme(plot.margin = margin(0, 0, -10, 0))
-
-
-  # When using interactive mode, skip patchwork (ggiraph doesn't work well with patchwork)
-  # Just return the main plot with annotation as subtitle
-  if (show_top3_ids) {
-    p <- p + labs(subtitle = paste0(as.character(innos), " Innovations"),
-                  caption = "© 2025 Innovation Strategy Explorer") +
-      theme(plot.subtitle = element_text(size = 14, hjust = 0.5),
-            plot.caption = element_text(hjust = 1, size = 10, color = "gray"))
-
-    return(girafe(ggobj = p,
-                  options = list(
-                    opts_hover(css = "cursor:pointer;fill:yellow;"),
-                    opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
-                  )))
-  }
-
-  # Combine them with patchwork for non-interactive mode
-  combined_plot <- annotation_plot / p + plot_layout(heights = c(0.1, 1)) +
-    labs(caption = "© 2025 Innovation Strategy Explorer") +
-    theme(
-      plot.caption = element_text(hjust = 1, size = 10, color = "gray")
-    )
+  # Add subtitle and caption
+  p <- p + labs(subtitle = paste0(as.character(innos), " Innovations"),
+                caption = "© 2025 Innovation Strategy Explorer") +
+    theme(plot.subtitle = element_text(size = 14, hjust = 0.5),
+          plot.caption = element_text(hjust = 1, size = 10, color = "gray"))
 
   # Return girafe object for Shiny girafeOutput compatibility
-  return(girafe(ggobj = combined_plot,
+  return(girafe(ggobj = p,
                 options = list(
-                  opts_hover(css = "cursor:pointer;"),
+                  opts_hover(css = "cursor:pointer;fill:yellow;"),
                   opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
                 )))
 }
