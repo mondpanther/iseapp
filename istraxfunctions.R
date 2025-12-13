@@ -74,7 +74,7 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
     top50_bin_mean= mean(scaler*istrax[top50==T], na.rm = TRUE),
 
     # Top 3 docdb_family_id values (highest istrax) as comma-separated string
-    top3_ids = paste(head(docdb_family_id[order(-istrax*scaler)], 5), collapse = ", "),
+    top3_ids = paste(head(docdb_family_id[order(-istrax*scaler)], 10), collapse = ", "),
 
     across(c(q1,q2,q3,top25,top50),mean),
       .groups = "drop"
@@ -114,7 +114,10 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
   library(ggplot2)
 
   library(patchwork)
-  #classes=techmap %>% filter(technology=="All"); toflow="istrax_global"; pdata=patchar_countrymap; country_code="VN"
+  #path <- paste0("/istraxes/istrax_global.fst"); ddd=dropbox_read_fst(path);
+  #patchar_countrymap <- countrymap %>% left_join(ddd)
+  #classes=techmap %>% filter(technology=="Green Technology"); toflow="istrax_global"; pdata=patchar_countrymap; country_code="VN";bwidthscale=100;show_top3_ids=TRUE
+  #display_mode="confidence"
   classlist=(classes %>% distinct(technology))$technology
 
   #toflow="istrax_global"; pdata=countrymap
@@ -241,32 +244,28 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
 
   # When using interactive mode, skip patchwork (ggiraph doesn't work well with patchwork)
   # Just return the main plot with annotation as subtitle
-  if (show_top3_ids) {
+  #if (show_top3_ids) {
     p <- p + labs(subtitle = paste0(as.character(innos), " Innovations"),
                   caption = "© 2025 Innovation Strategy Explorer") +
       theme(plot.subtitle = element_text(size = 14, hjust = 0.5),
             plot.caption = element_text(hjust = 1, size = 10, color = "gray"))
 
-    return(girafe(ggobj = p,
-                  options = list(
-                    opts_hover(css = "cursor:pointer;fill:yellow;"),
-                    opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
-                  )))
-  }
+  #  return(p)
+  #}
 
   # Combine them with patchwork for non-interactive mode
-  combined_plot <- annotation_plot / p + plot_layout(heights = c(0.1, 1)) +
-    labs(caption = "© 2025 Innovation Strategy Explorer") +
-    theme(
-      plot.caption = element_text(hjust = 1, size = 10, color = "gray")
-    )
+  #combined_plot <- annotation_plot / p + plot_layout(heights = c(0.1, 1)) +
+  #  labs(caption = "© 2025 Innovation Strategy Explorer") +
+  #  theme(
+  #    plot.caption = element_text(hjust = 1, size = 10, color = "gray")
+  #  )
 
-  # Return girafe object for Shiny girafeOutput compatibility
-  return(girafe(ggobj = combined_plot,
-                options = list(
-                  opts_hover(css = "cursor:pointer;"),
-                  opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
-                )))
+  #Return girafe object for Shiny girafeOutput compatibility
+  #return(girafe(ggobj = combined_plot,
+  #              options = list(
+  #                opts_hover(css = "cursor:pointer;"),
+  #                opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
+  #              )))
 }
 
 
@@ -335,7 +334,7 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
       top50_bin_mean= mean(scaler*istrax[top50==T], na.rm = TRUE),
 
       # Top 3 docdb_family_id values (highest istrax) as comma-separated string
-      top3_ids = paste(head(docdb_family_id[order(-istrax*scaler)], 5), collapse = ", "),
+      top3_ids = paste(head(docdb_family_id[order(-istrax*scaler)],10), collapse = ", "),
 
       across(c(q1,q2,q3,top25,top50),mean),
       .groups = "drop"
