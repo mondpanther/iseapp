@@ -36,7 +36,7 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
   scaler=ifelse(grepl("strax", istrax_var ),100,1)
   
   avstrax <- data %>%
-    select(docdb_family_id, !!istrax_sym) %>%
+    select(docdb_family_id, appln_id, !!istrax_sym) %>%
     rename(istrax = !!istrax_sym) %>%
     distinct() %>%
     inner_join(classes, by = "docdb_family_id") %>%
@@ -48,14 +48,14 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
         mutate(technology = "All")
     ) %>%
     distinct() %>%
-    group_by(technology) %>% arrange(technology,-istrax*scaler) %>% 
-    mutate(ppp=(1:n())/n()) %>% 
+    group_by(technology) %>% arrange(technology,-istrax*scaler) %>%
+    mutate(ppp=(1:n())/n()) %>%
     mutate(top25=ppp<0.25,
            top50=ppp<0.5,
            q1=quantile(istrax*scaler, 0.25, na.rm = TRUE),
            q2=quantile(istrax*scaler, 0.5, na.rm = TRUE),
            q3=quantile(istrax*scaler, 0.75, na.rm = TRUE)
-  ) %>% 
+  ) %>%
   summarise(
     mean = mean(istrax*scaler, na.rm = TRUE),
     innos = n(),
@@ -73,8 +73,8 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
     top25_bin_mean= mean(scaler*istrax[top25==T], na.rm = TRUE),
     top50_bin_mean= mean(scaler*istrax[top50==T], na.rm = TRUE),
 
-    # Top 3 docdb_family_id values (highest istrax) as comma-separated string
-    top3_ids = paste(head(docdb_family_id[order(-istrax*scaler)], 10), collapse = ", "),
+    # Top appln_id values (highest istrax) as comma-separated string
+    top3_ids = paste(head(appln_id[order(-istrax*scaler)], 10), collapse = ", "),
 
     across(c(q1,q2,q3,top25,top50),mean),
       .groups = "drop"
@@ -288,30 +288,30 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
   }
   
   #scaler=ifelse()
-  avstrax <- filtereddata %>% 
-    select(docdb_family_id, !!istrax_sym, ctry_code) %>%
+  avstrax <- filtereddata %>%
+    select(docdb_family_id, appln_id, !!istrax_sym, ctry_code) %>%
     rename(istrax = !!istrax_sym) %>%
     distinct() %>%
 
     bind_rows(
       #atest=
-      filtereddata %>% 
-        select(docdb_family_id, !!istrax_sym,) %>%
+      filtereddata %>%
+        select(docdb_family_id, appln_id, !!istrax_sym) %>%
         rename(istrax = !!istrax_sym) %>%
         distinct() %>%
         mutate(ctry_code = "All")
     ) %>%
-    
+
     distinct() %>%
     group_by(ctry_code) %>%
-    arrange(ctry_code,-istrax*scaler) %>% 
-    mutate(ppp=(1:n())/n()) %>% 
+    arrange(ctry_code,-istrax*scaler) %>%
+    mutate(ppp=(1:n())/n()) %>%
     mutate(q1=quantile(istrax*scaler, 0.25, na.rm = TRUE),
            q2=quantile(istrax*scaler, 0.5, na.rm = TRUE),
            q3=quantile(istrax*scaler, 0.75, na.rm = TRUE),
            top25=ppp<0.25,
            top50=ppp<0.5
-    ) %>% 
+    ) %>%
     summarise(
       mean = mean(istrax*scaler, na.rm = TRUE),
       innos = n(),
@@ -328,8 +328,8 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
       top25_bin_mean= mean(scaler*istrax[top25==T], na.rm = TRUE),
       top50_bin_mean= mean(scaler*istrax[top50==T], na.rm = TRUE),
 
-      # Top 3 docdb_family_id values (highest istrax) as comma-separated string
-      top3_ids = paste(head(docdb_family_id[order(-istrax*scaler)],10), collapse = ", "),
+      # Top appln_id values (highest istrax) as comma-separated string
+      top3_ids = paste(head(appln_id[order(-istrax*scaler)],10), collapse = ", "),
 
       across(c(q1,q2,q3,top25,top50),mean),
       .groups = "drop"
