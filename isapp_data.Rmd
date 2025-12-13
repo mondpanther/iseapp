@@ -1,0 +1,65 @@
+---
+title: "iseapp data maker"
+output: html_notebook
+---
+
+
+
+
+still incomplete
+
+
+```{r}
+
+library(shiny)
+library(bslib)
+library(thematic)
+library(tidyverse)
+library(gitlink)
+library(ggplot2)
+library(countrycode)
+library(plotly)
+library(arrow)
+library(dplyr)
+library(data.table)
+library(fst)
+library(shinycssloaders)
+library(httr2)
+library(ggiraph)
+source("dropbox_auth.R")
+
+localpath_fname=function(fname){
+  iseapplocal=Sys.getenv("ISEAPP_PATH_LOCAL")
+  paste0(iseapplocal,"/",fname)
+}
+
+
+
+```
+
+
+
+
+
+# Adding application id to countrymap...
+
+
+```{r}
+
+pp=localpath_fname("/countrymap.fst")
+if(file.exists(pp)){ 
+  countrymap <- read_fst(pp)
+} else {
+  countrymap <- dropbox_read_fst("/countrymap.fst")}
+
+
+first_appli=read_fst(paste0(ISEAPP_PATH_LOCAL,"first_appli.fst"))
+
+if(any(c("appln_id","appln_filing_year")) %in% names(countrymap)){
+  countrymap=countrymap %>% select(-appln_id,-appln_filing_year)
+  
+}
+countrymap=countrymap %>% left_join(first_appli)
+  
+
+```
