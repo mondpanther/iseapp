@@ -452,7 +452,7 @@ ui <- function(request){fluidPage(
       options = list(placeholder = 'Choose one or more technology categories...')
     ),
     radioButtons(
-      inputId = "bwidthscale:",
+      inputId = "bwidthscale",
       label = "Bar width scale",
       choices = c("log", "proportional"),
       selected = "log"
