@@ -402,6 +402,10 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
     return(girafe(ggobj = p))
   }
 
+  # Recreate country_name as factor with correct levels after filtering
+  avstrax$country_name <- factor(as.character(avstrax$country_name),
+                                  levels = as.character(avstrax$country_name[order(avstrax$mean)]))
+
   avstrax <- avstrax %>%
     mutate(
       #linnos = log(innos),
@@ -414,7 +418,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
       #width =ifelse( innos / max(innos)>win_thres,innos / max(innos),win_thres),
 
       # Store x position consistently for bars and error bars
-      x_pos = as.numeric(factor(country_name)),
+      x_pos = as.numeric(country_name),
       xmin = x_pos - width / 2,
       xmax = x_pos + width / 2,
       ymin = 0,
@@ -427,13 +431,13 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
 
   # Use interactive bars if show_top3_ids is enabled
   if (show_top3_ids) {
-    p <- ggplot(avstrax, aes(x = country_name)) +
+    p <- ggplot(avstrax) +
       geom_rect_interactive(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
                                  data_id = country_name,
                                  tooltip = paste0("Top 3 IDs: ", top3_ids),
                                  onclick = top3_ids_url))
   } else {
-    p <- ggplot(avstrax, aes(x = country_name)) +
+    p <- ggplot(avstrax) +
       geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax))
   }
 
