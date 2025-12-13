@@ -106,7 +106,9 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
                                     colorings=NULL,
                                     bwidthscale="log",
                                     display_mode="confidence",
-                                    show_top3_ids=FALSE
+                                    show_top3_ids=FALSE,
+                                    width_svg=10,
+                                    height_svg=6
                                     #battery_classes = NULL,
                                     #hard_to_abate_classes=NULL
                                     ) {
@@ -249,8 +251,12 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
           plot.caption = element_text(hjust = 1, size = 10, color = "gray"))
 
   # Return girafe object for Shiny girafeOutput compatibility
+  # Use responsive sizing with dynamic width/height based on browser window
   return(girafe(ggobj = p,
+                width_svg = width_svg,
+                height_svg = height_svg,
                 options = list(
+                  opts_sizing(rescale = TRUE, width = 1),
                   opts_hover(css = "cursor:pointer;fill:yellow;"),
                   opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
                 )))
@@ -342,7 +348,9 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
 plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
                                        technologies, toflow, custom_colors,topn=20,mininno=5,bwidthscale="log",
                                        display_mode="confidence",
-                                       show_top3_ids=FALSE) {
+                                       show_top3_ids=FALSE,
+                                       width_svg=10,
+                                       height_svg=6) {
   #mininno=30;topn=20;  pdata=patchar_countrymap;toflow="istrax_global"; classes=techmap; green_classes=green_classes; technologies="Green Energy"
 
   library(dplyr)
@@ -399,7 +407,10 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
     p <- ggplot() +
       annotate("text", x = 0.5, y = 0.5, label = "No data available for selected filters", size = 6) +
       theme_void()
-    return(girafe(ggobj = p))
+    return(girafe(ggobj = p,
+                  width_svg = width_svg,
+                  height_svg = height_svg,
+                  options = list(opts_sizing(rescale = TRUE, width = 1))))
   }
 
   # Recreate country_name as factor with correct levels after filtering
@@ -498,8 +509,12 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
           plot.caption = element_text(hjust = 1, size = 10, color = "gray"))
 
   # Return girafe object for Shiny girafeOutput compatibility
+  # Use responsive sizing with dynamic width/height based on browser window
   return(girafe(ggobj = p,
+                width_svg = width_svg,
+                height_svg = height_svg,
                 options = list(
+                  opts_sizing(rescale = TRUE, width = 1),
                   opts_hover(css = "cursor:pointer;fill:yellow;"),
                   opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
                 )))

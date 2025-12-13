@@ -461,7 +461,7 @@ ui <- function(request){fluidPage(
   # Wrap the first plot in a collapsible container
   tags$div(
     id = "plot1Container",
-    withSpinner(girafeOutput("avstrax_plot1", width = "100%", height = "600px"), type = 4, color = "#3498db")
+    withSpinner(girafeOutput("avstrax_plot1", width = "100%", height = "auto"), type = 4, color = "#3498db")
   ),
   
   inputPanel(
@@ -493,7 +493,7 @@ ui <- function(request){fluidPage(
 
   ),
 
-  withSpinner(girafeOutput("avstrax_plot2", width = "100%", height = "600px"), type = 4, color = "#3498db")
+  withSpinner(girafeOutput("avstrax_plot2", width = "100%", height = "auto"), type = 4, color = "#3498db")
   
 )
 }
@@ -501,7 +501,23 @@ ui <- function(request){fluidPage(
   
   
 # Define server
-server <- function(input, output) {
+server <- function(input, output, session) {
+
+  # Reactive values for window dimensions
+  window_dims <- reactiveValues(width = 800, height = 600)
+
+  # Track window resize events
+  observe({
+    # Get the output container dimensions from session clientData
+    w1 <- session$clientData$output_avstrax_plot1_width
+    w2 <- session$clientData$output_avstrax_plot2_width
+
+    # Use the larger of the two widths, or default
+    w <- max(c(w1, w2, 400), na.rm = TRUE)
+    if (!is.null(w) && !is.na(w) && w > 0) {
+      window_dims$width <- w
+    }
+  })
   
   #colorings=list(green=green_classes,battery=battery_classes,hard_to_abate=hard_to_abate_classes,ai=ai_classes)
   
@@ -573,6 +589,14 @@ server <- function(input, output) {
     #selected_countries="VN"  ;input=list(); input$toflow="istrax_global"
     #colorings=list(green=green_classes,battery=battery_classes,hard_to_abate=hard_to_abate_classes,ai=ai_classes)
     
+    # Calculate responsive dimensions - wider browser = wider plot
+    plot_width <- max(window_dims$width, 400)
+    # Convert pixels to inches (assuming 96 dpi), with aspect ratio that varies with width
+    width_inches <- plot_width / 96
+    # Wider windows get wider aspect ratio (less height per width)
+    aspect_ratio <- ifelse(plot_width > 1200, 0.4, ifelse(plot_width > 800, 0.5, 0.6))
+    height_inches <- width_inches * aspect_ratio
+
     p <- plot_avstrax_by_country(
       pdata = patchar_countrymap(),
       classes = filtered_techmap,
@@ -583,7 +607,9 @@ server <- function(input, output) {
       colorings=colorings,
       bwidthscale=input$bwidthscale,
       display_mode=input$display_mode,
-      show_top3_ids=input$show_top3_ids
+      show_top3_ids=input$show_top3_ids,
+      width_svg = width_inches,
+      height_svg = height_inches
       #battery_classes = battery_classes,
       #hard_to_abate_classes = hard_to_abate_classes
     )
@@ -626,6 +652,14 @@ server <- function(input, output) {
     
     #filtered= patchar_countrymap %>%    filter(ctry_code %in% c("VN","GB") )  
     #input=list(techs="AI",toflow="istrax_global")
+    # Calculate responsive dimensions - wider browser = wider plot
+    plot_width <- max(window_dims$width, 400)
+    # Convert pixels to inches (assuming 96 dpi), with aspect ratio that varies with width
+    width_inches <- plot_width / 96
+    # Wider windows get wider aspect ratio (less height per width)
+    aspect_ratio <- ifelse(plot_width > 1200, 0.4, ifelse(plot_width > 800, 0.5, 0.6))
+    height_inches <- width_inches * aspect_ratio
+
     p <- plot_avstrax_by_technology(
       pdata = filtered,
       classes = techmap,
@@ -640,7 +674,9 @@ server <- function(input, output) {
       mininno=input$mininno,
       bwidthscale=input$bwidthscale,
       display_mode=input$display_mode,
-      show_top3_ids=input$show_top3_ids
+      show_top3_ids=input$show_top3_ids,
+      width_svg = width_inches,
+      height_svg = height_inches
     )
 
     p
