@@ -367,13 +367,17 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   allmean <- avstrax %>%
     filter( ctry_code=="All") %>%
     pull(mean)
-  
+
   innos=  avstrax %>%
     filter( ctry_code=="All") %>%
     pull(innos)
-  
+
+  # Handle edge case where allmean or innos is empty
+  if (length(allmean) == 0) allmean <- 0
+  if (length(innos) == 0) innos <- 0
+
   # Prepare data for plotting
-  
+
   library(countrycode)
   
   avstrax$country_name <- countrycode(avstrax$ctry_code, origin = "iso2c", destination = "country.name.en")
@@ -386,9 +390,19 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   
   avstrax <- avstrax %>%
     filter( ctry_code!="All",innos>=mininno) %>%
-
     arrange(-mean) %>%
-    head(topn)%>%
+    head(topn)
+
+  # Check if we have data to plot
+  if (nrow(avstrax) == 0) {
+    # Return empty plot with message
+    p <- ggplot() +
+      annotate("text", x = 0.5, y = 0.5, label = "No data available for selected filters", size = 6) +
+      theme_void()
+    return(girafe(ggobj = p))
+  }
+
+  avstrax <- avstrax %>%
     mutate(
       #linnos = log(innos),
       linnos1 = innos,
