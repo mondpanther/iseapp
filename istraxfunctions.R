@@ -218,7 +218,7 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
       fill = "Technology"
     ) +
     guides(color = "none")+
-    theme_minimal() +
+    theme_minimal(base_family = "sans") +
 
     theme(
       axis.title.x = element_text(size = 16),
@@ -492,7 +492,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
       y = ylab,
       fill = "Country"
     ) +
-    theme_minimal() +
+    theme_minimal(base_family = "sans") +
     theme(
       axis.title.x = element_text(size = 16),
       axis.title.y = element_text(size = 16),
