@@ -450,7 +450,7 @@ ui <- function(request){fluidPage(
     ),
     checkboxInput(
       inputId = "show_top3_ids",
-      label = "Show top 3 patent family IDs",
+      label = "Show top patent IDs",
       value = FALSE
     )
   ),

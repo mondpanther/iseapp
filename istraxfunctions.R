@@ -447,7 +447,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
     p <- ggplot(avstrax) +
       geom_rect_interactive(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
                                  data_id = country_name,
-                                 tooltip = paste0("Top 3 IDs: ", top3_ids),
+                                 tooltip = paste0("Top IDs: ", top3_ids),
                                  onclick = top3_ids_url))
   } else {
     p <- ggplot(avstrax) +
