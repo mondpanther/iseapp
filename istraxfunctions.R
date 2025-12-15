@@ -218,13 +218,16 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
       fill = "Technology"
     ) +
     guides(color = "none")+
-    theme_minimal(base_family = "sans") +
+    theme_minimal(base_family = "Open Sans") +
 
     theme(
       axis.title.x = element_text(size = 16),
       axis.title.y = element_text(size = 16),
       axis.text.x = element_text(size = 14),
-      axis.text.y = element_text(size = 14)
+      axis.text.y = element_text(size = 14),
+      text = element_text(family = "Open Sans"),
+      axis.text = element_text(family = "Open Sans"),
+      axis.title = element_text(family = "Open Sans")
     )+
 
     geom_hline(yintercept = allmean, linetype = "dashed", color = "black", linewidth = 1) +
@@ -492,12 +495,15 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
       y = ylab,
       fill = "Country"
     ) +
-    theme_minimal(base_family = "sans") +
+    theme_minimal(base_family = "Open Sans") +
     theme(
       axis.title.x = element_text(size = 16),
       axis.title.y = element_text(size = 16),
       axis.text.x = element_text(size = 14),
-      axis.text.y = element_text(size = 14)
+      axis.text.y = element_text(size = 14),
+      text = element_text(family = "Open Sans"),
+      axis.text = element_text(family = "Open Sans"),
+      axis.title = element_text(family = "Open Sans")
     ) +
     geom_hline(yintercept = allmean, linetype = "dashed", color = "black", linewidth = 1) +
     coord_flip()

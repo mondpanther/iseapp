@@ -15,7 +15,10 @@ library(shinycssloaders)
 library(httr2)
 library(ggiraph)
 source("dropbox_auth.R")
+library(gdtools)
 
+# Register Google Font
+register_gfont("Open Sans")
 
 #iseapplocal=Sys.getenv("ISEAPP_PATH_LOCAL")
 localpath_fname=function(fname){
@@ -299,9 +302,9 @@ expand_country_selection <- function(selected) {
 
 # Define UI
 ui <- function(request){fluidPage(
-
-  theme = base_theme,
-
+  # Add Google Font
+  addGFontHtmlDependency(family = "Open Sans"),
+  
   # Add custom CSS
   tags$head(
     tags$style(HTML("
@@ -317,9 +320,11 @@ ui <- function(request){fluidPage(
         color: #34495E;
         margin-bottom: 20px;
       }
-      /* Ensure ggiraph/plot text matches the app's sans-serif font */
-      .girafe_container svg text, .girafe_container svg tspan {
-        font-family: 'Arial', sans-serif !important;
+      body {
+        font-family: 'Open Sans', sans-serif;
+      }
+      svg text {
+        font-family: 'Open Sans', sans-serif !important;
       }
     "))
   ),
