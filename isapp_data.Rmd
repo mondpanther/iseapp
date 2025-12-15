@@ -52,17 +52,41 @@ if(file.exists(pp)){
 } else {
   countrymap <- dropbox_read_fst("/countrymap.fst")}
 
+library(fst)
 
 first_appli=read_fst(paste0(ISEAPP_PATH_LOCAL,"first_appli.fst"))
+first_appli=first_appli %>% mutate(appln_id=paste0(appln_auth,appln_nr)) %>% select(appln_id,docdb_family_id,appln_filing_year)
+
 
 if(any(c("appln_id","appln_filing_year")) %in% names(countrymap)){
   countrymap=countrymap %>% select(-appln_id,-appln_filing_year)
-  
 }
 countrymap=countrymap %>% left_join(first_appli)
 
+countrymap=countrymap %>% select(-appln_filing_year)
 dropbox_write_fst(countrymap, "/countrymap.fst",compress=100)  
 pp=localpath_fname("/countrymap.fst")
 write_fst(countrymap, pp,compress=100)  
+
+
+
+# Construct the Espacenet URL
+#patent_number <- "JP2015535824"
+#url <- paste0("https://worldwide.espacenet.com/patent/search?q=", patent_number)
+
+# Open in browser
+#browseURL(url)
+
+
+# Explicitly search by application number
+application_id <- "CA20132889477"
+#url <- paste0("https://worldwide.espacenet.com/patent/search?q=pn=", application_id)
+
+# Or use application number field
+url <- paste0("https://worldwide.espacenet.com/patent/search?q=ap=", application_id)
+browseURL(url)
+
+#>>>>>>>>> this works....
+
 
 ```
