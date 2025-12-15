@@ -554,6 +554,7 @@ server <- function(input, output, session) {
   
   output$avstrax_plot1 <- renderGirafe({
     req(input$country, input$toflow, input$tech_categories_plot1, input$bwidthscale, input$display_mode, !is.null(input$show_top3_ids))
+    
     selected_countries <- expand_country_selection(input$country)
     # Get the label from the nested toflow_choices list
     flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]

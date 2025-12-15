@@ -62,13 +62,13 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
     sem = sd(istrax*scaler, na.rm = TRUE) / sqrt(n()),
     # Quartile bin means: mean of observations within each quartile bin
 
-    q1_bin_mean = mean(scaler*istrax[scaler*istrax <= q1], na.rm = TRUE),
-    q2_bin_mean = mean(scaler*istrax[scaler*istrax <= q2 & scaler*istrax>=q1], na.rm = TRUE),
-    q3_bin_mean = mean(scaler*istrax[scaler*istrax <= q3 & scaler*istrax>=q2], na.rm = TRUE),
-    q4_bin_mean = mean(scaler*istrax[scaler*istrax > q3], na.rm = TRUE),
+    #q1_bin_mean = mean(scaler*istrax[scaler*istrax <= q1], na.rm = TRUE),
+    #q2_bin_mean = mean(scaler*istrax[scaler*istrax <= q2 & scaler*istrax>=q1], na.rm = TRUE),
+    #q3_bin_mean = mean(scaler*istrax[scaler*istrax <= q3 & scaler*istrax>=q2], na.rm = TRUE),
+    #q4_bin_mean = mean(scaler*istrax[scaler*istrax > q3], na.rm = TRUE),
 
-    q0M_bin_mean= mean(scaler*istrax[(scaler*istrax) <= q2], na.rm = TRUE),
-    q1M_bin_mean= mean(scaler*istrax[(scaler*istrax) > q2], na.rm = TRUE),
+    #q0M_bin_mean= mean(scaler*istrax[(scaler*istrax) <= q2], na.rm = TRUE),
+    #q1M_bin_mean= mean(scaler*istrax[(scaler*istrax) > q2], na.rm = TRUE),
 
     top25_bin_mean= mean(scaler*istrax[top25==T], na.rm = TRUE),
     top50_bin_mean= mean(scaler*istrax[top50==T], na.rm = TRUE),
@@ -318,13 +318,13 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
       sem = sd(istrax*scaler, na.rm = TRUE) / sqrt(n()),
       # Quartile bin means: mean of observations within each quartile bin
 
-      q1_bin_mean = mean(scaler*istrax[scaler*istrax <= q1], na.rm = TRUE),
-      q2_bin_mean = mean(scaler*istrax[scaler*istrax <= q2 & scaler*istrax>=q1], na.rm = TRUE),
-      q3_bin_mean = mean(scaler*istrax[scaler*istrax <= q3 & scaler*istrax>=q2], na.rm = TRUE),
-      q4_bin_mean = mean(scaler*istrax[scaler*istrax >= q3], na.rm = TRUE),
+      #q1_bin_mean = mean(scaler*istrax[scaler*istrax <= q1], na.rm = TRUE),
+      #q2_bin_mean = mean(scaler*istrax[scaler*istrax <= q2 & scaler*istrax>=q1], na.rm = TRUE),
+      #q3_bin_mean = mean(scaler*istrax[scaler*istrax <= q3 & scaler*istrax>=q2], na.rm = TRUE),
+      #q4_bin_mean = mean(scaler*istrax[scaler*istrax >= q3], na.rm = TRUE),
 
-      q0M_bin_mean= mean(scaler*istrax[scaler*istrax <= q2], na.rm = TRUE),
-      q1M_bin_mean= mean(scaler*istrax[scaler*istrax >= q2], na.rm = TRUE),
+      #q0M_bin_mean= mean(scaler*istrax[scaler*istrax <= q2], na.rm = TRUE),
+      #q1M_bin_mean= mean(scaler*istrax[scaler*istrax >= q2], na.rm = TRUE),
       top25_bin_mean= mean(scaler*istrax[top25==T], na.rm = TRUE),
       top50_bin_mean= mean(scaler*istrax[top50==T], na.rm = TRUE),
 
