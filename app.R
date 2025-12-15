@@ -42,6 +42,11 @@ enableBookmarking(store = "url")
 # Harmonize UI and plot fonts across environments
 thematic::thematic_shiny(font = "Arial")
 
+# Ensure figures default to a sans-serif font as well
+theme_set(theme_minimal(base_family = "Arial"))
+update_geom_defaults("text", list(family = "Arial"))
+update_geom_defaults("label", list(family = "Arial"))
+
 # Load data
 
 #files <- list.files(path="istraxes", pattern = "parquet$", full.names = TRUE)
