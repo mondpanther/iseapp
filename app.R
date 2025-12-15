@@ -367,7 +367,7 @@ ui <- function(request){fluidPage(
   #titlePanel("Welcome to ISE - The Innovation Strategy Explorer"),
   
   tags$details(
-    tags$summary("About this tool", class = "toggle-summary"),
+    tags$summary("▼ About this tool", class = "toggle-summary"),
     tags$br(),
     tags$p("This tool supports the development of an innovation strategy at various scopes
      for either governments or (impact) investors.
