@@ -180,7 +180,7 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
     p <- ggplot(avstrax) +
       geom_rect_interactive(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = greenclass,
                                  data_id = technology,
-                                 tooltip = paste0("Top 3 IDs: ", top3_ids),
+                                 tooltip = paste0("Top IDs: ", top3_ids),
                                  onclick = top3_ids_url))
   } else {
     p <- ggplot(avstrax) +
