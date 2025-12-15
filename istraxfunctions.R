@@ -1,6 +1,7 @@
 
 library(dplyr)
 library(tidyr)
+library(ggiraph)
 
 
 
@@ -35,7 +36,7 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
   scaler=ifelse(grepl("strax", istrax_var ),100,1)
   
   avstrax <- data %>%
-    select(docdb_family_id, !!istrax_sym) %>%
+    select(docdb_family_id, appln_id, !!istrax_sym) %>%
     rename(istrax = !!istrax_sym) %>%
     distinct() %>%
     inner_join(classes, by = "docdb_family_id") %>%
@@ -47,36 +48,41 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
         mutate(technology = "All")
     ) %>%
     distinct() %>%
-    group_by(technology) %>% arrange(technology,-istrax*scaler) %>% 
-    mutate(ppp=(1:n())/n()) %>% 
+    group_by(technology) %>% arrange(technology,-istrax*scaler) %>%
+    mutate(ppp=(1:n())/n()) %>%
     mutate(top25=ppp<0.25,
            top50=ppp<0.5,
            q1=quantile(istrax*scaler, 0.25, na.rm = TRUE),
            q2=quantile(istrax*scaler, 0.5, na.rm = TRUE),
            q3=quantile(istrax*scaler, 0.75, na.rm = TRUE)
-  ) %>% 
+  ) %>%
   summarise(
     mean = mean(istrax*scaler, na.rm = TRUE),
     innos = n(),
     sem = sd(istrax*scaler, na.rm = TRUE) / sqrt(n()),
     # Quartile bin means: mean of observations within each quartile bin
-    
+
     q1_bin_mean = mean(scaler*istrax[scaler*istrax <= q1], na.rm = TRUE),
     q2_bin_mean = mean(scaler*istrax[scaler*istrax <= q2 & scaler*istrax>=q1], na.rm = TRUE),
     q3_bin_mean = mean(scaler*istrax[scaler*istrax <= q3 & scaler*istrax>=q2], na.rm = TRUE),
     q4_bin_mean = mean(scaler*istrax[scaler*istrax > q3], na.rm = TRUE),
-    
+
     q0M_bin_mean= mean(scaler*istrax[(scaler*istrax) <= q2], na.rm = TRUE),
     q1M_bin_mean= mean(scaler*istrax[(scaler*istrax) > q2], na.rm = TRUE),
-    
+
     top25_bin_mean= mean(scaler*istrax[top25==T], na.rm = TRUE),
     top50_bin_mean= mean(scaler*istrax[top50==T], na.rm = TRUE),
-    
-    
+
+    # Top appln_id values (highest istrax) as comma-separated string
+    top3_ids = paste(head(appln_id[order(-istrax*scaler)], 10), collapse = ", "),
+
     across(c(q1,q2,q3,top25,top50),mean),
       .groups = "drop"
     ) %>%
     mutate(
+      # Create Google search URL for top 3 IDs (use double quotes for JS to avoid HTML attribute conflicts)
+      top3_ids_url = paste0('window.open("https://www.google.com/search?q=',
+                            sapply(top3_ids, utils::URLencode, reserved = TRUE), '")'),
       greenclass = ifelse(technology %in% unlist(colorings["green"]), "green",
                           ifelse( technology %in% unlist(colorings["battery"]), "battery", 
                                   ifelse( technology %in% unlist(colorings["hard_to_abate"]), "hard to abate",
@@ -99,7 +105,11 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
                                     custom_colors,
                                     colorings=NULL,
                                     bwidthscale="log",
-                                    display_mode="confidence"
+                                    display_mode="confidence",
+                                    show_top3_ids=FALSE,
+                                    width_svg=10,
+                                    height_svg=6,
+                                    plot_title="Spillover returns"
                                     #battery_classes = NULL,
                                     #hard_to_abate_classes=NULL
                                     ) {
@@ -107,7 +117,10 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
   library(ggplot2)
 
   library(patchwork)
-  #classes=techmap %>% filter(technology=="All"); toflow="istrax_global"; pdata=patchar_countrymap; country_code="VN"
+  #path <- paste0("/istraxes/istrax_global.fst"); ddd=dropbox_read_fst(path);
+  #patchar_countrymap <- countrymap %>% left_join(ddd)
+  #classes=techmap %>% filter(technology=="Green Technology"); toflow="istrax_global"; pdata=patchar_countrymap; country_code="VN";bwidthscale=100;show_top3_ids=TRUE
+  #display_mode="confidence"
   classlist=(classes %>% distinct(technology))$technology
 
   #toflow="istrax_global"; pdata=countrymap
@@ -145,54 +158,62 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
       linnos2 = log(1+innos),
       bwidthscale = bwidthscale,
     ) %>% 
-    filter(innos>1) %>% 
+    filter(innos>1) %>%
     mutate(
       linnos=ifelse(bwidthscale=="log",linnos2,linnos1),
 
       width = linnos / max(linnos),
       #width =ifelse( innos / max(innos)>win_thres,innos / max(innos),win_thres),
-      
-      xmin = as.numeric(factor(technology)) - width / 2,
-      xmax = as.numeric(factor(technology)) + width / 2,
+
+      # Store x position consistently for bars and error bars
+      x_pos = as.numeric(factor(technology)),
+      xmin = x_pos - width / 2,
+      xmax = x_pos + width / 2,
       ymin = 0,
       ymax = mean
-    ) 
-  
+    )
+
   # Create the plot
-  
-  p=ggplot(avstrax) +
-    geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = greenclass))
+
+  # Use interactive bars if show_top3_ids is enabled
+  if (show_top3_ids) {
+    p <- ggplot(avstrax) +
+      geom_rect_interactive(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = greenclass,
+                                 data_id = technology,
+                                 tooltip = paste0("Top 3 IDs: ", top3_ids),
+                                 onclick = top3_ids_url))
+  } else {
+    p <- ggplot(avstrax) +
+      geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = greenclass))
+  }
 
   # Add either confidence bands or quartile means based on display_mode
   if (display_mode == "confidence") {
-    p <- p + geom_errorbar(aes(x = as.numeric(factor(technology)), ymin = ifelse(mean- 1.96 * sem>0,mean- 1.96 * sem,0) ,
+    p <- p + geom_errorbar(aes(x = x_pos, ymin = ifelse(mean- 1.96 * sem>0,mean- 1.96 * sem,0) ,
                                                                    ymax = mean + 1.96 * sem),
                            width = 0.2, color = "black", linewidth = .4, alpha = .4)
   } else if (display_mode == "quartiles") {
-    p <- p + # geom_errorbar(aes(x = as.numeric(factor(technology)),ymin = q1_bin_mean, ymax = q2_bin_mean, width = width),
+    p <- p + # geom_errorbar(aes(x = x_pos,ymin = q1_bin_mean, ymax = q2_bin_mean, width = width),
       #color = "brown",
       #                      linewidth = .7, alpha = .5)+
-            #geom_errorbar(aes(x = as.numeric(factor(technology)),ymin = q1, ymax = q2,width = width),
+            #geom_errorbar(aes(x = x_pos,ymin = q1, ymax = q2,width = width),
         #              color = "#3498db",
        #               linewidth = .7, alpha = .5)+
-      
-            #geom_errorbar(aes(x = as.numeric(factor(technology)),ymin = q2, ymax = q3,width = width),
+
+            #geom_errorbar(aes(x = x_pos,ymin = q2, ymax = q3,width = width),
          #           color = "#3498db",
           #          linewidth = .7, alpha = .5)+
-      
-            geom_errorbar(aes(color=greenclass,x = as.numeric(factor(technology)),ymin = top50_bin_mean, ymax = top25_bin_mean,width=width*1.05),
+
+            geom_errorbar(aes(color=greenclass,x = x_pos,ymin = top50_bin_mean, ymax = top25_bin_mean,width=width*1.05),
                      linewidth = 1, alpha = .5)
-    
-    
-    
   }
 
   p <- p +
-    scale_x_continuous(breaks = as.numeric(factor(avstrax$technology)), labels = avstrax$technology) +
+    scale_x_continuous(breaks = avstrax$x_pos, labels = avstrax$technology) +
     scale_color_manual(values = custom_colors) +
     scale_fill_manual(values = custom_colors) +
     labs(
-      title = "Spillover returns",
+      title = plot_title,
       x = "Technology",
       y = ylab,
       fill = "Technology"
@@ -222,25 +243,24 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
     theme_void() +
     annotate("text", x = 0.5, y = 0.5, label = paste0(as.character(innos)," Innovations"), size=5 ) +
     theme(plot.margin = margin(0, 0, -10, 0))
-  
-  
-  # Combine them
-  annotation_plot / p + plot_layout(heights = c(0.1, 1))+
-  
-  
-  
-  labs(caption = "© 2025 Innovation Strategy Explorer") +
-    theme(
-      plot.caption = element_text(hjust = 1, size = 10, color = "gray")
-    )
-  
-  #library(cowplot)
-  
-  
-  
-  #ggdraw(p) +
-  #draw_text(paste0(as.character(innos)," Innovations"), x = 0.85, y = 0.95, size = 14)
-  
+
+
+  # Add subtitle and caption
+  p <- p + labs(subtitle = paste0(as.character(innos), " Innovations"),
+                caption = "© 2025 Innovation Strategy Explorer") +
+    theme(plot.subtitle = element_text(size = 14, hjust = 0.5),
+          plot.caption = element_text(hjust = 1, size = 10, color = "gray"))
+
+  # Return girafe object for Shiny girafeOutput compatibility
+  # Use responsive sizing with dynamic width/height based on browser window
+  return(girafe(ggobj = p,
+                width_svg = width_svg,
+                height_svg = height_svg,
+                options = list(
+                  opts_sizing(rescale = TRUE, width = 1),
+                  opts_hover(css = "cursor:pointer;fill:yellow;"),
+                  opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
+                )))
 }
 
 
@@ -268,52 +288,58 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
   }
   
   #scaler=ifelse()
-  avstrax <- filtereddata %>% 
-    select(docdb_family_id, !!istrax_sym, ctry_code) %>%
+  avstrax <- filtereddata %>%
+    select(docdb_family_id, appln_id, !!istrax_sym, ctry_code) %>%
     rename(istrax = !!istrax_sym) %>%
     distinct() %>%
 
     bind_rows(
       #atest=
-      filtereddata %>% 
-        select(docdb_family_id, !!istrax_sym,) %>%
+      filtereddata %>%
+        select(docdb_family_id, appln_id, !!istrax_sym) %>%
         rename(istrax = !!istrax_sym) %>%
         distinct() %>%
         mutate(ctry_code = "All")
     ) %>%
-    
+
     distinct() %>%
     group_by(ctry_code) %>%
-    arrange(ctry_code,-istrax*scaler) %>% 
-    mutate(ppp=(1:n())/n()) %>% 
+    arrange(ctry_code,-istrax*scaler) %>%
+    mutate(ppp=(1:n())/n()) %>%
     mutate(q1=quantile(istrax*scaler, 0.25, na.rm = TRUE),
            q2=quantile(istrax*scaler, 0.5, na.rm = TRUE),
            q3=quantile(istrax*scaler, 0.75, na.rm = TRUE),
            top25=ppp<0.25,
            top50=ppp<0.5
-    ) %>% 
+    ) %>%
     summarise(
       mean = mean(istrax*scaler, na.rm = TRUE),
       innos = n(),
       sem = sd(istrax*scaler, na.rm = TRUE) / sqrt(n()),
       # Quartile bin means: mean of observations within each quartile bin
-      
+
       q1_bin_mean = mean(scaler*istrax[scaler*istrax <= q1], na.rm = TRUE),
       q2_bin_mean = mean(scaler*istrax[scaler*istrax <= q2 & scaler*istrax>=q1], na.rm = TRUE),
       q3_bin_mean = mean(scaler*istrax[scaler*istrax <= q3 & scaler*istrax>=q2], na.rm = TRUE),
       q4_bin_mean = mean(scaler*istrax[scaler*istrax >= q3], na.rm = TRUE),
-      
+
       q0M_bin_mean= mean(scaler*istrax[scaler*istrax <= q2], na.rm = TRUE),
       q1M_bin_mean= mean(scaler*istrax[scaler*istrax >= q2], na.rm = TRUE),
       top25_bin_mean= mean(scaler*istrax[top25==T], na.rm = TRUE),
       top50_bin_mean= mean(scaler*istrax[top50==T], na.rm = TRUE),
+
+      # Top appln_id values (highest istrax) as comma-separated string
+      top3_ids = paste(head(appln_id[order(-istrax*scaler)],10), collapse = ", "),
+
       across(c(q1,q2,q3,top25,top50),mean),
       .groups = "drop"
-    ) #%>%
-    #mutate(
-    #  greenclass = ifelse(technology %in% green_classes, "green", "other")
-    #)
-  
+    ) %>%
+    mutate(
+      # Create Google search URL for top 3 IDs (use double quotes for JS to avoid HTML attribute conflicts)
+      top3_ids_url = paste0('window.open("https://www.google.com/search?q=',
+                            sapply(top3_ids, utils::URLencode, reserved = TRUE), '")')
+    )
+
   return(avstrax)
 }
 
@@ -322,7 +348,11 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
 
 plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
                                        technologies, toflow, custom_colors,topn=20,mininno=5,bwidthscale="log",
-                                       display_mode="confidence") {
+                                       display_mode="confidence",
+                                       show_top3_ids=FALSE,
+                                       width_svg=10,
+                                       height_svg=6,
+                                       plot_title="Spillover returns") {
   #mininno=30;topn=20;  pdata=patchar_countrymap;toflow="istrax_global"; classes=techmap; green_classes=green_classes; technologies="Green Energy"
 
   library(dplyr)
@@ -347,13 +377,17 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   allmean <- avstrax %>%
     filter( ctry_code=="All") %>%
     pull(mean)
-  
+
   innos=  avstrax %>%
     filter( ctry_code=="All") %>%
     pull(innos)
-  
+
+  # Handle edge case where allmean or innos is empty
+  if (length(allmean) == 0) allmean <- 0
+  if (length(innos) == 0) innos <- 0
+
   # Prepare data for plotting
-  
+
   library(countrycode)
   
   avstrax$country_name <- countrycode(avstrax$ctry_code, origin = "iso2c", destination = "country.name.en")
@@ -364,70 +398,97 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   avstrax$ctry_code    <- factor(avstrax$ctry_code, levels = avstrax$ctry_code[order(avstrax$mean)])
   avstrax$country_name <- factor(avstrax$country_name, levels = avstrax$country_name[order(avstrax$mean)])
   
-  avstrax <- avstrax %>%  
-    filter( ctry_code!="All",innos>=mininno) %>% 
-    
-    arrange(-mean) %>% 
-    head(topn)%>%
+  avstrax <- avstrax %>%
+    filter( ctry_code!="All",innos>=mininno) %>%
+    arrange(-mean) %>%
+    head(topn)
+
+  # Check if we have data to plot
+  if (nrow(avstrax) == 0) {
+    # Return empty plot with message
+    p <- ggplot() +
+      annotate("text", x = 0.5, y = 0.5, label = "No data available for selected filters", size = 6) +
+      theme_void()
+    return(girafe(ggobj = p,
+                  width_svg = width_svg,
+                  height_svg = height_svg,
+                  options = list(opts_sizing(rescale = TRUE, width = 1))))
+  }
+
+  # Recreate country_name as factor with correct levels after filtering
+  avstrax$country_name <- factor(as.character(avstrax$country_name),
+                                  levels = as.character(avstrax$country_name[order(avstrax$mean)]))
+
+  avstrax <- avstrax %>%
     mutate(
       #linnos = log(innos),
       linnos1 = innos,
       linnos2 = log(1+innos),
       bwidthscale=bwidthscale,
-      linnos=ifelse(bwidthscale=="log",linnos2,linnos1),      
+      linnos=ifelse(bwidthscale=="log",linnos2,linnos1),
       width = linnos / max(linnos),
-      
+
       #width =ifelse( innos / max(innos)>win_thres,innos / max(innos),win_thres),
-      
-      
-      xmin = as.numeric(factor(country_name)) - width / 2,
-      xmax = as.numeric(factor(country_name)) + width / 2,
+
+      # Store x position consistently for bars and error bars
+      x_pos = as.numeric(country_name),
+      xmin = x_pos - width / 2,
+      xmax = x_pos + width / 2,
       ymin = 0,
       ymax = mean
-    ) 
-  
+    )
+
 
   # Create the plot
   ylab=ifelse(grepl("strax", toflow ),"Return in %","Millions of $")
 
-  p <- ggplot(avstrax, aes(x = country_name)) +
-    geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax))
+  # Use interactive bars if show_top3_ids is enabled
+  if (show_top3_ids) {
+    p <- ggplot(avstrax) +
+      geom_rect_interactive(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
+                                 data_id = country_name,
+                                 tooltip = paste0("Top IDs: ", top3_ids),
+                                 onclick = top3_ids_url))
+  } else {
+    p <- ggplot(avstrax) +
+      geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax))
+  }
 
   # Add either confidence bands or quartile means based on display_mode
   if (display_mode == "confidence") {
-    p <- p + geom_errorbar(aes(ymin = ifelse(mean- 1.96 * sem>0,mean- 1.96 * sem,0) ,
+    p <- p + geom_errorbar(aes(x = x_pos, ymin = ifelse(mean- 1.96 * sem>0,mean- 1.96 * sem,0) ,
                                ymax = mean + 1.96 * sem),
                            width = 0.2, color = "black", linewidth = .4, alpha = .4)
   } else if (display_mode == "quartiles") {
-#    p <- p + 
-#         geom_errorbar(aes(ymin = q1_bin_mean, 
+#    p <- p +
+#         geom_errorbar(aes(ymin = q1_bin_mean,
 #                           ymax = q2,width=width),
 #                           width = 0.2, color = "brown",
 #                           linewidth = .4, alpha = .5)+
 #        geom_errorbar(aes(ymin = q2, ymax = q4_bin_mean,width=width),
-#                      color = "brown", 
+#                      color = "brown",
 #                      linewidth = .4, alpha = .5)
-    
-    
-    p <- p + #geom_errorbar(aes(x = as.numeric(factor(country_name)),ymin = q1_bin_mean, ymax = q2_bin_mean, width = width),
+
+
+    p <- p + #geom_errorbar(aes(x = x_pos,ymin = q1_bin_mean, ymax = q2_bin_mean, width = width),
              #               color = "brown",
              #               linewidth = .5, alpha = .5)+
-      #geom_errorbar(aes(x = as.numeric(factor(country_name)),ymin = q2_bin_mean, ymax = q2,width = width),
+      #geom_errorbar(aes(x = x_pos,ymin = q2_bin_mean, ymax = q2,width = width),
       #              color = "#3498db",
       #              linewidth = .5, alpha = .5)+
-      
-      #geom_errorbar(aes(x = as.numeric(factor(country_name)),ymin = q2, ymax = q3_bin_mean,width = width),
+
+      #geom_errorbar(aes(x = x_pos,ymin = q2, ymax = q3_bin_mean,width = width),
       #              color = "#3498db",
       #              linewidth = .5, alpha = .5)+
-      
-      geom_errorbar(aes(x = as.numeric(factor(country_name)),ymin = top50_bin_mean, ymax = top25_bin_mean,width=width),
+
+      geom_errorbar(aes(x = x_pos, ymin = top50_bin_mean, ymax = top25_bin_mean,width=width),
                     color = "#3498db",linewidth = .5, alpha = .5)
-    
   }
 
   p <- p +
+    scale_x_continuous(breaks = avstrax$x_pos, labels = avstrax$country_name) +
     labs(
-      title = "Spillover returns",
+      title = plot_title,
       x = "Country",
       y = ylab,
       fill = "Country"
@@ -443,29 +504,22 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
     coord_flip()
   
   
-  #innos=3
-  annotation_plot <- ggplot() +
-    theme_void() +
-    annotate("text", x = 0.5, y = 0.5, label = paste0(as.character(innos)," Innovations"), size=5 ) +
-    theme(plot.margin = margin(0, 0, -10, 0))
-  
-  
-  # Combine them
-  annotation_plot / p + plot_layout(heights = c(0.1, 1))+
-    
-    labs(caption = "© 2025 Innovation Strategy Explorer") +
-    theme(
-      plot.caption = element_text(hjust = 1, size = 10, color = "gray")
-    )
-  
-  
-  #library(cowplot)
-  
-  
-  
-  #ggdraw(p) +
-  #draw_text(paste0(as.character(innos)," Innovations"), x = 0.85, y = 0.95, size = 14)
-  
+  # Add subtitle and caption
+  p <- p + labs(subtitle = paste0(as.character(innos), " Innovations"),
+                caption = "© 2025 Innovation Strategy Explorer") +
+    theme(plot.subtitle = element_text(size = 14, hjust = 0.5),
+          plot.caption = element_text(hjust = 1, size = 10, color = "gray"))
+
+  # Return girafe object for Shiny girafeOutput compatibility
+  # Use responsive sizing with dynamic width/height based on browser window
+  return(girafe(ggobj = p,
+                width_svg = width_svg,
+                height_svg = height_svg,
+                options = list(
+                  opts_sizing(rescale = TRUE, width = 1),
+                  opts_hover(css = "cursor:pointer;fill:yellow;"),
+                  opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
+                )))
 }
 
 
