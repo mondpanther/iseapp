@@ -645,7 +645,7 @@ server <- function(input, output, session) {
       show_top3_ids=input$show_top3_ids,
       width_svg = width_inches,
       height_svg = height_inches,
-      plot_title = flow_label
+      plot_title =  sub("^[^.]*\\.", "", flow_label)
       #battery_classes = battery_classes,
       #hard_to_abate_classes = hard_to_abate_classes
     )
@@ -714,12 +714,12 @@ server <- function(input, output, session) {
       show_top3_ids=input$show_top3_ids,
       width_svg = width_inches,
       height_svg = height_inches,
-      plot_title = flow_label
+      plot_title =  sub("^[^.]*\\.", "", flow_label)
     )
 
     p
   })
-  
+
   
   
 }
