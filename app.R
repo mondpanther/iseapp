@@ -39,6 +39,9 @@ if(file.exists(pp)){
 #rsconnect::writeManifest()
 enableBookmarking(store = "url")
 
+# Harmonize UI and plot fonts across environments
+thematic::thematic_shiny(font = "Arial")
+
 # Load data
 
 #files <- list.files(path="istraxes", pattern = "parquet$", full.names = TRUE)
@@ -271,6 +274,10 @@ names(grouped_choices[["Predefined Groups"]]) <- names(group_definitions)
 default_country <- if ("VN" %in% vals) "VN" else if (length(vals) > 0) vals[1] else NA_character_
 
 
+# Define a Bootstrap theme with a consistent base font
+base_theme <- bs_theme(base_font = "Arial")
+
+
 
 expand_country_selection <- function(selected) {
   expanded <- unlist(lapply(selected, function(x) {
@@ -287,6 +294,8 @@ expand_country_selection <- function(selected) {
 
 # Define UI
 ui <- function(request){fluidPage(
+
+  theme = base_theme,
 
   # Add custom CSS
   tags$head(
