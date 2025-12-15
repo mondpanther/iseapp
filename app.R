@@ -11,8 +11,9 @@ library(arrow)
 library(dplyr)
 library(data.table)
 library(fst)
-library(shinycssloaders) 
+library(shinycssloaders)
 library(httr2)
+library(ggiraph)
 source("dropbox_auth.R")
 
 
@@ -269,6 +270,8 @@ names(grouped_choices[["Predefined Groups"]]) <- names(group_definitions)
 
 default_country <- if ("VN" %in% vals) "VN" else if (length(vals) > 0) vals[1] else NA_character_
 
+
+
 expand_country_selection <- function(selected) {
   expanded <- unlist(lapply(selected, function(x) {
     if (x %in% names(group_definitions)) {
@@ -278,20 +281,13 @@ expand_country_selection <- function(selected) {
     }
   }))
   unique(expanded)
-  
-  
-  
-  
 }
 
 
 
 # Define UI
 ui <- function(request){fluidPage(
-  
-  
-  
-  
+
   # Add custom CSS
   tags$head(
     tags$style(HTML("
@@ -441,7 +437,7 @@ ui <- function(request){fluidPage(
       options = list(placeholder = 'Choose one or more technology categories...')
     ),
     radioButtons(
-      inputId = "bwidthscale:",
+      inputId = "bwidthscale",
       label = "Bar width scale",
       choices = c("log", "proportional"),
       selected = "log"
@@ -451,6 +447,11 @@ ui <- function(request){fluidPage(
       label = "Display mode",
       choices = c("Confidence bands" = "confidence", "Returns for the top 25 and top 50 percent" = "quartiles"),
       selected = "quartiles"
+    ),
+    checkboxInput(
+      inputId = "show_top3_ids",
+      label = "Show top patent IDs",
+      value = FALSE
     )
   ),
 
@@ -460,7 +461,7 @@ ui <- function(request){fluidPage(
   # Wrap the first plot in a collapsible container
   tags$div(
     id = "plot1Container",
-    withSpinner(plotOutput("avstrax_plot1", height = "600px"), type = 4, color = "#3498db")
+    withSpinner(girafeOutput("avstrax_plot1", width = "100%", height = "auto"), type = 4, color = "#3498db")
   ),
   
   inputPanel(
@@ -492,7 +493,7 @@ ui <- function(request){fluidPage(
 
   ),
 
-  withSpinner(plotOutput("avstrax_plot2", height = "600px"), type = 4, color = "#3498db")
+  withSpinner(girafeOutput("avstrax_plot2", width = "100%", height = "auto"), type = 4, color = "#3498db")
   
 )
 }
@@ -500,7 +501,23 @@ ui <- function(request){fluidPage(
   
   
 # Define server
-server <- function(input, output) {
+server <- function(input, output, session) {
+
+  # Reactive values for window dimensions
+  window_dims <- reactiveValues(width = 800, height = 600)
+
+  # Track window resize events
+  observe({
+    # Get the output container dimensions from session clientData
+    w1 <- session$clientData$output_avstrax_plot1_width
+    w2 <- session$clientData$output_avstrax_plot2_width
+
+    # Use the larger of the two widths, or default
+    w <- max(c(w1, w2, 400), na.rm = TRUE)
+    if (!is.null(w) && !is.na(w) && w > 0) {
+      window_dims$width <- w
+    }
+  })
   
   #colorings=list(green=green_classes,battery=battery_classes,hard_to_abate=hard_to_abate_classes,ai=ai_classes)
   
@@ -516,10 +533,7 @@ server <- function(input, output) {
     
     #input=list(toflow="avstrax_global")
     path <- paste0("/istraxes/", input$toflow,".fst")
-    #path <- paste0("/istraxes/istrax_global.fst")
-    
-    #ddd=dropbox_read_fst(path)
-    
+
     
     pp=localpath_fname(path)
     if(file.exists(pp)){ 
@@ -538,11 +552,11 @@ server <- function(input, output) {
   
   
   
-  output$avstrax_plot1 <- renderPlot({
-    req(input$country, input$toflow, input$tech_categories_plot1, input$bwidthscale, input$display_mode)
-
+  output$avstrax_plot1 <- renderGirafe({
+    req(input$country, input$toflow, input$tech_categories_plot1, input$bwidthscale, input$display_mode, !is.null(input$show_top3_ids))
     selected_countries <- expand_country_selection(input$country)
-    flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
+    # Get the label from the nested toflow_choices list
+    flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
 
     validate(
       need(exists("plot_avstrax_by_country"), "Function 'plot_avstrax_by_country' not found in the environment."),
@@ -576,6 +590,14 @@ server <- function(input, output) {
     #selected_countries="VN"  ;input=list(); input$toflow="istrax_global"
     #colorings=list(green=green_classes,battery=battery_classes,hard_to_abate=hard_to_abate_classes,ai=ai_classes)
     
+    # Calculate responsive dimensions - wider browser = wider plot
+    plot_width <- max(window_dims$width, 400)
+    # Convert pixels to inches (assuming 96 dpi), with aspect ratio that varies with width
+    width_inches <- plot_width / 96
+    # Wider windows get wider aspect ratio (less height per width)
+    aspect_ratio <- ifelse(plot_width > 1200, 0.4, ifelse(plot_width > 800, 0.5, 0.6))
+    height_inches <- width_inches * aspect_ratio
+
     p <- plot_avstrax_by_country(
       pdata = patchar_countrymap(),
       classes = filtered_techmap,
@@ -585,27 +607,33 @@ server <- function(input, output) {
       custom_colors = custom_colors,
       colorings=colorings,
       bwidthscale=input$bwidthscale,
-      display_mode=input$display_mode
+      display_mode=input$display_mode,
+      show_top3_ids=input$show_top3_ids,
+      width_svg = width_inches,
+      height_svg = height_inches,
+      plot_title = flow_label
       #battery_classes = battery_classes,
       #hard_to_abate_classes = hard_to_abate_classes
-    ) + ggtitle("")
+    )
 
     p
   })
-  
-  
-  output$avstrax_plot2 <- renderPlot({
+
+
+  output$avstrax_plot2 <- renderGirafe({
     req(input$country,
         input$toflow,
         input$techs,
         input$topn,
         input$mininno,
         input$bwidthscale,
-        input$display_mode)
+        input$display_mode,
+        !is.null(input$show_top3_ids))
     
     selected_countries <- expand_country_selection(input$country)
-    flow_label <- names(toflow_choices)[toflow_choices == input$toflow]
-    
+    # Get the label from the nested toflow_choices list
+    flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
+
     validate(
       need(exists("plot_avstrax_by_country"), "Function 'plot_avstrax_by_country' not found in the environment."),
       need(exists("patchar_countrymap"), "Object 'patchar_countrymap' not found."),
@@ -627,6 +655,14 @@ server <- function(input, output) {
     
     #filtered= patchar_countrymap %>%    filter(ctry_code %in% c("VN","GB") )  
     #input=list(techs="AI",toflow="istrax_global")
+    # Calculate responsive dimensions - wider browser = wider plot
+    plot_width <- max(window_dims$width, 400)
+    # Convert pixels to inches (assuming 96 dpi), with aspect ratio that varies with width
+    width_inches <- plot_width / 96
+    # Wider windows get wider aspect ratio (less height per width)
+    aspect_ratio <- ifelse(plot_width > 1200, 0.4, ifelse(plot_width > 800, 0.5, 0.6))
+    height_inches <- width_inches * aspect_ratio
+
     p <- plot_avstrax_by_technology(
       pdata = filtered,
       classes = techmap,
@@ -640,9 +676,13 @@ server <- function(input, output) {
       topn=input$topn,
       mininno=input$mininno,
       bwidthscale=input$bwidthscale,
-      display_mode=input$display_mode
-    ) + ggtitle("")
-    
+      display_mode=input$display_mode,
+      show_top3_ids=input$show_top3_ids,
+      width_svg = width_inches,
+      height_svg = height_inches,
+      plot_title = flow_label
+    )
+
     p
   })
   
