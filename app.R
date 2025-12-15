@@ -317,6 +317,10 @@ ui <- function(request){fluidPage(
         color: #34495E;
         margin-bottom: 20px;
       }
+      /* Ensure ggiraph/plot text matches the app's sans-serif font */
+      .girafe_container svg text, .girafe_container svg tspan {
+        font-family: 'Arial', sans-serif !important;
+      }
     "))
   ),
   
