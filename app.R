@@ -309,6 +309,14 @@ ui <- function(request){fluidPage(
   
   # Add custom CSS
   tags$head(
+    tags$script(async = NA, 
+                src = "https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"),
+    tags$script(HTML("
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-YY70D2F685');
+    ")),
     tags$style(HTML("
       h1 {
         font-family: 'Courier New', monospace;
