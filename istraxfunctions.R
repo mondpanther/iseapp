@@ -258,6 +258,7 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
                 options = list(
                   opts_sizing(rescale = TRUE, width = 1),
                   opts_hover(css = "cursor:pointer;fill:yellow;"),
+                  opts_selection(type = "none"),
                   opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
                 )))
 }
@@ -516,6 +517,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
                 options = list(
                   opts_sizing(rescale = TRUE, width = 1),
                   opts_hover(css = "cursor:pointer;fill:yellow;"),
+                  opts_selection(type = "none"),
                   opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
                 )))
 }
