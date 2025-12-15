@@ -80,9 +80,8 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
       .groups = "drop"
     ) %>%
     mutate(
-      # Create Google search URL for top 3 IDs (use double quotes for JS to avoid HTML attribute conflicts)
-      top3_ids_url = paste0('window.open("https://www.google.com/search?q=',
-                            sapply(top3_ids, utils::URLencode, reserved = TRUE), '")'),
+      # Create Espacenet search URL for top 3 IDs (use double quotes for JS to avoid HTML attribute conflicts)
+      top3_ids_url = build_espacenet_search(top3_ids),
       greenclass = ifelse(technology %in% unlist(colorings["green"]), "green",
                           ifelse( technology %in% unlist(colorings["battery"]), "battery", 
                                   ifelse( technology %in% unlist(colorings["hard_to_abate"]), "hard to abate",
@@ -335,9 +334,8 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
       .groups = "drop"
     ) %>%
     mutate(
-      # Create Google search URL for top 3 IDs (use double quotes for JS to avoid HTML attribute conflicts)
-      top3_ids_url = paste0('window.open("https://www.google.com/search?q=',
-                            sapply(top3_ids, utils::URLencode, reserved = TRUE), '")')
+      # Create Espacenet search URL for top 3 IDs (use double quotes for JS to avoid HTML attribute conflicts)
+      top3_ids_url = build_espacenet_search(top3_ids)
     )
 
   return(avstrax)
@@ -522,4 +520,14 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
                 )))
 }
 
+
+# Build Espacenet search URLs for a comma-separated list of application IDs
+build_espacenet_search <- function(id_strings) {
+  sapply(id_strings, function(ids) {
+    id_vec <- unlist(strsplit(ids, ",\\s*"))
+    query <- paste(paste0("ap=", id_vec), collapse = " OR ")
+    paste0('window.open("https://worldwide.espacenet.com/patent/search?q=',
+           utils::URLencode(query, reserved = TRUE), '")')
+  })
+}
 
