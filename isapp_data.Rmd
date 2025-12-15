@@ -80,6 +80,8 @@ write_fst(countrymap, pp,compress=100)
 
 # Explicitly search by application number
 application_id <- "CA20132889477"
+
+application_id="EP12718476"
 #url <- paste0("https://worldwide.espacenet.com/patent/search?q=pn=", application_id)
 
 # Or use application number field
