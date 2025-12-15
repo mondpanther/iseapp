@@ -2256,6 +2256,39 @@
         "Archs": "x64"
       }
     },
+    "gfonts": {
+      "Source": "CRAN",
+      "Repository": "https://cran.rstudio.com",
+      "description": {
+        "Package": "gfonts",
+        "Title": "Offline 'Google' Fonts for 'Markdown' and 'Shiny'",
+        "Version": "0.2.0",
+        "Authors@R": "c(\n  person(\"Victor\", \"Perrier\", email = \"victor.perrier@dreamrs.fr\", role = c(\"aut\", \"cre\")),\n  person(\"Fanny\", \"Meyer\", role = \"aut\"),\n  person(\"Mario\", \"Ranftl\", role = c(\"ctb\", \"cph\"), comment = \"google-webfonts-helper\"))",
+        "Description": "Download 'Google' fonts and generate 'CSS' to use in 'rmarkdown' documents and \n  'shiny' applications. Some popular fonts are included and ready to use.",
+        "URL": "https://dreamrs.github.io/gfonts/,\nhttps://github.com/dreamRs/gfonts",
+        "BugReports": "https://github.com/dreamRs/gfonts/issues",
+        "License": "GPL-3",
+        "Encoding": "UTF-8",
+        "LazyData": "true",
+        "Depends": "R (>= 2.10)",
+        "Imports": "utils, htmltools, shiny, crul, jsonlite, glue, crayon",
+        "RoxygenNote": "7.2.2",
+        "Suggests": "knitr, rmarkdown, testthat (>= 2.1.0), vcr, covr",
+        "VignetteBuilder": "knitr",
+        "NeedsCompilation": "no",
+        "Packaged": "2023-01-08 18:26:46 UTC; victor",
+        "Author": "Victor Perrier [aut, cre],\n  Fanny Meyer [aut],\n  Mario Ranftl [ctb, cph] (google-webfonts-helper)",
+        "Maintainer": "Victor Perrier <victor.perrier@dreamrs.fr>",
+        "Repository": "CRAN",
+        "Date/Publication": "2023-01-08 18:50:02 UTC",
+        "Built": "R 4.4.3; ; 2025-12-12 04:19:11 UTC; windows",
+        "RemoteType": "standard",
+        "RemotePkgRef": "gfonts",
+        "RemoteRef": "gfonts",
+        "RemoteRepos": "https://cran.rstudio.com",
+        "RemoteSha": "0.2.0"
+      }
+    },
     "ggiraph": {
       "Source": "CRAN",
       "Repository": "https://cran.rstudio.com",
@@ -6279,7 +6312,7 @@
       "checksum": "48a7623e2c9b8866c7bb871fc3db7b9d"
     },
     "app.R": {
-      "checksum": "3e560d8ca548d99fb03141037a548ab4"
+      "checksum": "2b694ce94fdc353e23a198e73ee4fa87"
     },
     "checking.nb.html": {
       "checksum": "c67daf34470f24725484e70049954250"

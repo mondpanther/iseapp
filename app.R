@@ -14,8 +14,10 @@ library(fst)
 library(shinycssloaders)
 library(httr2)
 library(ggiraph)
-source("dropbox_auth.R")
 library(gdtools)
+library(gfonts)
+source("dropbox_auth.R")
+
 
 # Register Google Font
 register_gfont("Open Sans")
