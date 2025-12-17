@@ -45,12 +45,12 @@ if(file.exists(pp)){
 enableBookmarking(store = "url")
 
 # Harmonize UI and plot fonts across environments
-thematic::thematic_shiny(font = "Arial")
+thematic::thematic_shiny(font = "Open Sans")
 
 # Ensure figures default to a sans-serif font as well
-theme_set(theme_minimal(base_family = "Arial"))
-update_geom_defaults("text", list(family = "Arial"))
-update_geom_defaults("label", list(family = "Arial"))
+theme_set(theme_minimal(base_family = "Open Sans"))
+update_geom_defaults("text", list(family = "Open Sans"))
+update_geom_defaults("label", list(family = "Open Sans"))
 
 # Load data
 
@@ -285,7 +285,7 @@ default_country <- if ("VN" %in% vals) "VN" else if (length(vals) > 0) vals[1] e
 
 
 # Define a Bootstrap theme with a consistent base font
-base_theme <- bs_theme(base_font = "Arial")
+base_theme <- bs_theme(base_font = "Open Sans")
 
 
 
@@ -325,7 +325,7 @@ ui <- function(request){fluidPage(
         color: #2C3E50;
       }
       .intro-text {
-        font-family: 'Arial', sans-serif;
+        font-family: 'Open Sans', sans-serif;
         font-size: 20px;
         color: #34495E;
         margin-bottom: 20px;
@@ -344,7 +344,7 @@ ui <- function(request){fluidPage(
   tags$style(HTML("
   details {
     margin-bottom: 20px;
-    font-family: 'Arial', sans-serif;
+    font-family: 'Open Sans', sans-serif;
     font-size: 15px;
     color: #34495E;
   }
