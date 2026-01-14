@@ -1,0 +1,180 @@
+---
+title: "Prep UK Regions"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries}
+library(bigrquery)
+library(DBI)
+library(fst)
+library(dplyr)
+library(jsonlite)
+```
+
+# Helper function to find Dropbox path
+
+```{r find_dropbox}
+get_dropbox_path <- function() {
+
+  # Dropbox stores its configuration in info.json
+  # This works for both personal and team Dropbox accounts
+
+  if (.Platform$OS.type == "windows") {
+    # On Windows, check both APPDATA and LOCALAPPDATA
+    info_paths <- c(
+      file.path(Sys.getenv("APPDATA"), "Dropbox", "info.json"),
+      file.path(Sys.getenv("LOCALAPPDATA"), "Dropbox", "info.json")
+    )
+  } else {
+    # On Mac/Linux
+    info_paths <- file.path(Sys.getenv("HOME"), ".dropbox", "info.json")
+  }
+
+  # Find the first existing info.json
+  info_path <- NULL
+  for (p in info_paths) {
+    if (file.exists(p)) {
+      info_path <- p
+      break
+    }
+  }
+
+  if (is.null(info_path)) {
+    stop("Could not find Dropbox info.json. Is Dropbox installed?")
+  }
+
+  # Read the JSON file
+  info <- fromJSON(info_path)
+
+  # Prefer business/team Dropbox if available, otherwise use personal
+  if (!is.null(info$business)) {
+    return(info$business$path)
+  } else if (!is.null(info$personal)) {
+    return(info$personal$path)
+  } else {
+    stop("Could not find Dropbox path in info.json")
+  }
+}
+
+# Get the Dropbox path
+dropbox_root <- get_dropbox_path()
+message("Found Dropbox at: ", dropbox_root)
+```
+
+# Download NUTS1 data from BigQuery
+
+```{r download_nuts1}
+# Set your project ID
+project_id <- "patbis"
+
+# Specify dataset and table name
+# Note: table is named nuts2 but actually contains NUTS1 codes (3 chars)
+dataset <- "spatial"
+table <- "docdb_nuts2_v3"
+
+# Download the entire table
+docdb_nuts1 <- bq_table_download(
+  bq_table(project_id, dataset, table)
+)
+
+
+# Rename region_code to nuts1_code for clarity
+docdb_nuts1 <- docdb_nuts1 %>%
+  rename(nuts1_code = region_code)
+
+# Preview the data
+head(docdb_nuts1)
+```
+
+# Filter to keep only families in countrymap
+
+```{r filter_countrymap}
+# Read countrymap.fst from Dropbox
+countrymap_path <- file.path(dropbox_root, "Apps", "iseapp", "countrymap.fst")
+countrymap <- read_fst(countrymap_path)
+
+# Filter to keep only docdb_family_ids that exist in countrymap
+n_before <- nrow(docdb_nuts1)
+
+docdb_nuts1 <- docdb_nuts1 %>%
+  semi_join(countrymap, by = "docdb_family_id")
+
+n_after <- nrow(docdb_nuts1)
+
+message("Filtered from ", n_before, " to ", n_after, " observations")
+
+# Show distinct NUTS1 regions after filtering
+docdb_nuts1 %>%
+  distinct(nuts1_code) %>%
+  arrange(nuts1_code)
+```
+
+# Add NUTS1 region names
+
+```{r add_region_names}
+# UK NUTS1 region lookup table
+nuts1_names <- tibble::tribble(
+  ~nuts1_code, ~nuts1_name,
+  "UKC", "North East England",
+  "UKD", "North West England",
+  "UKE", "Yorkshire and The Humber",
+  "UKF", "East Midlands",
+  "UKG", "West Midlands",
+  "UKH", "East of England",
+  "UKI", "London",
+  "UKJ", "South East England",
+  "UKK", "South West England",
+  "UKL", "Wales",
+  "UKM", "Scotland",
+  "UKN", "Northern Ireland"
+)
+
+# Join region names to the data
+docdb_nuts1 <- docdb_nuts1 %>%
+  left_join(nuts1_names, by = "nuts1_code")
+
+# Preview
+head(docdb_nuts1)
+
+# Check for any unmatched codes
+unmatched <- docdb_nuts1 %>%
+  filter(is.na(nuts1_name)) %>%
+  distinct(nuts1_code)
+
+matched <- docdb_nuts1 %>%
+  filter(!is.na(nuts1_name)) %>%
+  distinct(nuts1_code)
+
+
+if (nrow(unmatched) > 0) {
+  warning("Unmatched NUTS1 codes: ", paste(unmatched$nuts1_code, collapse = ", "))
+} else {
+  message("All NUTS1 codes matched to region names")
+}
+
+message("Matched NUTS1 codes: ", paste(matched$nuts1_code, collapse = ", "))
+
+# Keep only matched codes
+docdb_nuts1 <- docdb_nuts1 %>%
+  filter(!is.na(nuts1_name))
+```
+
+# Save to local Dropbox
+
+```{r save_fst}
+# Define the output path in Dropbox Apps/iseapp folder
+output_path <- file.path(dropbox_root, "Apps", "iseapp", "docdb_nuts1.fst")
+
+# Create directory if it doesn't exist
+dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
+
+# Write the data as fst file
+write_fst(docdb_nuts1, output_path, compress = 100)
+
+message("Data saved to: ", output_path)
+```
+
