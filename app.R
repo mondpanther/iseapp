@@ -479,12 +479,12 @@ ui <- function(request){fluidPage(
       inputId = "display_mode",
       label = "Display mode",
       choices = c("Confidence bands" = "confidence", "Returns for the top 25 and top 50 percent" = "quartiles"),
-      selected = "quartiles"
+      selected = "confidence"
     ),
     checkboxInput(
       inputId = "show_top3_ids",
       label = "Show top patent IDs",
-      value = FALSE
+      value = TRUE
     )
   ),
 
