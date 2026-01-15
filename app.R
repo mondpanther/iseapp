@@ -628,6 +628,14 @@ ui <- function(request){fluidPage(
           multiple = TRUE,
           options = list(placeholder = 'Choose one or more technology categories...')
         ),
+        selectizeInput(
+          inputId = "techs_comparison",
+          label = "Comparison categories (optional)",
+          choices = grouped_techs,
+          selected = NULL,
+          multiple = TRUE,
+          options = list(placeholder = 'Choose categories to compare...')
+        ),
         sliderInput(
           inputId = "topn",
           label = "Show top n countries",
@@ -710,6 +718,14 @@ ui <- function(request){fluidPage(
           selected = "Green Technology",
           multiple = TRUE,
           options = list(placeholder = 'Choose one or more technology categories...')
+        ),
+        selectizeInput(
+          inputId = "techs_comparison_region",
+          label = "Comparison categories (optional)",
+          choices = grouped_techs,
+          selected = NULL,
+          multiple = TRUE,
+          options = list(placeholder = 'Choose categories to compare...')
         ),
         sliderInput(
           inputId = "topn_region",
@@ -891,21 +907,18 @@ server <- function(input, output, session) {
     p <- plot_avstrax_by_technology(
       pdata = filtered,
       classes = techmap,
-      #green_classes = green_classes,
-
-      #country_code = selected_countries,
-      technologies=input$techs,
-
+      technologies = input$techs,
       toflow = input$toflow,
       custom_colors = custom_colors,
-      topn=input$topn,
-      mininno=input$mininno,
-      bwidthscale=input$bwidthscale,
-      display_mode=input$display_mode,
-      show_top3_ids=input$show_top3_ids,
+      topn = input$topn,
+      mininno = input$mininno,
+      bwidthscale = input$bwidthscale,
+      display_mode = input$display_mode,
+      show_top3_ids = input$show_top3_ids,
       width_svg = width_inches,
       height_svg = height_inches,
-      plot_title =  sub("^[^.]*\\.", "", flow_label)
+      plot_title = sub("^[^.]*\\.", "", flow_label),
+      comparison_technologies = input$techs_comparison
     )
 
     p
@@ -1044,7 +1057,8 @@ server <- function(input, output, session) {
       width_svg = width_inches,
       height_svg = height_inches,
       plot_title = sub("^[^.]*\\.", "", flow_label),
-      x_label = "Region"
+      x_label = "Region",
+      comparison_technologies = input$techs_comparison_region
     )
 
     p

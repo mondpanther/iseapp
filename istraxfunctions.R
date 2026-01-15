@@ -373,63 +373,73 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
                                        width_svg=10,
                                        height_svg=6,
                                        plot_title="Spillover returns",
-                                       x_label="Country") {
+                                       x_label="Country",
+                                       comparison_technologies=NULL) {
   #mininno=30;topn=20;  pdata=patchar_countrymap;toflow="istrax_global"; classes=techmap; green_classes=green_classes; technologies="Green Energy"
 
   library(dplyr)
   library(ggplot2)
-  
   library(patchwork)
-  # Filter by technology class
+  library(countrycode)
+
+  # Check if we have comparison technologies
+  has_comparison <- !is.null(comparison_technologies) && length(comparison_technologies) > 0
+
+  # Filter by technology class for main selection
   filtered <- classes %>%
-    filter(technology %in% technologies )  %>%
+    filter(technology %in% technologies) %>%
     distinct()
-  
-  if("All Innovations" %in% technologies) filtered=data.frame()
-  # Compute avstrax
-  avstrax <- compute_avstrax_for_techs(pdata, toflow, filtered)#, green_classes)
-  
-  
-  
-  
-  
-  
-  # Extract mean for "All"
+
+  if("All Innovations" %in% technologies) filtered <- data.frame()
+
+  # Compute avstrax for main technologies
+  avstrax <- compute_avstrax_for_techs(pdata, toflow, filtered)
+  avstrax$group <- "Main"
+
+  # If comparison technologies are selected, compute for those too
+  if (has_comparison) {
+    filtered_comp <- classes %>%
+      filter(technology %in% comparison_technologies) %>%
+      distinct()
+
+    if("All Innovations" %in% comparison_technologies) filtered_comp <- data.frame()
+
+    avstrax_comp <- compute_avstrax_for_techs(pdata, toflow, filtered_comp)
+    avstrax_comp$group <- "Comparison"
+  }
+
+  # Extract mean for "All" from main selection
   allmean <- avstrax %>%
-    filter( ctry_code=="All") %>%
+    filter(ctry_code == "All") %>%
     pull(mean)
 
-  innos=  avstrax %>%
-    filter( ctry_code=="All") %>%
+  innos <- avstrax %>%
+    filter(ctry_code == "All") %>%
     pull(innos)
 
   # Handle edge case where allmean or innos is empty
   if (length(allmean) == 0) allmean <- 0
   if (length(innos) == 0) innos <- 0
 
-  # Prepare data for plotting
-
-  library(countrycode)
-
   # Use existing country_name if available (e.g., for regions), otherwise use countrycode
   if (!"country_name" %in% names(avstrax) || all(is.na(avstrax$country_name))) {
     avstrax$country_name <- countrycode(avstrax$ctry_code, origin = "iso2c", destination = "country.name.en")
   }
-  
-  
-  
-  
-  avstrax$ctry_code    <- factor(avstrax$ctry_code, levels = avstrax$ctry_code[order(avstrax$mean)])
-  avstrax$country_name <- factor(avstrax$country_name, levels = avstrax$country_name[order(avstrax$mean)])
-  
+
+  if (has_comparison) {
+    if (!"country_name" %in% names(avstrax_comp) || all(is.na(avstrax_comp$country_name))) {
+      avstrax_comp$country_name <- countrycode(avstrax_comp$ctry_code, origin = "iso2c", destination = "country.name.en")
+    }
+  }
+
+  # Filter and order main data
   avstrax <- avstrax %>%
-    filter( ctry_code!="All",innos>=mininno) %>%
+    filter(ctry_code != "All", innos >= mininno) %>%
     arrange(-mean) %>%
     head(topn)
 
   # Check if we have data to plot
   if (nrow(avstrax) == 0) {
-    # Return empty plot with message
     p <- ggplot() +
       annotate("text", x = 0.5, y = 0.5, label = "No data available for selected filters", size = 6) +
       theme_void()
@@ -439,76 +449,150 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
                   options = list(opts_sizing(rescale = TRUE, width = 1))))
   }
 
-  # Recreate country_name as factor with correct levels after filtering
-  avstrax$country_name <- factor(as.character(avstrax$country_name),
-                                  levels = as.character(avstrax$country_name[order(avstrax$mean)]))
+  # Set factor levels based on main data ordering
+  country_order <- as.character(avstrax$country_name[order(avstrax$mean)])
+  avstrax$country_name <- factor(as.character(avstrax$country_name), levels = country_order)
+  avstrax$x_pos <- as.numeric(avstrax$country_name)
 
-  avstrax <- avstrax %>%
-    mutate(
-      #linnos = log(innos),
-      linnos1 = innos,
-      linnos2 = log(1+innos),
-      bwidthscale=bwidthscale,
-      linnos=ifelse(bwidthscale=="log",linnos2,linnos1),
-      width = linnos / max(linnos),
+  # Compute bar widths for main data
+  # Width is proportional to share of innovations (or log of share if log scale)
+  if (bwidthscale == "log") {
+    avstrax$width_raw <- log(1 + avstrax$innos)
+  } else {
+    avstrax$width_raw <- avstrax$innos
+  }
+  max_width_main <- max(avstrax$width_raw)
+  avstrax$width <- avstrax$width_raw / max_width_main
 
-      #width =ifelse( innos / max(innos)>win_thres,innos / max(innos),win_thres),
+  # Prepare comparison data if available
+  has_comp_data <- FALSE
+  max_width_comp <- 0
+  if (has_comparison) {
+    # Filter comparison data to same countries as main
+    avstrax_comp <- avstrax_comp %>%
+      filter(ctry_code %in% avstrax$ctry_code)
 
-      # Store x position consistently for bars and error bars
-      x_pos = as.numeric(country_name),
-      xmin = x_pos - width / 2,
-      xmax = x_pos + width / 2,
-      ymin = 0,
-      ymax = mean
-    )
+    if (nrow(avstrax_comp) > 0) {
+      has_comp_data <- TRUE
+      avstrax_comp$country_name <- factor(as.character(avstrax_comp$country_name), levels = country_order)
+      avstrax_comp$x_pos <- as.numeric(avstrax_comp$country_name)
 
+      # Compute bar widths for comparison data (separately)
+      if (bwidthscale == "log") {
+        avstrax_comp$width_raw <- log(1 + avstrax_comp$innos)
+      } else {
+        avstrax_comp$width_raw <- avstrax_comp$innos
+      }
+      max_width_comp <- max(avstrax_comp$width_raw)
+      avstrax_comp$width <- avstrax_comp$width_raw / max_width_comp
+    }
+  }
+
+  # Calculate bar positions
+  # Allocate space per country: 2x max bar width if comparison, 1x if no comparison
+  # This ensures bars never overlap
+  bar_gap <- 0.1  # Gap between grouped bars
+
+  if (has_comp_data) {
+    # Space allocation: enough for largest bar from each category plus gap
+    # Scale widths so max width = 0.4 (leaving room for gap and second bar)
+    scale_factor <- 0.4
+    avstrax$width_scaled <- avstrax$width * scale_factor
+    avstrax_comp$width_scaled <- avstrax_comp$width * scale_factor
+
+    # Position main bar on the left side
+    avstrax <- avstrax %>%
+      mutate(
+        xmin = x_pos - scale_factor - bar_gap/2,
+        xmax = xmin + width_scaled,
+        ymin = 0,
+        ymax = mean
+      )
+
+    # Position comparison bar on the right side
+    avstrax_comp <- avstrax_comp %>%
+      mutate(
+        xmin = x_pos + bar_gap/2,
+        xmax = xmin + width_scaled,
+        ymin = 0,
+        ymax = mean
+      )
+  } else {
+    # Single bar - scale so max width = 0.8 (centered)
+    scale_factor <- 0.8
+    avstrax$width_scaled <- avstrax$width * scale_factor
+
+    avstrax <- avstrax %>%
+      mutate(
+        xmin = x_pos - width_scaled / 2,
+        xmax = x_pos + width_scaled / 2,
+        ymin = 0,
+        ymax = mean
+      )
+  }
 
   # Create the plot
-  ylab=ifelse(grepl("strax", toflow ),"Return in %","Millions of $")
+  ylab <- ifelse(grepl("strax", toflow), "Return in %", "Millions of $")
+
+  # Define colors for main and comparison
+  main_color <- "#3498db"
+  comp_color <- "#e74c3c"
 
   # Use interactive bars if show_top3_ids is enabled
   if (show_top3_ids) {
-    p <- ggplot(avstrax) +
-      geom_rect_interactive(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
-                                 data_id = country_name,
-                                 tooltip = paste0("Top IDs: ", top3_ids),
-                                 onclick = top3_ids_url),
-                            fill = "#3498db")
+    p <- ggplot() +
+      geom_rect_interactive(data = avstrax,
+                            aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
+                                data_id = country_name,
+                                tooltip = paste0("Main - Top IDs: ", top3_ids),
+                                onclick = top3_ids_url),
+                            fill = main_color)
+    if (has_comp_data) {
+      p <- p + geom_rect_interactive(data = avstrax_comp,
+                                     aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
+                                         data_id = paste0(country_name, "_comp"),
+                                         tooltip = paste0("Comparison - Top IDs: ", top3_ids),
+                                         onclick = top3_ids_url),
+                                     fill = comp_color)
+    }
   } else {
-    p <- ggplot(avstrax) +
-      geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
-                fill = "#3498db")
+    p <- ggplot() +
+      geom_rect(data = avstrax,
+                aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+                fill = main_color)
+    if (has_comp_data) {
+      p <- p + geom_rect(data = avstrax_comp,
+                         aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+                         fill = comp_color)
+    }
   }
 
   # Add either confidence bands or quartile means based on display_mode
+  # Position error bars at the center of each bar: (xmin + xmax) / 2
   if (display_mode == "confidence") {
-    p <- p + geom_errorbar(aes(x = x_pos, ymin = ifelse(mean- 1.96 * sem>0,mean- 1.96 * sem,0) ,
+    p <- p + geom_errorbar(data = avstrax,
+                           aes(x = (xmin + xmax) / 2,
+                               ymin = ifelse(mean - 1.96 * sem > 0, mean - 1.96 * sem, 0),
                                ymax = mean + 1.96 * sem),
-                           width = 0.2, color = "black", linewidth = .4, alpha = .4)
+                           width = 0.15, color = "black", linewidth = .4, alpha = .4)
+    if (has_comp_data) {
+      p <- p + geom_errorbar(data = avstrax_comp,
+                             aes(x = (xmin + xmax) / 2,
+                                 ymin = ifelse(mean - 1.96 * sem > 0, mean - 1.96 * sem, 0),
+                                 ymax = mean + 1.96 * sem),
+                             width = 0.15, color = "black", linewidth = .4, alpha = .4)
+    }
   } else if (display_mode == "quartiles") {
-#    p <- p +
-#         geom_errorbar(aes(ymin = q1_bin_mean,
-#                           ymax = q2,width=width),
-#                           width = 0.2, color = "brown",
-#                           linewidth = .4, alpha = .5)+
-#        geom_errorbar(aes(ymin = q2, ymax = q4_bin_mean,width=width),
-#                      color = "brown",
-#                      linewidth = .4, alpha = .5)
-
-
-    p <- p + #geom_errorbar(aes(x = x_pos,ymin = q1_bin_mean, ymax = q2_bin_mean, width = width),
-             #               color = "brown",
-             #               linewidth = .5, alpha = .5)+
-      #geom_errorbar(aes(x = x_pos,ymin = q2_bin_mean, ymax = q2,width = width),
-      #              color = "#3498db",
-      #              linewidth = .5, alpha = .5)+
-
-      #geom_errorbar(aes(x = x_pos,ymin = q2, ymax = q3_bin_mean,width = width),
-      #              color = "#3498db",
-      #              linewidth = .5, alpha = .5)+
-
-      geom_errorbar(aes(x = x_pos, ymin = top50_bin_mean, ymax = top25_bin_mean,width=width),
-                    color = "#3498db",linewidth = .5, alpha = .5)
+    p <- p + geom_errorbar(data = avstrax,
+                           aes(x = (xmin + xmax) / 2,
+                               ymin = top50_bin_mean, ymax = top25_bin_mean, width = width_scaled),
+                           color = main_color, linewidth = .5, alpha = .5)
+    if (has_comp_data) {
+      p <- p + geom_errorbar(data = avstrax_comp,
+                             aes(x = (xmin + xmax) / 2,
+                                 ymin = top50_bin_mean, ymax = top25_bin_mean, width = width_scaled),
+                             color = comp_color, linewidth = .5, alpha = .5)
+    }
   }
 
   p <- p +
@@ -516,8 +600,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
     labs(
       title = plot_title,
       x = x_label,
-      y = ylab,
-      fill = x_label
+      y = ylab
     ) +
     theme_minimal(base_family = "Open Sans") +
     theme(
@@ -531,16 +614,22 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
     ) +
     geom_hline(yintercept = allmean, linetype = "dashed", color = "black", linewidth = 1) +
     coord_flip()
-  
-  
+
+  # Build subtitle with legend info
+  subtitle_text <- paste0(as.character(innos), " Innovations")
+  if (has_comp_data) {
+    subtitle_text <- paste0(subtitle_text, "
+Main: ", paste(technologies, collapse = ", "),
+                            " | Comparison: ", paste(comparison_technologies, collapse = ", "))
+  }
+
   # Add subtitle and caption
-  p <- p + labs(subtitle = paste0(as.character(innos), " Innovations"),
+  p <- p + labs(subtitle = subtitle_text,
                 caption = "© 2025 Innovation Strategy Explorer") +
-    theme(plot.subtitle = element_text(size = 14, hjust = 0.5),
+    theme(plot.subtitle = element_text(size = 11, hjust = 0.5),
           plot.caption = element_text(hjust = 1, size = 10, color = "gray"))
 
   # Return girafe object for Shiny girafeOutput compatibility
-  # Use responsive sizing with dynamic width/height based on browser window
   return(girafe(ggobj = p,
                 width_svg = width_svg,
                 height_svg = height_svg,
