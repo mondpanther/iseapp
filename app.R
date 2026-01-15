@@ -561,6 +561,9 @@ ui <- function(request){fluidPage(
     });
   ")),
 
+  # Spacer between bookmark button and tabs
+  tags$div(style = "margin-top: 20px;"),
+
   # Tabbed interface
   tabsetPanel(
     id = "main_tabs",
