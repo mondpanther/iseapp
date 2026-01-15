@@ -119,24 +119,16 @@ if(file.exists(pp)){
   countrymap <- dropbox_read_fst("/countrymap.fst")}
 
 # Load regionmap for Region Explorer tab
-regionmap <- NULL
-regionmap_available <- FALSE
 pp_region=localpath_fname("/regionmap.fst")
 if(file.exists(pp_region)){
   regionmap <- read_fst(pp_region)
-  regionmap_available <- TRUE
-  message("Regionmap loaded with ", nrow(regionmap), " rows")
-  message("Regionmap columns: ", paste(names(regionmap), collapse = ", "))
+  message("Regionmap loaded locally with ", nrow(regionmap), " rows")
 } else {
-  tryCatch({
-    regionmap <<- dropbox_read_fst("/regionmap.fst")
-    regionmap_available <<- TRUE
-    message("Regionmap loaded from Dropbox")
-    message("Regionmap columns: ", paste(names(regionmap), collapse = ", "))
-  }, error = function(e) {
-    message("Regionmap not available - Region Explorer will be disabled: ", e$message)
-  })
+  regionmap <- dropbox_read_fst("/regionmap.fst")
+  message("Regionmap loaded from Dropbox with ", nrow(regionmap), " rows")
 }
+regionmap_available <- !is.null(regionmap) && nrow(regionmap) > 0
+message("Regionmap columns: ", paste(names(regionmap), collapse = ", "))
 
 
 
