@@ -740,18 +740,24 @@ ui <- function(request){fluidPage(
 server <- function(input, output, session) {
 
   # Reactive values for window dimensions
-  window_dims <- reactiveValues(width = 800, height = 600)
+  window_dims <- reactiveValues(width = 800, height = 600, initialized = FALSE)
 
   # Track window resize events
   observe({
     # Get the output container dimensions from session clientData
     w1 <- session$clientData$output_avstrax_plot1_width
     w2 <- session$clientData$output_avstrax_plot2_width
+    w3 <- session$clientData$output_avstrax_plot1_region_width
+    w4 <- session$clientData$output_avstrax_plot2_region_width
 
-    # Use the larger of the two widths, or default
-    w <- max(c(w1, w2, 400), na.rm = TRUE)
-    if (!is.null(w) && !is.na(w) && w > 0) {
+    # Use the larger of the widths, or default
+    w <- max(c(w1, w2, w3, w4, 400), na.rm = TRUE)
+    if (!is.null(w) && !is.na(w) && w > 400) {
       window_dims$width <- w
+      window_dims$initialized <- TRUE
+    } else {
+      # Keep checking until we get valid dimensions (important for bookmark restoration)
+      invalidateLater(100)
     }
   })
   
@@ -790,7 +796,8 @@ server <- function(input, output, session) {
   
   output$avstrax_plot1 <- renderGirafe({
     req(input$country, input$toflow, input$tech_categories_plot1, input$bwidthscale, input$display_mode, !is.null(input$show_top3_ids))
-    
+    req(window_dims$initialized)  # Wait for valid dimensions (important for bookmark restoration)
+
     selected_countries <- expand_country_selection(input$country)
     # Get the label from the nested toflow_choices list
     flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
@@ -857,7 +864,8 @@ server <- function(input, output, session) {
         input$bwidthscale,
         input$display_mode,
         !is.null(input$show_top3_ids))
-    
+    req(window_dims$initialized)  # Wait for valid dimensions (important for bookmark restoration)
+
     selected_countries <- expand_country_selection(input$country)
     # Get the label from the nested toflow_choices list
     flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
@@ -943,6 +951,7 @@ server <- function(input, output, session) {
   output$avstrax_plot1_region <- renderGirafe({
     req(input$region, input$toflow_region, input$tech_categories_plot1_region,
         input$bwidthscale_region, input$display_mode_region, !is.null(input$show_top3_ids_region))
+    req(window_dims$initialized)  # Wait for valid dimensions (important for bookmark restoration)
 
     # Check if regionmap is available
     shiny::validate(shiny::need(regionmap_available, "Region data not available. Please run prep_UK_regions.Rmd first."))
@@ -999,6 +1008,7 @@ server <- function(input, output, session) {
         input$bwidthscale_region,
         input$display_mode_region,
         !is.null(input$show_top3_ids_region))
+    req(window_dims$initialized)  # Wait for valid dimensions (important for bookmark restoration)
 
     # Check if regionmap is available
     shiny::validate(shiny::need(regionmap_available, "Region data not available. Please run prep_UK_regions.Rmd first."))
