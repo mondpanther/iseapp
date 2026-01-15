@@ -491,35 +491,37 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   # Calculate bar positions
   # Allocate space per country: 2x max bar width if comparison, 1x if no comparison
   # This ensures bars never overlap
-  bar_gap <- 0.1  # Gap between grouped bars
+  # Leave larger gaps between countries/regions for clarity
+  bar_gap <- 0.08  # Gap between grouped bars within a country
+  country_gap <- 0.15  # Extra gap between countries (reduces available bar space)
 
   if (has_comp_data) {
-    # Space allocation: enough for largest bar from each category plus gap
-    # Scale widths so max width = 0.4 (leaving room for gap and second bar)
-    scale_factor <- 0.4
+    # Space allocation: enough for largest bar from each category plus gaps
+    # Scale widths so max width = 0.35 (leaving room for gap, second bar, and country spacing)
+    scale_factor <- 0.35
     avstrax$width_scaled <- avstrax$width * scale_factor
     avstrax_comp$width_scaled <- avstrax_comp$width * scale_factor
 
-    # Position main bar on the left side
+    # Position main bar on top (higher x position, since coord_flip makes it appear first)
     avstrax <- avstrax %>%
-      mutate(
-        xmin = x_pos - scale_factor - bar_gap/2,
-        xmax = xmin + width_scaled,
-        ymin = 0,
-        ymax = mean
-      )
-
-    # Position comparison bar on the right side
-    avstrax_comp <- avstrax_comp %>%
       mutate(
         xmin = x_pos + bar_gap/2,
         xmax = xmin + width_scaled,
         ymin = 0,
         ymax = mean
       )
+
+    # Position comparison bar below main (lower x position)
+    avstrax_comp <- avstrax_comp %>%
+      mutate(
+        xmin = x_pos - scale_factor - bar_gap/2,
+        xmax = xmin + width_scaled,
+        ymin = 0,
+        ymax = mean
+      )
   } else {
-    # Single bar - scale so max width = 0.8 (centered)
-    scale_factor <- 0.8
+    # Single bar - scale so max width = 0.7 (centered, with space between countries)
+    scale_factor <- 0.7
     avstrax$width_scaled <- avstrax$width * scale_factor
 
     avstrax <- avstrax %>%
@@ -536,35 +538,57 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
 
   # Define colors for main and comparison
   main_color <- "#3498db"
-  comp_color <- "#e74c3c"
+  comp_color <- "#888888"  # Grey for comparison
+  comp_alpha <- 0.6  # Fainter comparison bars
 
   # Use interactive bars if show_top3_ids is enabled
+  # Add group column for legend
+  avstrax$group <- "Main"
+  if (has_comp_data) {
+    avstrax_comp$group <- "Comparison"
+  }
+
   if (show_top3_ids) {
     p <- ggplot() +
       geom_rect_interactive(data = avstrax,
                             aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
+                                fill = group,
                                 data_id = country_name,
                                 tooltip = paste0("Main - Top IDs: ", top3_ids),
-                                onclick = top3_ids_url),
-                            fill = main_color)
+                                onclick = top3_ids_url))
     if (has_comp_data) {
       p <- p + geom_rect_interactive(data = avstrax_comp,
                                      aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
+                                         fill = group,
                                          data_id = paste0(country_name, "_comp"),
                                          tooltip = paste0("Comparison - Top IDs: ", top3_ids),
                                          onclick = top3_ids_url),
-                                     fill = comp_color)
+                                     alpha = comp_alpha)
     }
   } else {
     p <- ggplot() +
       geom_rect(data = avstrax,
-                aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
-                fill = main_color)
+                aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = group))
     if (has_comp_data) {
       p <- p + geom_rect(data = avstrax_comp,
-                         aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
-                         fill = comp_color)
+                         aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = group),
+                         alpha = comp_alpha)
     }
+  }
+
+  # Set up color scale for legend
+  if (has_comp_data) {
+    p <- p + scale_fill_manual(
+      values = c("Main" = main_color, "Comparison" = comp_color),
+      name = NULL,  # No title for cleaner look
+      breaks = c("Main", "Comparison"),
+      labels = c("Main category", "Comparison category")
+    )
+  } else {
+    p <- p + scale_fill_manual(
+      values = c("Main" = main_color),
+      guide = "none"  # No legend needed for single category
+    )
   }
 
   # Add either confidence bands or quartile means based on display_mode
@@ -610,7 +634,12 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
       axis.text.y = element_text(size = 14),
       text = element_text(family = "Open Sans"),
       axis.text = element_text(family = "Open Sans"),
-      axis.title = element_text(family = "Open Sans")
+      axis.title = element_text(family = "Open Sans"),
+      legend.position = if (has_comp_data) "bottom" else "none",
+      legend.title = element_text(size = 12),
+      legend.text = element_text(size = 11),
+      legend.box.background = element_rect(color = "grey80", linewidth = 0.5),
+      legend.margin = margin(t = 5, r = 10, b = 5, l = 10)
     ) +
     geom_hline(yintercept = allmean, linetype = "dashed", color = "black", linewidth = 1) +
     coord_flip()

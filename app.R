@@ -630,7 +630,7 @@ ui <- function(request){fluidPage(
         ),
         selectizeInput(
           inputId = "techs_comparison",
-          label = "Comparison categories (optional)",
+          label = "Comparison categories",
           choices = grouped_techs,
           selected = NULL,
           multiple = TRUE,
@@ -721,7 +721,7 @@ ui <- function(request){fluidPage(
         ),
         selectizeInput(
           inputId = "techs_comparison_region",
-          label = "Comparison categories (optional)",
+          label = "Comparison categories",
           choices = grouped_techs,
           selected = NULL,
           multiple = TRUE,
