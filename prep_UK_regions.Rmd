@@ -81,44 +81,50 @@ docdb_nuts1 <- bq_table_download(
   bq_table(project_id, dataset, table)
 )
 
-
-# Rename region_code to nuts1_code for clarity
+# Rename region_code to region_code for clarity (keeping consistent naming)
 docdb_nuts1 <- docdb_nuts1 %>%
-  rename(nuts1_code = region_code)
+  rename(region_code = region_code)
 
 # Preview the data
 head(docdb_nuts1)
 ```
 
-# Filter to keep only families in countrymap
+# Filter to keep only families in countrymap and get appln_id
 
 ```{r filter_countrymap}
-# Read countrymap.fst from Dropbox
+# Read countrymap.fst from Dropbox to get the universe of valid docdb_family_ids and appln_ids
 countrymap_path <- file.path(dropbox_root, "Apps", "iseapp", "countrymap.fst")
 countrymap <- read_fst(countrymap_path)
 
-# Filter to keep only docdb_family_ids that exist in countrymap
+# Create lookup for appln_id from countrymap
+appln_id_lookup <- countrymap %>%
+  select(docdb_family_id, appln_id) %>%
+  distinct()
+
+# Filter to keep only docdb_family_ids that exist in countrymap and join appln_id
 n_before <- nrow(docdb_nuts1)
 
 docdb_nuts1 <- docdb_nuts1 %>%
-  semi_join(countrymap, by = "docdb_family_id")
+  inner_join(appln_id_lookup, by = "docdb_family_id")
 
 n_after <- nrow(docdb_nuts1)
 
 message("Filtered from ", n_before, " to ", n_after, " observations")
+message("All rows now have appln_id: ", sum(!is.na(docdb_nuts1$appln_id)), " of ", nrow(docdb_nuts1))
 
-# Show distinct NUTS1 regions after filtering
+# Show distinct regions after filtering
 docdb_nuts1 %>%
-  distinct(nuts1_code) %>%
-  arrange(nuts1_code)
+  distinct(region_code) %>%
+  arrange(region_code)
 ```
 
-# Add NUTS1 region names
+# Add region names
 
 ```{r add_region_names}
 # UK NUTS1 region lookup table
-nuts1_names <- tibble::tribble(
-  ~nuts1_code, ~nuts1_name,
+# This can be expanded in the future to include other regions
+region_names <- tibble::tribble(
+  ~region_code, ~region_name,
   "UKC", "North East England",
   "UKD", "North West England",
   "UKE", "Yorkshire and The Humber",
@@ -135,46 +141,64 @@ nuts1_names <- tibble::tribble(
 
 # Join region names to the data
 docdb_nuts1 <- docdb_nuts1 %>%
-  left_join(nuts1_names, by = "nuts1_code")
+  left_join(region_names, by = "region_code")
 
 # Preview
 head(docdb_nuts1)
 
 # Check for any unmatched codes
 unmatched <- docdb_nuts1 %>%
-  filter(is.na(nuts1_name)) %>%
-  distinct(nuts1_code)
+  filter(is.na(region_name)) %>%
+  distinct(region_code)
 
 matched <- docdb_nuts1 %>%
-  filter(!is.na(nuts1_name)) %>%
-  distinct(nuts1_code)
-
+  filter(!is.na(region_name)) %>%
+  distinct(region_code)
 
 if (nrow(unmatched) > 0) {
-  warning("Unmatched NUTS1 codes: ", paste(unmatched$nuts1_code, collapse = ", "))
+  warning("Unmatched region codes: ", paste(unmatched$region_code, collapse = ", "))
 } else {
-  message("All NUTS1 codes matched to region names")
+  message("All region codes matched to region names")
 }
 
-message("Matched NUTS1 codes: ", paste(matched$nuts1_code, collapse = ", "))
+message("Matched region codes: ", paste(matched$region_code, collapse = ", "))
 
 # Keep only matched codes
 docdb_nuts1 <- docdb_nuts1 %>%
-  filter(!is.na(nuts1_name))
+  filter(!is.na(region_name))
 ```
 
-# Save to local Dropbox
+# Create regionmap (analogous to countrymap but for regions)
 
-```{r save_fst}
+```{r create_regionmap}
+# Create regionmap with the same structure as countrymap
+# This allows the Region Explorer to work similarly to the Country Explorer
+regionmap <- docdb_nuts1 %>%
+  select(docdb_family_id, appln_id, region_code, region_name) %>%
+  distinct()
+
+message("Regionmap created with ", nrow(regionmap), " rows")
+message("Regionmap columns: ", paste(names(regionmap), collapse = ", "))
+
+# Summary by region
+regionmap %>%
+  group_by(region_code, region_name) %>%
+  summarise(n_patents = n_distinct(docdb_family_id), .groups = "drop") %>%
+  arrange(desc(n_patents))
+```
+
+# Save regionmap to Dropbox
+
+```{r save_regionmap}
 # Define the output path in Dropbox Apps/iseapp folder
-output_path <- file.path(dropbox_root, "Apps", "iseapp", "docdb_nuts1.fst")
+output_path <- file.path(dropbox_root, "Apps", "iseapp", "regionmap.fst")
 
 # Create directory if it doesn't exist
 dir.create(dirname(output_path), recursive = TRUE, showWarnings = FALSE)
 
 # Write the data as fst file
-write_fst(docdb_nuts1, output_path, compress = 100)
+write_fst(regionmap, output_path, compress = 100)
 
-message("Data saved to: ", output_path)
+message("Regionmap saved to: ", output_path)
 ```
 

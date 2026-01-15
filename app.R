@@ -22,10 +22,65 @@ source("dropbox_auth.R")
 # Register Google Font
 register_gfont("Open Sans")
 
-#iseapplocal=Sys.getenv("ISEAPP_PATH_LOCAL")
-localpath_fname=function(fname){
-  iseapplocal=Sys.getenv("ISEAPP_PATH_LOCAL")
-  paste0(iseapplocal,"/",fname)
+# Function to detect local Dropbox path from Dropbox's config file
+get_dropbox_path <- function() {
+  # Dropbox stores its configuration in info.json
+  # This works for both personal and team Dropbox accounts
+
+  if (.Platform$OS.type == "windows") {
+    info_paths <- c(
+      file.path(Sys.getenv("APPDATA"), "Dropbox", "info.json"),
+      file.path(Sys.getenv("LOCALAPPDATA"), "Dropbox", "info.json")
+    )
+  } else {
+    info_paths <- file.path(Sys.getenv("HOME"), ".dropbox", "info.json")
+  }
+
+  for (p in info_paths) {
+    if (file.exists(p)) {
+      info <- jsonlite::fromJSON(p)
+      if (!is.null(info$business)) {
+        return(info$business$path)
+      } else if (!is.null(info$personal)) {
+        return(info$personal$path)
+      }
+    }
+  }
+  return(NULL)
+}
+
+# Try to find local Dropbox Apps/iseapp folder
+get_local_iseapp_path <- function() {
+  # First check environment variable
+  env_path <- Sys.getenv("ISEAPP_PATH_LOCAL")
+  if (nzchar(env_path) && dir.exists(env_path)) {
+    return(env_path)
+  }
+  # Try to detect Dropbox path automatically
+  dropbox_root <- get_dropbox_path()
+  if (!is.null(dropbox_root)) {
+    iseapp_path <- file.path(dropbox_root, "Apps", "iseapp")
+    if (dir.exists(iseapp_path)) {
+      return(iseapp_path)
+    }
+  }
+  return(NULL)
+}
+
+# Get the local path (cached)
+iseapp_local_path <- get_local_iseapp_path()
+if (!is.null(iseapp_local_path)) {
+  message("Using local Dropbox path: ", iseapp_local_path)
+} else {
+  message("Local Dropbox not found, will use online Dropbox")
+}
+
+localpath_fname <- function(fname) {
+  if (!is.null(iseapp_local_path)) {
+    fname <- sub("^/+", "", fname)
+    return(file.path(iseapp_local_path, fname))
+  }
+  return("")
 }
 
 
@@ -58,10 +113,30 @@ update_geom_defaults("label", list(family = "Arial"))
 #countrymap <- read_fst("countrymap.fst")
 #countrymap <- dropbox_read_fst("/countrymap.fst")
 pp=localpath_fname("/countrymap.fst")
-if(file.exists(pp)){ 
+if(file.exists(pp)){
   countrymap <- read_fst(pp)
 } else {
   countrymap <- dropbox_read_fst("/countrymap.fst")}
+
+# Load regionmap for Region Explorer tab
+regionmap <- NULL
+regionmap_available <- FALSE
+pp_region=localpath_fname("/regionmap.fst")
+if(file.exists(pp_region)){
+  regionmap <- read_fst(pp_region)
+  regionmap_available <- TRUE
+  message("Regionmap loaded with ", nrow(regionmap), " rows")
+  message("Regionmap columns: ", paste(names(regionmap), collapse = ", "))
+} else {
+  tryCatch({
+    regionmap <<- dropbox_read_fst("/regionmap.fst")
+    regionmap_available <<- TRUE
+    message("Regionmap loaded from Dropbox")
+    message("Regionmap columns: ", paste(names(regionmap), collapse = ", "))
+  }, error = function(e) {
+    message("Regionmap not available - Region Explorer will be disabled: ", e$message)
+  })
+}
 
 
 
@@ -300,7 +375,56 @@ expand_country_selection <- function(selected) {
   unique(expanded)
 }
 
+# Region definitions for Region Explorer tab
+# UK NUTS1 regions (can be expanded in the future)
+uk_regions <- c(
+  "UKC" = "North East England",
+  "UKD" = "North West England",
+  "UKE" = "Yorkshire and The Humber",
+  "UKF" = "East Midlands",
+  "UKG" = "West Midlands",
+  "UKH" = "East of England",
+  "UKI" = "London",
+  "UKJ" = "South East England",
+  "UKK" = "South West England",
+  "UKL" = "Wales",
+  "UKM" = "Scotland",
+  "UKN" = "Northern Ireland"
+)
 
+# Create region choices (code -> name mapping)
+region_choices <- setNames(names(uk_regions), uk_regions)
+
+# Region group definitions
+region_group_definitions <- list(
+  "All UK regions" = names(uk_regions)
+)
+
+# Create grouped region choices
+grouped_region_choices <- list(
+  "Predefined Groups" = list("All UK regions" = "All UK regions"),
+  "Individual Regions" = as.list(region_choices)
+)
+
+# Function to expand region selection (similar to country)
+expand_region_selection <- function(selected) {
+  expanded <- unlist(lapply(selected, function(x) {
+    if (x %in% names(region_group_definitions)) {
+      return(region_group_definitions[[x]])
+    } else {
+      return(x)
+    }
+  }))
+  unique(expanded)
+}
+
+# Function to get region display name
+get_region_name <- function(code) {
+  if (code %in% names(uk_regions)) {
+    return(uk_regions[code])
+  }
+  return(code)
+}
 
 # Define UI
 ui <- function(request){fluidPage(
@@ -431,103 +555,190 @@ ui <- function(request){fluidPage(
           button.text('▲ Less');
         }
       });
+      $('#togglePlot1_region').click(function() {
+        var plot = $('#plot1Container_region');
+        var button = $(this);
+        if (plot.is(':visible')) {
+          plot.slideUp(300);
+          button.text('▼ More');
+        } else {
+          plot.slideDown(300);
+          button.text('▲ Less');
+        }
+      });
     });
   ")),
-  
-  
-  
 
-  
-   
-  
-  inputPanel(
-    selectizeInput(
-      inputId = "country",
-      label = "Country or Group",
-      choices = grouped_choices,
-      selected = "All countries",
-      multiple = TRUE,
-      options = list(placeholder = 'Choose one or more countries or groups...')
+  # Tabbed interface
+  tabsetPanel(
+    id = "main_tabs",
+
+    # Tab 1: Country Explorer
+    tabPanel(
+      "Country Explorer",
+      br(),
+      inputPanel(
+        selectizeInput(
+          inputId = "country",
+          label = "Country or Group",
+          choices = grouped_choices,
+          selected = "All countries",
+          multiple = TRUE,
+          options = list(placeholder = 'Choose one or more countries or groups...')
+        ),
+        selectizeInput(
+          inputId = "toflow",
+          label = "Return flow",
+          choices = toflow_choices,
+          selected = "istrax_global",
+          multiple = FALSE,
+          width = "400px",
+          options = list(placeholder = 'Choose a return flow...')
+        ),
+        selectizeInput(
+          inputId = "tech_categories_plot1",
+          label = "Technology categories",
+          choices = grouped_techs,
+          selected = c("Other","AI","Green Technology"),
+          multiple = TRUE,
+          width = "200%",
+          options = list(placeholder = 'Choose one or more technology categories...')
+        ),
+        radioButtons(
+          inputId = "bwidthscale",
+          label = "Bar width scale",
+          choices = c("log", "proportional"),
+          selected = "log"
+        ),
+        radioButtons(
+          inputId = "display_mode",
+          label = "Display mode",
+          choices = c("Confidence bands" = "confidence", "Returns for the top 25 and top 50 percent" = "quartiles"),
+          selected = "confidence"
+        ),
+        checkboxInput(
+          inputId = "show_top3_ids",
+          label = "Show top patent IDs",
+          value = TRUE
+        )
+      ),
+      tags$button("▲ Less", id = "togglePlot1", class = "plot-toggle"),
+      tags$div(
+        id = "plot1Container",
+        withSpinner(girafeOutput("avstrax_plot1", width = "100%", height = "auto"), type = 4, color = "#3498db")
+      ),
+      inputPanel(
+        selectizeInput(
+          inputId = "techs",
+          label = "Technology categories",
+          choices = grouped_techs,
+          selected = "Green Technology",
+          multiple = TRUE,
+          options = list(placeholder = 'Choose one or more technology categories...')
+        ),
+        sliderInput(
+          inputId = "topn",
+          label = "Show top n countries",
+          min = 1,
+          max = 200,
+          width = "350px",
+          value = 20
+        ),
+        sliderInput(
+          inputId = "mininno",
+          label = "Innovation count threshold:",
+          min = 1,
+          max = 500,
+          value = 100,
+          width = "350px"
+        )
+      ),
+      withSpinner(girafeOutput("avstrax_plot2", width = "100%", height = "auto"), type = 4, color = "#3498db")
     ),
 
-    selectizeInput(
-      inputId = "toflow",
-      label = "Return flow",
-      choices = toflow_choices,
-      selected = "istrax_global",
-      multiple = FALSE,
-      width = "400px",
-      options = list(placeholder = 'Choose a return flow...')
-    ),
-
-    selectizeInput(
-      inputId = "tech_categories_plot1",
-      label = "Technology categories",
-      choices = grouped_techs,
-      selected = c("Other","AI","Green Technology"),
-      multiple = TRUE,
-      width = "200%",
-      options = list(placeholder = 'Choose one or more technology categories...')
-    ),
-    radioButtons(
-      inputId = "bwidthscale",
-      label = "Bar width scale",
-      choices = c("log", "proportional"),
-      selected = "log"
-    ),
-    radioButtons(
-      inputId = "display_mode",
-      label = "Display mode",
-      choices = c("Confidence bands" = "confidence", "Returns for the top 25 and top 50 percent" = "quartiles"),
-      selected = "confidence"
-    ),
-    checkboxInput(
-      inputId = "show_top3_ids",
-      label = "Show top patent IDs",
-      value = TRUE
+    # Tab 2: Region Explorer
+    tabPanel(
+      "Region Explorer",
+      br(),
+      inputPanel(
+        selectizeInput(
+          inputId = "region",
+          label = "Region or Group",
+          choices = grouped_region_choices,
+          selected = "All UK regions",
+          multiple = TRUE,
+          options = list(placeholder = 'Choose one or more regions...')
+        ),
+        selectizeInput(
+          inputId = "toflow_region",
+          label = "Return flow",
+          choices = toflow_choices,
+          selected = "istrax_global",
+          multiple = FALSE,
+          width = "400px",
+          options = list(placeholder = 'Choose a return flow...')
+        ),
+        selectizeInput(
+          inputId = "tech_categories_plot1_region",
+          label = "Technology categories",
+          choices = grouped_techs,
+          selected = c("Other","AI","Green Technology"),
+          multiple = TRUE,
+          width = "200%",
+          options = list(placeholder = 'Choose one or more technology categories...')
+        ),
+        radioButtons(
+          inputId = "bwidthscale_region",
+          label = "Bar width scale",
+          choices = c("log", "proportional"),
+          selected = "log"
+        ),
+        radioButtons(
+          inputId = "display_mode_region",
+          label = "Display mode",
+          choices = c("Confidence bands" = "confidence", "Returns for the top 25 and top 50 percent" = "quartiles"),
+          selected = "confidence"
+        ),
+        checkboxInput(
+          inputId = "show_top3_ids_region",
+          label = "Show top patent IDs",
+          value = TRUE
+        )
+      ),
+      tags$button("▲ Less", id = "togglePlot1_region", class = "plot-toggle"),
+      tags$div(
+        id = "plot1Container_region",
+        withSpinner(girafeOutput("avstrax_plot1_region", width = "100%", height = "auto"), type = 4, color = "#3498db")
+      ),
+      inputPanel(
+        selectizeInput(
+          inputId = "techs_region",
+          label = "Technology categories",
+          choices = grouped_techs,
+          selected = "Green Technology",
+          multiple = TRUE,
+          options = list(placeholder = 'Choose one or more technology categories...')
+        ),
+        sliderInput(
+          inputId = "topn_region",
+          label = "Show top n regions",
+          min = 1,
+          max = 50,
+          width = "350px",
+          value = 12
+        ),
+        sliderInput(
+          inputId = "mininno_region",
+          label = "Innovation count threshold:",
+          min = 1,
+          max = 500,
+          value = 100,
+          width = "350px"
+        )
+      ),
+      withSpinner(girafeOutput("avstrax_plot2_region", width = "100%", height = "auto"), type = 4, color = "#3498db")
     )
-  ),
-
-  # Toggle button for Figure 1
-  tags$button("▲ Less", id = "togglePlot1", class = "plot-toggle"),
-
-  # Wrap the first plot in a collapsible container
-  tags$div(
-    id = "plot1Container",
-    withSpinner(girafeOutput("avstrax_plot1", width = "100%", height = "auto"), type = 4, color = "#3498db")
-  ),
-  
-  inputPanel(
-    selectizeInput(
-      inputId = "techs",
-      label = "Technology categories",
-      choices = grouped_techs,
-      selected = "Green Technology",
-      multiple = TRUE,
-      options = list(placeholder = 'Choose one or more technology categories...')
-    ),
-    
-    sliderInput(
-      inputId = "topn",
-      label = "Show top n countries",
-      min = 1,
-      max = 200,
-      width = "350px",
-      value = 20  # default starting value
-    ),
-    sliderInput(
-      inputId = "mininno",
-      label = "Innovation count threshold:",
-      min = 1,
-      max = 500,
-      value = 100,  # default starting value
-      width = "350px"
-    )
-
-  ),
-
-  withSpinner(girafeOutput("avstrax_plot2", width = "100%", height = "auto"), type = 4, color = "#3498db")
-  
+  )
 )
 }
 
@@ -591,15 +802,6 @@ server <- function(input, output, session) {
     selected_countries <- expand_country_selection(input$country)
     # Get the label from the nested toflow_choices list
     flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
-
-    validate(
-      need(exists("plot_avstrax_by_country"), "Function 'plot_avstrax_by_country' not found in the environment."),
-      need(exists("patchar_countrymap"), "Object 'patchar_countrymap' not found."),
-      need(exists("techmap"), "Object 'techmap' not found."),
-      need(exists("green_classes"),   "Object 'green_classes' not found."),
-      need(exists("battery_classes"), "Object 'battery_classes' not found."),
-      need(exists("custom_colors"),   "Object 'custom_colors' not found.")
-    )
 
     # Filter techmap based on selected technology categories
     # Handle "Other" category to include all non-selected technologies
@@ -668,17 +870,6 @@ server <- function(input, output, session) {
     # Get the label from the nested toflow_choices list
     flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
 
-    validate(
-      need(exists("plot_avstrax_by_country"), "Function 'plot_avstrax_by_country' not found in the environment."),
-      need(exists("patchar_countrymap"), "Object 'patchar_countrymap' not found."),
-      need(exists("techmap"), "Object 'techmap' not found."),
-      need(exists("green_classes"), "Object 'green_classes' not found."),
-      need(exists("battery_classes"), "Object 'battery_classes' not found."),
-      need(exists("custom_colors"), "Object 'custom_colors' not found.")
-    )
-  
-    
-    
     #plot_avstrax_by_technology <- function(pdata, classes, green_classes, technologies, toflow, custom_colors)
     #input$techs="Wireless" 
     
@@ -720,8 +911,143 @@ server <- function(input, output, session) {
     p
   })
 
-  
-  
+  # ============================================
+  # Region Explorer Tab - Server Logic
+  # ============================================
+
+  # Reactive for region data (similar to patchar_countrymap but for regions)
+  patchar_regionmap <- reactive({
+    req(input$toflow_region)
+
+    path <- paste0("/istraxes/", input$toflow_region,".fst")
+
+    pp=localpath_fname(path)
+    if(file.exists(pp)){
+      ddd <- read_fst(pp)
+    } else {
+      ddd <- dropbox_read_fst(path)
+    }
+
+    # Join regionmap with istrax data
+    # Rename region_code to ctry_code and region_name to country_name for compatibility with plotting functions
+    if (regionmap_available && !is.null(regionmap) && nrow(regionmap) > 0) {
+      # Remove ctry_code from ddd if it exists to avoid duplicate column names after join
+      ddd_for_join <- ddd %>% select(-any_of(c("ctry_code", "country_name")))
+
+      patchar_regionmap <- regionmap %>%
+        rename(ctry_code = region_code, country_name = region_name) %>%
+        left_join(ddd_for_join, by = "docdb_family_id")
+      message("patchar_regionmap columns after rename: ", paste(names(patchar_regionmap), collapse = ", "))
+      message("patchar_regionmap rows: ", nrow(patchar_regionmap))
+    } else {
+      patchar_regionmap <- data.frame()
+      message("patchar_regionmap is empty - regionmap_available: ", regionmap_available)
+    }
+
+    patchar_regionmap
+  })
+
+  # Region Plot 1 - Returns by technology for selected regions
+  output$avstrax_plot1_region <- renderGirafe({
+    req(input$region, input$toflow_region, input$tech_categories_plot1_region,
+        input$bwidthscale_region, input$display_mode_region, !is.null(input$show_top3_ids_region))
+
+    # Check if regionmap is available
+    shiny::validate(shiny::need(regionmap_available, "Region data not available. Please run prep_UK_regions.Rmd first."))
+
+    selected_regions <- expand_region_selection(input$region)
+    flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow_region]
+
+    # Filter techmap based on selected technology categories
+    selected_categories <- input$tech_categories_plot1_region
+    include_other <- "Other" %in% selected_categories
+    explicit_categories <- setdiff(selected_categories, "Other")
+
+    if(include_other && length(explicit_categories) > 0) {
+      filtered_techmap <- techmap %>%
+        mutate(technology = ifelse(technology %in% explicit_categories, technology, "Other"))
+    } else if(include_other && length(explicit_categories) == 0) {
+      filtered_techmap <- techmap %>%
+        mutate(technology = "Other")
+    } else {
+      filtered_techmap <- techmap %>%
+        filter(technology %in% explicit_categories)
+    }
+
+    plot_width <- max(window_dims$width, 400)
+    width_inches <- plot_width / 96
+    aspect_ratio <- ifelse(plot_width > 1200, 0.4, ifelse(plot_width > 800, 0.5, 0.6))
+    height_inches <- width_inches * aspect_ratio
+
+    p <- plot_avstrax_by_country(
+      pdata = patchar_regionmap(),
+      classes = filtered_techmap,
+      country_code = selected_regions,
+      toflow = input$toflow_region,
+      custom_colors = custom_colors,
+      colorings = colorings,
+      bwidthscale = input$bwidthscale_region,
+      display_mode = input$display_mode_region,
+      show_top3_ids = input$show_top3_ids_region,
+      width_svg = width_inches,
+      height_svg = height_inches,
+      plot_title = sub("^[^.]*\\.", "", flow_label)
+    )
+
+    p
+  })
+
+  # Region Plot 2 - Returns by region for selected technologies
+  output$avstrax_plot2_region <- renderGirafe({
+    req(input$region,
+        input$toflow_region,
+        input$techs_region,
+        input$topn_region,
+        input$mininno_region,
+        input$bwidthscale_region,
+        input$display_mode_region,
+        !is.null(input$show_top3_ids_region))
+
+    # Check if regionmap is available
+    shiny::validate(shiny::need(regionmap_available, "Region data not available. Please run prep_UK_regions.Rmd first."))
+
+    selected_regions <- expand_region_selection(input$region)
+    flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow_region]
+
+    # Get region data and validate it has required columns
+    region_data <- patchar_regionmap()
+    has_ctry_code <- "ctry_code" %in% names(region_data)
+    shiny::validate(shiny::need(has_ctry_code, "Region data missing required columns. Please regenerate regionmap.fst."))
+
+    # Filter by selected regions
+    filtered <- region_data %>%
+      filter(ctry_code %in% selected_regions)
+
+    plot_width <- max(window_dims$width, 400)
+    width_inches <- plot_width / 96
+    aspect_ratio <- ifelse(plot_width > 1200, 0.4, ifelse(plot_width > 800, 0.5, 0.6))
+    height_inches <- width_inches * aspect_ratio
+
+    p <- plot_avstrax_by_technology(
+      pdata = filtered,
+      classes = techmap,
+      technologies = input$techs_region,
+      toflow = input$toflow_region,
+      custom_colors = custom_colors,
+      topn = input$topn_region,
+      mininno = input$mininno_region,
+      bwidthscale = input$bwidthscale_region,
+      display_mode = input$display_mode_region,
+      show_top3_ids = input$show_top3_ids_region,
+      width_svg = width_inches,
+      height_svg = height_inches,
+      plot_title = sub("^[^.]*\\.", "", flow_label),
+      x_label = "Region"
+    )
+
+    p
+  })
+
 }
 
 # Run the app

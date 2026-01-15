@@ -291,23 +291,49 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
   }
   
   #scaler=ifelse()
-  avstrax <- filtereddata %>%
-    select(docdb_family_id, appln_id, !!istrax_sym, ctry_code) %>%
-    rename(istrax = !!istrax_sym) %>%
-    distinct() %>%
+  # Include country_name if it exists (for regions)
+  has_country_name <- "country_name" %in% names(filtereddata)
 
-    bind_rows(
-      #atest=
-      filtereddata %>%
-        select(docdb_family_id, appln_id, !!istrax_sym) %>%
-        rename(istrax = !!istrax_sym) %>%
-        distinct() %>%
-        mutate(ctry_code = "All")
-    ) %>%
+  if (has_country_name) {
+    avstrax <- filtereddata %>%
+      select(docdb_family_id, appln_id, !!istrax_sym, ctry_code, country_name) %>%
+      rename(istrax = !!istrax_sym) %>%
+      distinct() %>%
+      bind_rows(
+        filtereddata %>%
+          select(docdb_family_id, appln_id, !!istrax_sym) %>%
+          rename(istrax = !!istrax_sym) %>%
+          distinct() %>%
+          mutate(ctry_code = "All", country_name = "All")
+      )
+  } else {
+    avstrax <- filtereddata %>%
+      select(docdb_family_id, appln_id, !!istrax_sym, ctry_code) %>%
+      rename(istrax = !!istrax_sym) %>%
+      distinct() %>%
+      bind_rows(
+        filtereddata %>%
+          select(docdb_family_id, appln_id, !!istrax_sym) %>%
+          rename(istrax = !!istrax_sym) %>%
+          distinct() %>%
+          mutate(ctry_code = "All")
+      )
+  }
 
-    distinct() %>%
-    group_by(ctry_code) %>%
-    arrange(ctry_code,-istrax*scaler) %>%
+  # Group by ctry_code (and country_name if it exists)
+  if (has_country_name) {
+    avstrax <- avstrax %>%
+      distinct() %>%
+      group_by(ctry_code, country_name) %>%
+      arrange(ctry_code,-istrax*scaler)
+  } else {
+    avstrax <- avstrax %>%
+      distinct() %>%
+      group_by(ctry_code) %>%
+      arrange(ctry_code,-istrax*scaler)
+  }
+
+  avstrax <- avstrax %>%
     mutate(ppp=(1:n())/n()) %>%
     mutate(q1=quantile(istrax*scaler, 0.25, na.rm = TRUE),
            q2=quantile(istrax*scaler, 0.5, na.rm = TRUE),
@@ -319,15 +345,7 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
       mean = mean(istrax*scaler, na.rm = TRUE),
       innos = n(),
       sem = sd(istrax*scaler, na.rm = TRUE) / sqrt(n()),
-      # Quartile bin means: mean of observations within each quartile bin
 
-      #q1_bin_mean = mean(scaler*istrax[scaler*istrax <= q1], na.rm = TRUE),
-      #q2_bin_mean = mean(scaler*istrax[scaler*istrax <= q2 & scaler*istrax>=q1], na.rm = TRUE),
-      #q3_bin_mean = mean(scaler*istrax[scaler*istrax <= q3 & scaler*istrax>=q2], na.rm = TRUE),
-      #q4_bin_mean = mean(scaler*istrax[scaler*istrax >= q3], na.rm = TRUE),
-
-      #q0M_bin_mean= mean(scaler*istrax[scaler*istrax <= q2], na.rm = TRUE),
-      #q1M_bin_mean= mean(scaler*istrax[scaler*istrax >= q2], na.rm = TRUE),
       top25_bin_mean= mean(scaler*istrax[top25==T], na.rm = TRUE),
       top50_bin_mean= mean(scaler*istrax[top50==T], na.rm = TRUE),
 
@@ -354,7 +372,8 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
                                        show_top3_ids=FALSE,
                                        width_svg=10,
                                        height_svg=6,
-                                       plot_title="Spillover returns") {
+                                       plot_title="Spillover returns",
+                                       x_label="Country") {
   #mininno=30;topn=20;  pdata=patchar_countrymap;toflow="istrax_global"; classes=techmap; green_classes=green_classes; technologies="Green Energy"
 
   library(dplyr)
@@ -391,8 +410,11 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   # Prepare data for plotting
 
   library(countrycode)
-  
-  avstrax$country_name <- countrycode(avstrax$ctry_code, origin = "iso2c", destination = "country.name.en")
+
+  # Use existing country_name if available (e.g., for regions), otherwise use countrycode
+  if (!"country_name" %in% names(avstrax) || all(is.na(avstrax$country_name))) {
+    avstrax$country_name <- countrycode(avstrax$ctry_code, origin = "iso2c", destination = "country.name.en")
+  }
   
   
   
@@ -450,10 +472,12 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
       geom_rect_interactive(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
                                  data_id = country_name,
                                  tooltip = paste0("Top IDs: ", top3_ids),
-                                 onclick = top3_ids_url))
+                                 onclick = top3_ids_url),
+                            fill = "#3498db")
   } else {
     p <- ggplot(avstrax) +
-      geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax))
+      geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+                fill = "#3498db")
   }
 
   # Add either confidence bands or quartile means based on display_mode
@@ -491,9 +515,9 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
     scale_x_continuous(breaks = avstrax$x_pos, labels = avstrax$country_name) +
     labs(
       title = plot_title,
-      x = "Country",
+      x = x_label,
       y = ylab,
-      fill = "Country"
+      fill = x_label
     ) +
     theme_minimal(base_family = "Open Sans") +
     theme(
