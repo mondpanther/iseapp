@@ -202,3 +202,13 @@ write_fst(regionmap, output_path, compress = 100)
 message("Regionmap saved to: ", output_path)
 ```
 
+# Sort out the server
+
+```{r}
+library(rsconnect)
+library(accounts)
+connectCloudUser(launch.browser=T)
+
+```
+
+
