@@ -16,6 +16,8 @@ library(httr2)
 library(ggiraph)
 library(gdtools)
 library(gfonts)
+library(leaflet)
+library(sf)
 source("dropbox_auth.R")
 
 
@@ -656,7 +658,10 @@ ui <- function(request){fluidPage(
           width = "350px"
         )
       ),
-      withSpinner(girafeOutput("avstrax_plot2", width = "100%", height = "auto"), type = 4, color = "#3498db")
+      withSpinner(girafeOutput("avstrax_plot2", width = "100%", height = "auto"), type = 4, color = "#3498db"),
+      tags$br(),
+      tags$h4("World Map View"),
+      withSpinner(plotlyOutput("world_map", width = "100%", height = "500px"), type = 4, color = "#3498db")
     ),
 
     # Tab 2: Region Explorer
@@ -747,7 +752,10 @@ ui <- function(request){fluidPage(
           width = "350px"
         )
       ),
-      withSpinner(girafeOutput("avstrax_plot2_region", width = "100%", height = "auto"), type = 4, color = "#3498db")
+      withSpinner(girafeOutput("avstrax_plot2_region", width = "100%", height = "auto"), type = 4, color = "#3498db"),
+      tags$br(),
+      tags$h4("UK Regions Map View"),
+      withSpinner(leafletOutput("uk_regions_map", width = "100%", height = "500px"), type = 4, color = "#3498db")
     )
   )
 )
@@ -927,6 +935,42 @@ server <- function(input, output, session) {
     p
   })
 
+  # World Map for Country Explorer
+  output$world_map <- renderPlotly({
+    req(input$country,
+        input$toflow,
+        input$techs,
+        input$mininno)
+
+    selected_countries <- expand_country_selection(input$country)
+    flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
+
+    # Filter by technology class
+    filtered_classes <- techmap %>%
+      filter(technology %in% input$techs) %>%
+      distinct()
+
+    if("All Innovations" %in% input$techs) filtered_classes <- data.frame()
+
+    # Filter data by selected countries
+    filtered <- patchar_countrymap() %>%
+      filter(ctry_code %in% selected_countries)
+
+    # Compute aggregated data for all countries
+    avstrax_data <- compute_avstrax_for_techs(filtered, input$toflow, filtered_classes)
+
+    # Filter by minimum innovations
+    avstrax_data <- avstrax_data %>%
+      filter(innos >= input$mininno)
+
+    plot_world_map(
+      avstrax_data = avstrax_data,
+      value_col = "mean",
+      color_scale = "Viridis",
+      plot_title = paste0("World Map: ", sub("^[^.]*\\.", "", flow_label))
+    )
+  })
+
   # ============================================
   # Region Explorer Tab - Server Logic
   # ============================================
@@ -1065,6 +1109,48 @@ server <- function(input, output, session) {
     )
 
     p
+  })
+
+  # UK Regions Map for Region Explorer
+  output$uk_regions_map <- renderLeaflet({
+    req(input$region,
+        input$toflow_region,
+        input$techs_region,
+        input$mininno_region)
+
+    # Check if regionmap is available
+    shiny::validate(shiny::need(regionmap_available, "Region data not available."))
+
+    selected_regions <- expand_region_selection(input$region)
+    flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow_region]
+
+    # Filter by technology class
+    filtered_classes <- techmap %>%
+      filter(technology %in% input$techs_region) %>%
+      distinct()
+
+    if("All Innovations" %in% input$techs_region) filtered_classes <- data.frame()
+
+    # Get region data and filter by selected regions
+    region_data <- patchar_regionmap()
+    has_ctry_code <- "ctry_code" %in% names(region_data)
+    shiny::validate(shiny::need(has_ctry_code, "Region data missing required columns."))
+
+    filtered <- region_data %>%
+      filter(ctry_code %in% selected_regions)
+
+    # Compute aggregated data for all regions
+    avstrax_data <- compute_avstrax_for_techs(filtered, input$toflow_region, filtered_classes)
+
+    # Filter by minimum innovations
+    avstrax_data <- avstrax_data %>%
+      filter(innos >= input$mininno_region)
+
+    plot_uk_regions_map(
+      avstrax_data = avstrax_data,
+      value_col = "mean",
+      plot_title = paste0("UK Regions: ", sub("^[^.]*\\.", "", flow_label))
+    )
   })
 
 }

@@ -2,6 +2,7 @@
 library(dplyr)
 library(tidyr)
 library(ggiraph)
+library(scales)
 
 
 
@@ -42,7 +43,7 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
     inner_join(classes, by = "docdb_family_id") %>%
     bind_rows(
       data %>%
-        #select(docdb_family_id, starts_with("istrax")) %>%
+        select(docdb_family_id, starts_with("istrax")) %>%
         rename(istrax = !!istrax_sym) %>%
         distinct() %>%
         mutate(technology = "All")
@@ -231,6 +232,9 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
     )+
 
     geom_hline(yintercept = allmean, linetype = "dashed", color = "black", linewidth = 1) +
+    annotate("text", y = allmean, x = max(avstrax$x_pos) + 0.4,
+             label = "Average", angle = -90, vjust = 1.5, size = 4,
+             family = "Open Sans", color = "black") +
     coord_flip()#+
   #paste0(as.character(innos)," Innovations")
   #annotate("text", 
@@ -642,6 +646,9 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
       legend.margin = margin(t = 5, r = 10, b = 5, l = 10)
     ) +
     geom_hline(yintercept = allmean, linetype = "dashed", color = "black", linewidth = 1) +
+    annotate("text", y = allmean, x = max(avstrax$x_pos) - 0.6,
+             label = "Average", angle = -90, vjust = 1.5, size = 4,
+             family = "Open Sans", color = "black") +
     coord_flip()
 
   # Build subtitle with legend info
@@ -679,5 +686,364 @@ build_espacenet_search <- function(id_strings) {
     paste0('window.open("https://worldwide.espacenet.com/patent/search?q=',
            utils::URLencode(query, reserved = TRUE), '")')
   })
+}
+
+
+# ============================================
+# Map Plotting Functions
+# ============================================
+
+#' Plot world choropleth map showing country-level data
+#' @param avstrax_data Data frame with ctry_code and mean columns (output from compute_avstrax_for_techs)
+#' @param value_col Column name for values to display (default: "mean")
+#' @param color_scale Color scale for the choropleth
+#' @param plot_title Title for the map
+#' @return A plotly object
+plot_world_map <- function(avstrax_data,
+                           value_col = "mean",
+                           color_scale = "Viridis",
+                           plot_title = "Returns by Country") {
+  library(plotly)
+  library(countrycode)
+
+  # Filter out "All" and prepare data
+
+  map_data <- avstrax_data %>%
+    filter(ctry_code != "All") %>%
+    mutate(
+      # Convert ISO2 to ISO3 for plotly
+      iso3 = countrycode(ctry_code, origin = "iso2c", destination = "iso3c"),
+      country_name = countrycode(ctry_code, origin = "iso2c", destination = "country.name.en"),
+      value = !!sym(value_col)
+    ) %>%
+    filter(!is.na(iso3))
+
+  # Handle empty data
+  if (nrow(map_data) == 0) {
+    p <- plotly::plot_ly() %>%
+      plotly::layout(
+        title = list(text = "No data available for map display", x = 0.5),
+        annotations = list(
+          list(text = "No countries with data to display",
+               x = 0.5, y = 0.5, showarrow = FALSE, font = list(size = 16))
+        )
+      )
+    return(p)
+  }
+
+  # Determine if values are percentages (returns) or absolute values (spillovers)
+  is_percentage <- grepl("strax", value_col) || max(map_data$value, na.rm = TRUE) > 10
+
+  # Create hover text - use if/else for scalar condition to avoid ifelse recycling issue
+  if (is_percentage) {
+    map_data <- map_data %>%
+      mutate(
+        hover_text = paste0(
+          "<b>", country_name, "</b><br>",
+          "Value: ", round(value, 1), "%<br>",
+          "Innovations: ", scales::comma(innos)
+        )
+      )
+  } else {
+    map_data <- map_data %>%
+      mutate(
+        hover_text = paste0(
+          "<b>", country_name, "</b><br>",
+          "Value: $", round(value, 2), "M<br>",
+          "Innovations: ", scales::comma(innos)
+        )
+      )
+  }
+
+  # Create choropleth
+  p <- plotly::plot_ly(
+    data = map_data,
+    type = "choropleth",
+    locations = ~iso3,
+    z = ~value,
+    text = ~hover_text,
+    hoverinfo = "text",
+    colorscale = color_scale,
+    reversescale = FALSE,
+    marker = list(line = list(color = "white", width = 0.5)),
+    colorbar = list(
+      title = list(text = ifelse(is_percentage, "Return (%)", "Value ($M)")),
+      ticksuffix = ifelse(is_percentage, "%", "")
+    )
+  ) %>%
+    plotly::layout(
+      title = list(text = plot_title, x = 0.5, font = list(size = 16)),
+      geo = list(
+        showframe = FALSE,
+        showcoastlines = TRUE,
+        coastlinecolor = "grey",
+        projection = list(type = "natural earth"),
+        showland = TRUE,
+        landcolor = "lightgray",
+        showocean = TRUE,
+        oceancolor = "aliceblue",
+        showcountries = TRUE,
+        countrycolor = "white",
+        countrywidth = 0.5
+      ),
+      margin = list(l = 0, r = 0, t = 50, b = 0)
+    ) %>%
+    plotly::config(
+      scrollZoom = TRUE,
+      displayModeBar = TRUE,
+      modeBarButtonsToAdd = list("zoom2d", "pan2d", "resetScale2d")
+    )
+
+  return(p)
+}
+
+
+#' Plot UK regions choropleth map showing NUTS1 region-level data
+#' Uses leaflet with GeoJSON for proper filled region polygons
+#' @param avstrax_data Data frame with ctry_code (NUTS1 codes) and mean columns
+#' @param value_col Column name for values to display (default: "mean")
+#' @param plot_title Title for the map
+#' @return A leaflet object
+plot_uk_regions_map <- function(avstrax_data,
+                                 value_col = "mean",
+                                 plot_title = "Returns by UK Region") {
+  library(leaflet)
+  library(sf)
+  library(htmltools)
+
+
+  # UK NUTS1 region names mapping
+  uk_regions_names <- c(
+    "UKC" = "North East England",
+    "UKD" = "North West England",
+    "UKE" = "Yorkshire and The Humber",
+    "UKF" = "East Midlands",
+    "UKG" = "West Midlands",
+    "UKH" = "East of England",
+    "UKI" = "London",
+    "UKJ" = "South East England",
+    "UKK" = "South West England",
+    "UKL" = "Wales",
+    "UKM" = "Scotland",
+    "UKN" = "Northern Ireland"
+  )
+
+  # Load UK NUTS1 GeoJSON - try local file first, then GitHub
+  # Try to load the GeoJSON, with caching
+  if (!exists(".uk_nuts1_sf", envir = .GlobalEnv)) {
+    uk_sf <- NULL
+
+    # Option 1: Try local file first
+    local_geojson <- "uk_nuts1_boundaries.geojson"
+    if (file.exists(local_geojson)) {
+      tryCatch({
+        uk_sf <- sf::st_read(local_geojson, quiet = TRUE)
+        message("Loaded UK NUTS1 boundaries from local file")
+      }, error = function(e) {
+        message("Could not load local GeoJSON: ", e$message)
+      })
+    }
+
+    # Option 2: Try GitHub source (England & Wales)
+    if (is.null(uk_sf)) {
+      geojson_url <- "https://raw.githubusercontent.com/martinjc/UK-GeoJSON/master/json/eurostat/ew/nuts1.json"
+      tryCatch({
+        uk_sf <- sf::st_read(geojson_url, quiet = TRUE)
+        message("Loaded UK NUTS1 boundaries from GitHub")
+      }, error = function(e) {
+        message("Could not load from GitHub: ", e$message)
+      })
+    }
+
+    # Add Scotland and Northern Ireland from GADM file if missing
+    if (!is.null(uk_sf)) {
+      # Check which regions we have
+      nuts_col <- names(uk_sf)[grepl("NUTS.*CD", names(uk_sf), ignore.case = TRUE)][1]
+      if (!is.null(nuts_col)) {
+        existing_codes <- uk_sf[[nuts_col]]
+        name_col <- names(uk_sf)[grepl("NUTS.*NM", names(uk_sf), ignore.case = TRUE)][1]
+
+        # Try to load Scotland and NI from GADM file
+        gadm_file <- "gadm41_GBR_1.json"
+        if (file.exists(gadm_file) && (!"UKM" %in% existing_codes || !"UKN" %in% existing_codes)) {
+          tryCatch({
+            gadm_sf <- sf::st_read(gadm_file, quiet = TRUE)
+
+            # Add Scotland (UKM) if missing
+            if (!"UKM" %in% existing_codes) {
+              scotland_sf <- gadm_sf %>% filter(NAME_1 == "Scotland")
+              if (nrow(scotland_sf) > 0) {
+                scotland_sf <- scotland_sf %>%
+                  select(geometry) %>%
+                  mutate(!!nuts_col := "UKM")
+                if (!is.null(name_col)) scotland_sf[[name_col]] <- "Scotland"
+                uk_sf <- rbind(uk_sf, scotland_sf)
+                message("Added Scotland from GADM")
+              }
+            }
+
+            # Add Northern Ireland (UKN) if missing
+            if (!"UKN" %in% existing_codes) {
+              ni_sf <- gadm_sf %>% filter(NAME_1 == "NorthernIreland")
+              if (nrow(ni_sf) > 0) {
+                ni_sf <- ni_sf %>%
+                  select(geometry) %>%
+                  mutate(!!nuts_col := "UKN")
+                if (!is.null(name_col)) ni_sf[[name_col]] <- "Northern Ireland"
+                uk_sf <- rbind(uk_sf, ni_sf)
+                message("Added Northern Ireland from GADM")
+              }
+            }
+          }, error = function(e) {
+            message("Could not load GADM file: ", e$message)
+          })
+        }
+      }
+
+      # Standardize column names
+      nuts_col <- names(uk_sf)[grepl("NUTS.*CD", names(uk_sf), ignore.case = TRUE)][1]
+      if (!is.null(nuts_col) && !is.na(nuts_col) && nuts_col != "NUTS1CD") {
+        uk_sf <- uk_sf %>% rename(NUTS1CD = !!sym(nuts_col))
+      }
+    }
+
+    assign(".uk_nuts1_sf", uk_sf, envir = .GlobalEnv)
+  }
+
+  uk_sf <- get(".uk_nuts1_sf", envir = .GlobalEnv)
+
+  # Handle case where GeoJSON couldn't be loaded
+  if (is.null(uk_sf)) {
+    # Return empty leaflet with message
+    return(
+      leaflet() %>%
+        addTiles() %>%
+        setView(lng = -2.5, lat = 54.5, zoom = 5) %>%
+        addControl(
+          html = "<div style='padding: 10px; background: white;'>Could not load UK region boundaries</div>",
+          position = "topright"
+        )
+    )
+  }
+
+  # Filter out "All" and prepare data
+  map_data <- avstrax_data %>%
+    filter(ctry_code != "All", ctry_code %in% names(uk_regions_names)) %>%
+    mutate(
+      region_name = uk_regions_names[ctry_code],
+      value = !!sym(value_col)
+    )
+
+  # Determine if values are percentages
+  is_percentage <- nrow(map_data) > 0 &&
+    (grepl("strax", value_col) || max(map_data$value, na.rm = TRUE) > 10)
+
+  # Join data to spatial features
+  # First, identify the NUTS code column in the sf object
+  nuts_col <- if ("NUTS121CD" %in% names(uk_sf)) "NUTS121CD" else
+              if ("NUTS1CD" %in% names(uk_sf)) "NUTS1CD" else
+              names(uk_sf)[grepl("NUTS.*CD", names(uk_sf), ignore.case = TRUE)][1]
+
+  name_col <- if ("NUTS121NM" %in% names(uk_sf)) "NUTS121NM" else
+              if ("NUTS1NM" %in% names(uk_sf)) "NUTS1NM" else
+              names(uk_sf)[grepl("NUTS.*NM", names(uk_sf), ignore.case = TRUE)][1]
+
+  if (is.null(nuts_col)) {
+    return(
+      leaflet() %>%
+        addTiles() %>%
+        setView(lng = -2.5, lat = 54.5, zoom = 5) %>%
+        addControl(
+          html = "<div style='padding: 10px; background: white;'>Could not identify NUTS code column</div>",
+          position = "topright"
+        )
+    )
+  }
+
+  # Merge data with spatial features
+  uk_sf$nuts_code <- uk_sf[[nuts_col]]
+  uk_sf <- uk_sf %>%
+    left_join(map_data, by = c("nuts_code" = "ctry_code"))
+
+  # Create color palette
+  if (nrow(map_data) > 0) {
+    pal <- colorNumeric(
+      palette = "viridis",
+      domain = map_data$value,
+      na.color = "#E0E0E0"  # Light gray for regions without data
+    )
+  } else {
+    pal <- function(x) "#E0E0E0"
+  }
+
+  # Create hover labels
+  uk_sf <- uk_sf %>%
+    mutate(
+      display_name = ifelse(!is.na(region_name), region_name,
+                            ifelse(!is.null(name_col) & name_col %in% names(uk_sf),
+                                   .[[name_col]], nuts_code)),
+      label_text = ifelse(
+        !is.na(value),
+        paste0(
+          "<strong>", display_name, "</strong><br/>",
+          "Value: ", ifelse(is_percentage,
+                            paste0(round(value, 1), "%"),
+                            paste0("$", round(value, 2), "M")), "<br/>",
+          "Innovations: ", scales::comma(innos)
+        ),
+        paste0("<strong>", display_name, "</strong><br/>No data")
+      )
+    )
+
+  # Create leaflet map
+  map <- leaflet(uk_sf) %>%
+    addProviderTiles(providers$CartoDB.Positron) %>%
+    addPolygons(
+      fillColor = ~pal(value),
+      weight = 1,
+      opacity = 1,
+      color = "white",
+      fillOpacity = 0.7,
+      highlightOptions = highlightOptions(
+        weight = 3,
+        color = "#666",
+        fillOpacity = 0.9,
+        bringToFront = TRUE
+      ),
+      label = ~lapply(label_text, HTML),
+      labelOptions = labelOptions(
+        style = list(
+          "font-weight" = "normal",
+          padding = "3px 8px"
+        ),
+        textsize = "12px",
+        direction = "auto"
+      )
+    ) %>%
+    setView(lng = -2.5, lat = 54.5, zoom = 5)
+
+  # Add legend if we have data
+  if (nrow(map_data) > 0) {
+    map <- map %>%
+      addLegend(
+        position = "bottomright",
+        pal = pal,
+        values = ~value,
+        title = ifelse(is_percentage, "Return (%)", "Value ($M)"),
+        opacity = 0.7,
+        na.label = "No data"
+      )
+  }
+
+  # Add title
+  map <- map %>%
+    addControl(
+      html = paste0("<div style='padding: 6px 12px; background: white; ",
+                    "border-radius: 4px; font-weight: bold; font-size: 14px;'>",
+                    htmltools::htmlEscape(plot_title), "</div>"),
+      position = "topright"
+    )
+
+  return(map)
 }
 

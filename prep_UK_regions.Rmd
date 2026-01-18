@@ -206,8 +206,8 @@ message("Regionmap saved to: ", output_path)
 
 ```{r}
 library(rsconnect)
-library(accounts)
-connectCloudUser(launch.browser=T)
+#library(accounts)
+#connectCloudUser(launch.browser=T)
 
 ```
 

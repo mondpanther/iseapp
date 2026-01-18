@@ -1,0 +1,445 @@
+---
+title: "Prepare and Explore ISE Data"
+output: html_notebook
+---
+
+# Setup
+
+```{r setup}
+library(fst)
+library(arrow)
+library(tidyverse)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggiraph)
+library(wbstats)
+library(countrycode)
+library(jsonlite)
+
+source("dropbox_auth.R")
+
+# Function to detect local Dropbox path from Dropbox's config file
+get_dropbox_path <- function() {
+  if (.Platform$OS.type == "windows") {
+    info_paths <- c(
+      file.path(Sys.getenv("APPDATA"), "Dropbox", "info.json"),
+      file.path(Sys.getenv("LOCALAPPDATA"), "Dropbox", "info.json")
+    )
+  } else {
+    info_paths <- file.path(Sys.getenv("HOME"), ".dropbox", "info.json")
+  }
+
+  for (p in info_paths) {
+    if (file.exists(p)) {
+      info <- jsonlite::fromJSON(p)
+      if (!is.null(info$business)) {
+        return(info$business$path)
+      } else if (!is.null(info$personal)) {
+        return(info$personal$path)
+      }
+    }
+  }
+  return(NULL)
+}
+
+# Try to find local Dropbox Apps/iseapp folder
+get_local_iseapp_path <- function() {
+  # First check environment variable
+  env_path <- Sys.getenv("ISEAPP_PATH_LOCAL")
+  if (nzchar(env_path) && dir.exists(env_path)) {
+    return(env_path)
+  }
+  # Try to detect Dropbox path automatically
+  dropbox_root <- get_dropbox_path()
+  if (!is.null(dropbox_root)) {
+    iseapp_path <- file.path(dropbox_root, "Apps", "iseapp")
+    if (dir.exists(iseapp_path)) {
+      return(iseapp_path)
+    }
+  }
+  return(NULL)
+}
+
+# Get the local path (cached for session)
+iseapp_local_path <- get_local_iseapp_path()
+if (!is.null(iseapp_local_path)) {
+  message("Using local Dropbox path: ", iseapp_local_path)
+} else {
+  message("Local Dropbox not found, will use online Dropbox API")
+}
+
+# Helper function for local file paths
+localpath_fname <- function(fname) {
+  if (!is.null(iseapp_local_path)) {
+    fname <- sub("^/+", "", fname)
+    return(file.path(iseapp_local_path, fname))
+  }
+  return("")
+}
+```
+
+# Data Loading
+
+Load the core mapping files with Dropbox fallback pattern.
+
+```{r load-countrymap}
+pp <- localpath_fname("countrymap.fst")
+if (file.exists(pp)) {
+  countrymap <- read_fst(pp)
+} else {
+  countrymap <- dropbox_read_fst("/countrymap.fst")
+}
+
+cat("Loaded countrymap:", nrow(countrymap), "rows\n")
+
+
+countrymap %>% distinct(docdb_family_id) %>% nrow()
+test=countrymap %>% filter(ctry_code=="GB") 
+
+test=countrymap %>% filter(ctry_code=="klj")
+
+test=countrymap %>% distinct(ctry_code)
+
+```
+
+```{r load-techmap}
+pp <- localpath_fname("techmap.fst")
+if (file.exists(pp)) {
+  techmap <- read_fst(pp)
+} else {
+  techmap <- dropbox_read_fst("/techmap.fst")
+}
+
+cat("Loaded techmap:", nrow(techmap), "rows\n")
+
+techmap %>% distinct(technology)
+
+
+```
+
+# Data Overview
+
+## Countrymap Structure
+
+```{r countrymap-overview}
+cat("Dimensions:", nrow(countrymap), "rows x", ncol(countrymap), "columns\n\n")
+cat("Column names:\n")
+print(names(countrymap))
+```
+
+```{r countrymap-types}
+cat("\nData types:\n")
+str(countrymap)
+```
+
+```{r countrymap-head}
+head(countrymap, 10)
+```
+
+## Techmap Structure
+
+```{r techmap-overview}
+cat("Dimensions:", nrow(techmap), "rows x", ncol(techmap), "columns\n\n")
+cat("Column names:\n")
+print(names(techmap))
+```
+
+```{r techmap-types}
+cat("\nData types:\n")
+str(techmap)
+```
+
+```{r techmap-head}
+head(techmap, 10)
+```
+
+# Missing Value Analysis
+
+## Countrymap Completeness
+
+```{r countrymap-missing}
+countrymap_missing <- countrymap %>%
+  summarise(across(everything(), ~sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "column", values_to = "na_count") %>%
+  mutate(
+    total = nrow(countrymap),
+    na_pct = round(100 * na_count / total, 2)
+  ) %>%
+  arrange(desc(na_pct))
+
+print(countrymap_missing)
+
+
+
+```
+
+## Techmap Completeness
+
+```{r techmap-missing}
+techmap_missing <- techmap %>%
+  summarise(across(everything(), ~sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "column", values_to = "na_count") %>%
+  mutate(
+    total = nrow(techmap),
+    na_pct = round(100 * na_count / total, 2)
+  ) %>%
+  arrange(desc(na_pct))
+
+print(techmap_missing)
+```
+
+# Summary Statistics
+
+## Countrymap Key Metrics
+
+```{r countrymap-summary}
+# Numeric columns summary
+countrymap %>%
+  select(where(is.numeric)) %>%
+  summary()
+```
+
+## Techmap Key Metrics
+
+```{r techmap-summary}
+# Numeric columns summary
+techmap %>%
+  select(where(is.numeric)) %>%
+  summary()
+```
+
+# Country Analysis
+
+## Patent Counts by Country
+
+```{r country-patent-counts}
+if ("ctry_code" %in% names(countrymap)) {
+  country_counts <- countrymap %>%
+    count(ctry_code, name = "patent_count") %>%
+    arrange(desc(patent_count))
+
+  cat("Total unique countries:", n_distinct(country_counts$ctry_code), "\n\n")
+  cat("Top 20 countries by patent count:\n")
+  print(head(country_counts, 20))
+}
+```
+
+## Top Contributors Visualization
+
+```{r country-top-chart, fig.width=10, fig.height=8}
+if ("ctry_code" %in% names(countrymap)) {
+  top_countries <- country_counts %>%
+    slice_max(patent_count, n = 20) %>%
+    mutate(ctry_code = fct_reorder(ctry_code, patent_count))
+
+  p <- ggplot(top_countries, aes(x = ctry_code, y = patent_count)) +
+    geom_col_interactive(
+      aes(tooltip = paste0(ctry_code, ": ", scales::comma(patent_count))),
+      fill = "steelblue"
+    ) +
+    coord_flip() +
+    labs(
+      title = "Top 20 Countries by Patent Count",
+      x = "Country Code",
+      y = "Number of Patents"
+    ) +
+    theme_minimal() +
+    scale_y_continuous(labels = scales::comma)
+
+  girafe(ggobj = p)
+}
+```
+
+## Country Distribution with World Bank Data
+
+```{r country-income-analysis}
+if ("ctry_code" %in% names(countrymap)) {
+  # Get income classification
+  income_class <- wb_countries() %>%
+    select(ctry_code = iso2c, income_level, region)
+
+  country_summary <- country_counts %>%
+    left_join(income_class, by = "ctry_code") %>%
+    filter(!is.na(income_level))
+
+  # Summary by income level
+  income_summary <- country_summary %>%
+    group_by(income_level) %>%
+    summarise(
+      n_countries = n(),
+      total_patents = sum(patent_count),
+      mean_patents = mean(patent_count),
+      median_patents = median(patent_count)
+    ) %>%
+    arrange(desc(total_patents))
+
+  print(income_summary)
+}
+```
+
+# Technology Analysis
+
+## Technology Category Distribution
+
+```{r tech-distribution}
+# Check for technology classification columns in techmap
+tech_cols <- names(techmap)[grepl("tech|ipc|cpc|class", names(techmap), ignore.case = TRUE)]
+cat("Technology-related columns found:", paste(tech_cols, collapse = ", "), "\n\n")
+
+if (length(tech_cols) > 0) {
+  # Show distribution for first tech column found
+  first_tech_col <- tech_cols[1]
+  cat("Distribution for", first_tech_col, ":\n")
+
+  tech_dist <- techmap %>%
+    count(!!sym(first_tech_col), name = "count") %>%
+    arrange(desc(count))
+
+  print(head(tech_dist, 20))
+}
+```
+
+## Technology Categories Visualization
+
+```{r tech-chart, fig.width=10, fig.height=8}
+if (length(tech_cols) > 0 && nrow(tech_dist) > 0) {
+  top_tech <- tech_dist %>%
+    slice_max(count, n = 15) %>%
+    mutate(category = fct_reorder(as.character(!!sym(first_tech_col)), count))
+
+  p <- ggplot(top_tech, aes(x = category, y = count)) +
+    geom_col_interactive(
+      aes(tooltip = paste0(category, ": ", scales::comma(count))),
+      fill = "darkgreen"
+    ) +
+    coord_flip() +
+    labs(
+      title = paste("Top 15 Technology Categories by", first_tech_col),
+      x = "Category",
+      y = "Count"
+    ) +
+    theme_minimal() +
+    scale_y_continuous(labels = scales::comma)
+
+  girafe(ggobj = p)
+}
+```
+
+# Time Series Analysis
+
+## Filing Trends Over Years
+
+```{r time-series-prep}
+# Check for year columns
+year_cols <- names(countrymap)[grepl("year|date", names(countrymap), ignore.case = TRUE)]
+cat("Year-related columns found:", paste(year_cols, collapse = ", "), "\n")
+```
+
+```{r filing-trends, fig.width=12, fig.height=6}
+if (length(year_cols) > 0) {
+  year_col <- year_cols[1]
+  cat("Using column:", year_col, "\n\n")
+
+  yearly_counts <- countrymap %>%
+    filter(!is.na(!!sym(year_col))) %>%
+    count(year = !!sym(year_col), name = "patents") %>%
+    arrange(year)
+
+  # Filter to reasonable year range
+  yearly_counts <- yearly_counts %>%
+    filter(year >= 1980 & year <= 2025)
+
+  print(yearly_counts)
+
+  p <- ggplot(yearly_counts, aes(x = year, y = patents)) +
+    geom_line_interactive(
+      aes(tooltip = paste0("Year ", year, ": ", scales::comma(patents), " patents")),
+      color = "steelblue",
+      linewidth = 1
+    ) +
+    geom_point_interactive(
+      aes(tooltip = paste0("Year ", year, ": ", scales::comma(patents), " patents")),
+      color = "steelblue",
+      size = 2
+    ) +
+    labs(
+      title = "Patent Filing Trends Over Time",
+      x = "Year",
+      y = "Number of Patents"
+    ) +
+    theme_minimal() +
+    scale_y_continuous(labels = scales::comma)
+
+  girafe(ggobj = p)
+}
+```
+
+## Trends by Top Countries
+
+```{r trends-by-country, fig.width=12, fig.height=8}
+if (length(year_cols) > 0 && "ctry_code" %in% names(countrymap)) {
+  # Get top 5 countries
+  top5 <- country_counts %>%
+    slice_max(patent_count, n = 5) %>%
+    pull(ctry_code)
+
+  yearly_by_country <- countrymap %>%
+    filter(ctry_code %in% top5, !is.na(!!sym(year_col))) %>%
+    count(year = !!sym(year_col), ctry_code, name = "patents") %>%
+    filter(year >= 1990 & year <= 2025)
+
+  p <- ggplot(yearly_by_country, aes(x = year, y = patents, color = ctry_code)) +
+    geom_line(linewidth = 1) +
+    geom_point(size = 1.5) +
+    labs(
+      title = "Patent Filing Trends by Top 5 Countries",
+      x = "Year",
+      y = "Number of Patents",
+      color = "Country"
+    ) +
+    theme_minimal() +
+    scale_y_continuous(labels = scales::comma)
+
+  print(p)
+}
+```
+
+# Cross-tabulation Analysis
+
+## Country x Technology Matrix (if applicable)
+
+```{r cross-tab}
+# Check if we can join countrymap and techmap
+common_cols <- intersect(names(countrymap), names(techmap))
+cat("Common columns between countrymap and techmap:\n")
+print(common_cols)
+
+if (length(common_cols) > 0) {
+  cat("\nThese columns can be used to join the datasets.\n")
+}
+```
+
+# Data Quality Summary
+
+```{r quality-summary}
+cat("=== DATA QUALITY SUMMARY ===\n\n")
+
+cat("COUNTRYMAP:\n")
+cat("  - Total records:", scales::comma(nrow(countrymap)), "\n")
+cat("  - Total columns:", ncol(countrymap), "\n")
+cat("  - Complete cases:", scales::comma(sum(complete.cases(countrymap))), "\n")
+cat("  - Complete case rate:", round(100 * sum(complete.cases(countrymap)) / nrow(countrymap), 1), "%\n\n")
+
+cat("TECHMAP:\n")
+cat("  - Total records:", scales::comma(nrow(techmap)), "\n")
+cat("  - Total columns:", ncol(techmap), "\n")
+cat("  - Complete cases:", scales::comma(sum(complete.cases(techmap))), "\n")
+cat("  - Complete case rate:", round(100 * sum(complete.cases(techmap)) / nrow(techmap), 1), "%\n")
+```
+
+# Session Info
+
+```{r session-info}
+sessionInfo()
+```
