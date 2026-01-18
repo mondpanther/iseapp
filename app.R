@@ -19,6 +19,7 @@ library(gfonts)
 library(leaflet)
 library(sf)
 source("dropbox_auth.R")
+source("istraxfunctions.R")
 
 
 # Register Google Font
@@ -75,6 +76,14 @@ if (!is.null(iseapp_local_path)) {
   message("Using local Dropbox path: ", iseapp_local_path)
 } else {
   message("Local Dropbox not found, will use online Dropbox")
+}
+
+# Get prepdata path for pre-computed data
+prepdata_path <- get_prepdata_path(iseapp_local_path)
+if (!is.null(prepdata_path)) {
+  message("Pre-computed data available at: ", prepdata_path)
+} else {
+  message("No pre-computed data directory found - will compute on-the-fly")
 }
 
 localpath_fname <- function(fname) {
@@ -203,8 +212,6 @@ cpc_sections=c( "Human Necessities",
                 "Physics",
                 "Electricity",                               
                  "General tagging of new or cross-sectional technology" )
-
-source("istraxfunctions.R")
 
 # Get all unique technologies from techmap
 all_techs <- c((techmap %>% distinct(technology))$technology, "All")
@@ -805,16 +812,20 @@ server <- function(input, output, session) {
 
     
     pp=localpath_fname(path)
-    if(file.exists(pp)){ 
+    if(file.exists(pp)){
       ddd <- read_fst(pp)
     } else {
       ddd <- dropbox_read_fst(path)}
-    
-    
-    
-    
+
+    # Replace missing values with 0 in the value column
+    # Some files (avstrax, ev) contain NAs that need to be treated as 0
+    value_col <- input$toflow
+    if (value_col %in% names(ddd)) {
+      ddd[[value_col]][is.na(ddd[[value_col]])] <- 0
+    }
+
     #patchar_countrymap <- countrymap %>% left_join(read_fst(path))
-    patchar_countrymap <- countrymap %>% left_join(ddd)
+    patchar_countrymap <- countrymap %>% left_join(ddd, by = c("docdb_family_id", "ctry_code"))
     
   })
 
@@ -897,16 +908,39 @@ server <- function(input, output, session) {
     # Get the label from the nested toflow_choices list
     flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
 
-    #plot_avstrax_by_technology <- function(pdata, classes, green_classes, technologies, toflow, custom_colors)
-    #input$techs="Wireless" 
-    
-    # We first implement the filter from the previous diagram; i.e. we restrict to the countries selected there...
-    #selected_countries="VN"
-    filtered <- patchar_countrymap() %>%
-      filter(ctry_code %in% selected_countries )  
-    
-    #filtered= patchar_countrymap %>%    filter(ctry_code %in% c("VN","GB") )  
-    #input=list(techs="AI",toflow="istrax_global")
+    # Try to load pre-computed data if available
+    precomputed_data <- NULL
+
+    # Check if we can use pre-computed data:
+    # 1. No comparison technologies (pre-computation doesn't cover comparisons)
+    # 2. Country selection matches a known group
+    # 3. Technology selection matches a known category
+    if (is.null(input$techs_comparison) || length(input$techs_comparison) == 0) {
+      # Try to match country selection to a pre-computed group
+      country_group <- match_country_group(selected_countries, group_definitions)
+      # Try to match tech selection to a pre-computed category
+      tech_category <- match_tech_category(input$techs)
+
+      if (!is.null(country_group) && !is.null(tech_category)) {
+        # Try to load pre-computed data
+        precomputed_data <- load_precomputed_by_tech(prepdata_path, input$toflow,
+                                                      paste0(country_group, "_", tech_category))
+        if (!is.null(precomputed_data)) {
+          message("Using pre-computed data for: ", country_group, " / ", tech_category)
+        }
+      }
+    }
+
+    # Only load and merge full data if pre-computed data is not available
+    if (is.null(precomputed_data)) {
+      # We first implement the filter from the previous diagram; i.e. we restrict to the countries selected there...
+      filtered <- patchar_countrymap() %>%
+        filter(ctry_code %in% selected_countries )
+    } else {
+      # When using pre-computed data, we still need a minimal filtered for any fallback
+      filtered <- NULL
+    }
+
     # Calculate responsive dimensions - wider browser = wider plot
     plot_width <- max(window_dims$width, 400)
     # Convert pixels to inches (assuming 96 dpi), with aspect ratio that varies with width
@@ -916,7 +950,7 @@ server <- function(input, output, session) {
     height_inches <- width_inches * aspect_ratio
 
     p <- plot_avstrax_by_technology(
-      pdata = filtered,
+      pdata = if(is.null(precomputed_data)) filtered else data.frame(),
       classes = techmap,
       technologies = input$techs,
       toflow = input$toflow,
@@ -929,7 +963,8 @@ server <- function(input, output, session) {
       width_svg = width_inches,
       height_svg = height_inches,
       plot_title = sub("^[^.]*\\.", "", flow_label),
-      comparison_technologies = input$techs_comparison
+      comparison_technologies = input$techs_comparison,
+      precomputed_avstrax = precomputed_data
     )
 
     p
@@ -945,19 +980,37 @@ server <- function(input, output, session) {
     selected_countries <- expand_country_selection(input$country)
     flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
 
-    # Filter by technology class
-    filtered_classes <- techmap %>%
-      filter(technology %in% input$techs) %>%
-      distinct()
+    # Try to load pre-computed data if available
+    avstrax_data <- NULL
 
-    if("All Innovations" %in% input$techs) filtered_classes <- data.frame()
+    # Try to match selections to pre-computed data
+    country_group <- match_country_group(selected_countries, group_definitions)
+    tech_category <- match_tech_category(input$techs)
 
-    # Filter data by selected countries
-    filtered <- patchar_countrymap() %>%
-      filter(ctry_code %in% selected_countries)
+    if (!is.null(country_group) && !is.null(tech_category)) {
+      avstrax_data <- load_precomputed_by_tech(prepdata_path, input$toflow,
+                                                paste0(country_group, "_", tech_category))
+      if (!is.null(avstrax_data)) {
+        message("World map using pre-computed data for: ", country_group, " / ", tech_category)
+      }
+    }
 
-    # Compute aggregated data for all countries
-    avstrax_data <- compute_avstrax_for_techs(filtered, input$toflow, filtered_classes)
+    # If no pre-computed data, compute on the fly
+    if (is.null(avstrax_data)) {
+      # Filter by technology class
+      filtered_classes <- techmap %>%
+        filter(technology %in% input$techs) %>%
+        distinct()
+
+      if("All Innovations" %in% input$techs) filtered_classes <- data.frame()
+
+      # Filter data by selected countries
+      filtered <- patchar_countrymap() %>%
+        filter(ctry_code %in% selected_countries)
+
+      # Compute aggregated data for all countries
+      avstrax_data <- compute_avstrax_for_techs(filtered, input$toflow, filtered_classes)
+    }
 
     # Filter by minimum innovations
     avstrax_data <- avstrax_data %>%
@@ -986,6 +1039,13 @@ server <- function(input, output, session) {
       ddd <- read_fst(pp)
     } else {
       ddd <- dropbox_read_fst(path)
+    }
+
+    # Replace missing values with 0 in the value column
+    # Some files (avstrax, ev) contain NAs that need to be treated as 0
+    value_col <- input$toflow_region
+    if (value_col %in% names(ddd)) {
+      ddd[[value_col]][is.na(ddd[[value_col]])] <- 0
     }
 
     # Join regionmap with istrax data
@@ -1076,14 +1136,39 @@ server <- function(input, output, session) {
     selected_regions <- expand_region_selection(input$region)
     flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow_region]
 
-    # Get region data and validate it has required columns
-    region_data <- patchar_regionmap()
-    has_ctry_code <- "ctry_code" %in% names(region_data)
-    shiny::validate(shiny::need(has_ctry_code, "Region data missing required columns. Please regenerate regionmap.fst."))
+    # Try to load pre-computed data if available
+    precomputed_data <- NULL
 
-    # Filter by selected regions
-    filtered <- region_data %>%
-      filter(ctry_code %in% selected_regions)
+    # Check if we can use pre-computed data (no comparison technologies)
+    if (is.null(input$techs_comparison_region) || length(input$techs_comparison_region) == 0) {
+      # Try to match region selection to a pre-computed group
+      region_group <- match_country_group(selected_regions, region_group_definitions)
+      # Try to match tech selection to a pre-computed category
+      tech_category <- match_tech_category(input$techs_region)
+
+      if (!is.null(region_group) && !is.null(tech_category)) {
+        # Try to load pre-computed data for regions
+        precomputed_data <- load_precomputed_by_region(prepdata_path, input$toflow_region,
+                                                        paste0(region_group, "_", tech_category))
+        if (!is.null(precomputed_data)) {
+          message("Using pre-computed region data for: ", region_group, " / ", tech_category)
+        }
+      }
+    }
+
+    # Only load and merge full data if pre-computed data is not available
+    if (is.null(precomputed_data)) {
+      # Get region data and validate it has required columns
+      region_data <- patchar_regionmap()
+      has_ctry_code <- "ctry_code" %in% names(region_data)
+      shiny::validate(shiny::need(has_ctry_code, "Region data missing required columns. Please regenerate regionmap.fst."))
+
+      # Filter by selected regions
+      filtered <- region_data %>%
+        filter(ctry_code %in% selected_regions)
+    } else {
+      filtered <- NULL
+    }
 
     plot_width <- max(window_dims$width, 400)
     width_inches <- plot_width / 96
@@ -1091,7 +1176,7 @@ server <- function(input, output, session) {
     height_inches <- width_inches * aspect_ratio
 
     p <- plot_avstrax_by_technology(
-      pdata = filtered,
+      pdata = if(is.null(precomputed_data)) filtered else data.frame(),
       classes = techmap,
       technologies = input$techs_region,
       toflow = input$toflow_region,
@@ -1105,7 +1190,8 @@ server <- function(input, output, session) {
       height_svg = height_inches,
       plot_title = sub("^[^.]*\\.", "", flow_label),
       x_label = "Region",
-      comparison_technologies = input$techs_comparison_region
+      comparison_technologies = input$techs_comparison_region,
+      precomputed_avstrax = precomputed_data
     )
 
     p
@@ -1124,23 +1210,41 @@ server <- function(input, output, session) {
     selected_regions <- expand_region_selection(input$region)
     flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow_region]
 
-    # Filter by technology class
-    filtered_classes <- techmap %>%
-      filter(technology %in% input$techs_region) %>%
-      distinct()
+    # Try to load pre-computed data if available
+    avstrax_data <- NULL
 
-    if("All Innovations" %in% input$techs_region) filtered_classes <- data.frame()
+    # Try to match selections to pre-computed data
+    region_group <- match_country_group(selected_regions, region_group_definitions)
+    tech_category <- match_tech_category(input$techs_region)
 
-    # Get region data and filter by selected regions
-    region_data <- patchar_regionmap()
-    has_ctry_code <- "ctry_code" %in% names(region_data)
-    shiny::validate(shiny::need(has_ctry_code, "Region data missing required columns."))
+    if (!is.null(region_group) && !is.null(tech_category)) {
+      avstrax_data <- load_precomputed_by_region(prepdata_path, input$toflow_region,
+                                                  paste0(region_group, "_", tech_category))
+      if (!is.null(avstrax_data)) {
+        message("UK regions map using pre-computed data for: ", region_group, " / ", tech_category)
+      }
+    }
 
-    filtered <- region_data %>%
-      filter(ctry_code %in% selected_regions)
+    # If no pre-computed data, compute on the fly
+    if (is.null(avstrax_data)) {
+      # Filter by technology class
+      filtered_classes <- techmap %>%
+        filter(technology %in% input$techs_region) %>%
+        distinct()
 
-    # Compute aggregated data for all regions
-    avstrax_data <- compute_avstrax_for_techs(filtered, input$toflow_region, filtered_classes)
+      if("All Innovations" %in% input$techs_region) filtered_classes <- data.frame()
+
+      # Get region data and filter by selected regions
+      region_data <- patchar_regionmap()
+      has_ctry_code <- "ctry_code" %in% names(region_data)
+      shiny::validate(shiny::need(has_ctry_code, "Region data missing required columns."))
+
+      filtered <- region_data %>%
+        filter(ctry_code %in% selected_regions)
+
+      # Compute aggregated data for all regions
+      avstrax_data <- compute_avstrax_for_techs(filtered, input$toflow_region, filtered_classes)
+    }
 
     # Filter by minimum innovations
     avstrax_data <- avstrax_data %>%

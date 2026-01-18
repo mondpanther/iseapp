@@ -3,8 +3,150 @@ library(dplyr)
 library(tidyr)
 library(ggiraph)
 library(scales)
+library(fst)
 
 
+# ============================================
+# Pre-computed Data Helper Functions
+# ============================================
+
+#' Generate safe filename for pre-computed data
+#' @param ... Parts to combine into filename
+#' @return Safe filename string
+safe_filename <- function(...) {
+  parts <- c(...)
+  name <- paste(parts, collapse = "_")
+  name <- gsub("[^a-zA-Z0-9_]", "_", name)
+  name <- gsub("_+", "_", name)
+  name <- gsub("^_|_$", "", name)
+  paste0(name, ".fst")
+}
+
+#' Get the prepdata directory path
+#' @param iseapp_local_path The base iseapp path
+#' @return Path to prepdata directory or NULL
+get_prepdata_path <- function(iseapp_local_path) {
+  if (is.null(iseapp_local_path)) return(NULL)
+  prepdata_path <- file.path(iseapp_local_path, "prepdata")
+  if (dir.exists(prepdata_path)) return(prepdata_path)
+  return(NULL)
+}
+
+#' Try to load pre-computed data for "by technology" aggregation
+#' @param prepdata_path Path to prepdata directory
+#' @param toflow The toflow variable name
+#' @param country_group_name Name of the country group
+#' @return Data frame or NULL if not found
+load_precomputed_by_tech <- function(prepdata_path, toflow, country_group_name) {
+  if (is.null(prepdata_path)) return(NULL)
+
+  filename <- safe_filename("by_tech", toflow, country_group_name)
+  filepath <- file.path(prepdata_path, filename)
+
+  if (file.exists(filepath)) {
+    tryCatch({
+      data <- read_fst(filepath)
+      message("Loaded pre-computed data: ", filename)
+      return(data)
+    }, error = function(e) {
+      message("Error loading pre-computed data: ", e$message)
+      return(NULL)
+    })
+  }
+  return(NULL)
+}
+
+#' Try to load pre-computed data for "by country" aggregation
+#' @param prepdata_path Path to prepdata directory
+#' @param toflow The toflow variable name
+#' @param tech_category_name Name of the technology category
+#' @return Data frame or NULL if not found
+load_precomputed_by_country <- function(prepdata_path, toflow, tech_category_name) {
+  if (is.null(prepdata_path)) return(NULL)
+
+  filename <- safe_filename("by_country", toflow, tech_category_name)
+  filepath <- file.path(prepdata_path, filename)
+
+  if (file.exists(filepath)) {
+    tryCatch({
+      data <- read_fst(filepath)
+      message("Loaded pre-computed data: ", filename)
+      return(data)
+    }, error = function(e) {
+      message("Error loading pre-computed data: ", e$message)
+      return(NULL)
+    })
+  }
+  return(NULL)
+}
+
+#' Try to load pre-computed data for "by region" aggregation
+#' @param prepdata_path Path to prepdata directory
+#' @param toflow The toflow variable name
+#' @param tech_category_name Name of the technology category
+#' @return Data frame or NULL if not found
+load_precomputed_by_region <- function(prepdata_path, toflow, tech_category_name) {
+  if (is.null(prepdata_path)) return(NULL)
+
+  filename <- safe_filename("by_region", toflow, tech_category_name)
+  filepath <- file.path(prepdata_path, filename)
+
+  if (file.exists(filepath)) {
+    tryCatch({
+      data <- read_fst(filepath)
+      message("Loaded pre-computed data: ", filename)
+      return(data)
+    }, error = function(e) {
+      message("Error loading pre-computed data: ", e$message)
+      return(NULL)
+    })
+  }
+  return(NULL)
+}
+
+#' Map selected countries to a country group name for pre-computed lookup
+#' @param selected_countries Vector of selected country codes
+#' @param group_definitions Named list of country group definitions
+#' @return Group name if exact match found, NULL otherwise
+match_country_group <- function(selected_countries, group_definitions) {
+  selected_set <- sort(unique(selected_countries))
+
+  for (group_name in names(group_definitions)) {
+    group_set <- sort(unique(group_definitions[[group_name]]))
+    if (identical(selected_set, group_set)) {
+      # Convert to safe name format
+      return(gsub(" ", "_", group_name))
+    }
+  }
+  return(NULL)
+}
+
+#' Map selected technologies to a category name for pre-computed lookup
+#' @param selected_techs Vector of selected technology names
+#' @param tech_definitions Named list mapping category names to tech filters
+#' @return Category name if match found, NULL otherwise
+match_tech_category <- function(selected_techs, tech_definitions = NULL) {
+  # Default tech definitions
+  if (is.null(tech_definitions)) {
+    tech_definitions <- list(
+      "All" = "All",
+      "Green_Technology" = "Green Technology",
+      "Battery_Technology" = "Battery Technology",
+      "Hard_to_Abate" = "Hard to Abate Sector Decarbonization",
+      "AI" = "AI",
+      "Other" = "Other"
+    )
+  }
+
+  if (length(selected_techs) == 1) {
+    for (cat_name in names(tech_definitions)) {
+      if (identical(selected_techs, tech_definitions[[cat_name]])) {
+        return(cat_name)
+      }
+    }
+  }
+  return(NULL)
+}
 
 
 # Define custom colors
@@ -29,13 +171,23 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
                             ) {
   library(dplyr)
 
-  
-  
+
+
   #data=filtered; istrax_var="istrax_global"
   istrax_sym <- rlang::sym(istrax_var)
-  
+
+  # Check if the required column exists in the data
+
+  if (!istrax_var %in% names(data)) {
+    # Try to find similar column names for better error message
+    similar_cols <- grep("strax|^ev_", names(data), value = TRUE)
+    stop(paste0("Column '", istrax_var, "' not found in data. ",
+                "Available similar columns: ", paste(similar_cols, collapse = ", "),
+                ". All columns: ", paste(head(names(data), 20), collapse = ", ")))
+  }
+
   scaler=ifelse(grepl("strax", istrax_var ),100,1)
-  
+
   avstrax <- data %>%
     select(docdb_family_id, appln_id, !!istrax_sym) %>%
     rename(istrax = !!istrax_sym) %>%
@@ -43,7 +195,7 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
     inner_join(classes, by = "docdb_family_id") %>%
     bind_rows(
       data %>%
-        select(docdb_family_id, starts_with("istrax")) %>%
+        select(docdb_family_id, !!istrax_sym) %>%
         rename(istrax = !!istrax_sym) %>%
         distinct() %>%
         mutate(technology = "All")
@@ -276,13 +428,22 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
 compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
                                       ) {
   #data=patchar_countrymap;istrax_var="istrax_global"; classes=filtered; green_classes=green_classes;classes=data.frame()
-  
-  
+
+
   library(dplyr)
-  
-  
+
+
   istrax_sym <- rlang::sym(istrax_var)
-  
+
+  # Check if the required column exists in the data
+  if (!istrax_var %in% names(data)) {
+    # Try to find similar column names for better error message
+    similar_cols <- grep("strax|^ev_", names(data), value = TRUE)
+    stop(paste0("Column '", istrax_var, "' not found in data. ",
+                "Available similar columns: ", paste(similar_cols, collapse = ", "),
+                ". All columns: ", paste(head(names(data), 20), collapse = ", ")))
+  }
+
   scaler=ifelse(grepl("strax", istrax_var ),100,1)
   
   # If not filter classes are selected we take all
@@ -378,7 +539,8 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
                                        height_svg=6,
                                        plot_title="Spillover returns",
                                        x_label="Country",
-                                       comparison_technologies=NULL) {
+                                       comparison_technologies=NULL,
+                                       precomputed_avstrax=NULL) {
   #mininno=30;topn=20;  pdata=patchar_countrymap;toflow="istrax_global"; classes=techmap; green_classes=green_classes; technologies="Green Energy"
 
   library(dplyr)
@@ -389,27 +551,36 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   # Check if we have comparison technologies
   has_comparison <- !is.null(comparison_technologies) && length(comparison_technologies) > 0
 
-  # Filter by technology class for main selection
-  filtered <- classes %>%
-    filter(technology %in% technologies) %>%
-    distinct()
-
-  if("All Innovations" %in% technologies) filtered <- data.frame()
-
-  # Compute avstrax for main technologies
-  avstrax <- compute_avstrax_for_techs(pdata, toflow, filtered)
-  avstrax$group <- "Main"
-
-  # If comparison technologies are selected, compute for those too
-  if (has_comparison) {
-    filtered_comp <- classes %>%
-      filter(technology %in% comparison_technologies) %>%
+  # Use pre-computed data if provided, otherwise compute
+  if (!is.null(precomputed_avstrax) && nrow(precomputed_avstrax) > 0) {
+    message("Using pre-computed avstrax data")
+    avstrax <- precomputed_avstrax
+    avstrax$group <- "Main"
+    # For comparison, we still need to compute (pre-computation doesn't cover all combinations)
+    has_comparison <- FALSE
+  } else {
+    # Filter by technology class for main selection
+    filtered <- classes %>%
+      filter(technology %in% technologies) %>%
       distinct()
 
-    if("All Innovations" %in% comparison_technologies) filtered_comp <- data.frame()
+    if("All Innovations" %in% technologies) filtered <- data.frame()
 
-    avstrax_comp <- compute_avstrax_for_techs(pdata, toflow, filtered_comp)
-    avstrax_comp$group <- "Comparison"
+    # Compute avstrax for main technologies
+    avstrax <- compute_avstrax_for_techs(pdata, toflow, filtered)
+    avstrax$group <- "Main"
+
+    # If comparison technologies are selected, compute for those too
+    if (has_comparison) {
+      filtered_comp <- classes %>%
+        filter(technology %in% comparison_technologies) %>%
+        distinct()
+
+      if("All Innovations" %in% comparison_technologies) filtered_comp <- data.frame()
+
+      avstrax_comp <- compute_avstrax_for_techs(pdata, toflow, filtered_comp)
+      avstrax_comp$group <- "Comparison"
+    }
   }
 
   # Extract mean for "All" from main selection
