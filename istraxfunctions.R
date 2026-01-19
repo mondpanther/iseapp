@@ -302,14 +302,22 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
   if(!"All" %in% classlist) avstrax=avstrax %>% filter(technology != "All") 
   
   
-  avstrax <- avstrax %>% 
+  # Determine if this is a return (%) or spillover ($) variable
+
+  is_return <- grepl("strax", toflow)
+
+  avstrax <- avstrax %>%
     #filter(technology != "All") %>%
     arrange(technology) %>%
     mutate(
       linnos1 = innos,
       linnos2 = log(1+innos),
       bwidthscale = bwidthscale,
-    ) %>% 
+      # Format value label based on variable type
+      value_label = ifelse(is_return,
+                           paste0(round(mean, 1), "%"),
+                           paste0("$", round(mean, 1), " million"))
+    ) %>%
     filter(innos>1) %>%
     mutate(
       linnos=ifelse(bwidthscale=="log",linnos2,linnos1),
@@ -332,7 +340,7 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
     p <- ggplot(avstrax) +
       geom_rect_interactive(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = greenclass,
                                  data_id = technology,
-                                 tooltip = paste0("Top IDs: ", top3_ids),
+                                 tooltip = paste0(technology, ": ", value_label, "\nTop IDs: ", top3_ids),
                                  onclick = top3_ids_url))
   } else {
     p <- ggplot(avstrax) +
@@ -710,6 +718,12 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
 
   # Create the plot
   ylab <- ifelse(grepl("strax", toflow), "Return in %", "Millions of $")
+  is_return <- grepl("strax", toflow)
+
+  # Add formatted value labels for tooltips
+  avstrax$value_label <- ifelse(is_return,
+                                 paste0(round(avstrax$mean, 1), "%"),
+                                 paste0("$", round(avstrax$mean, 1), " million"))
 
   # Define colors for main and comparison
   main_color <- "#3498db"
@@ -721,6 +735,9 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   avstrax$group <- "Main"
   if (has_comp_data) {
     avstrax_comp$group <- "Comparison"
+    avstrax_comp$value_label <- ifelse(is_return,
+                                        paste0(round(avstrax_comp$mean, 1), "%"),
+                                        paste0("$", round(avstrax_comp$mean, 1), " million"))
   }
 
   if (show_top3_ids) {
@@ -729,14 +746,14 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
                             aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
                                 fill = group,
                                 data_id = country_name,
-                                tooltip = paste0("Main - Top IDs: ", top3_ids),
+                                tooltip = paste0(country_name, ": ", value_label, "\nTop IDs: ", top3_ids),
                                 onclick = top3_ids_url))
     if (has_comp_data) {
       p <- p + geom_rect_interactive(data = avstrax_comp,
                                      aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
                                          fill = group,
                                          data_id = paste0(country_name, "_comp"),
-                                         tooltip = paste0("Comparison - Top IDs: ", top3_ids),
+                                         tooltip = paste0(country_name, " (Comparison): ", value_label, "\nTop IDs: ", top3_ids),
                                          onclick = top3_ids_url),
                                      alpha = comp_alpha)
     }
