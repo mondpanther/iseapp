@@ -340,7 +340,9 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
     p <- ggplot(avstrax) +
       geom_rect_interactive(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = greenclass,
                                  data_id = technology,
-                                 tooltip = paste0(technology, ": ", value_label, "\nTop IDs: ", top3_ids),
+                                 tooltip = paste0(technology, ": ", value_label,
+                                                  "\nInnovations: ", scales::comma(innos),
+                                                  "\nTop IDs: ", top3_ids),
                                  onclick = top3_ids_url))
   } else {
     p <- ggplot(avstrax) +
@@ -746,14 +748,18 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
                             aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
                                 fill = group,
                                 data_id = country_name,
-                                tooltip = paste0(country_name, ": ", value_label, "\nTop IDs: ", top3_ids),
+                                tooltip = paste0(country_name, ": ", value_label,
+                                                 "\nInnovations: ", scales::comma(innos),
+                                                 "\nTop IDs: ", top3_ids),
                                 onclick = top3_ids_url))
     if (has_comp_data) {
       p <- p + geom_rect_interactive(data = avstrax_comp,
                                      aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
                                          fill = group,
                                          data_id = paste0(country_name, "_comp"),
-                                         tooltip = paste0(country_name, " (Comparison): ", value_label, "\nTop IDs: ", top3_ids),
+                                         tooltip = paste0(country_name, " (Comparison): ", value_label,
+                                                          "\nInnovations: ", scales::comma(innos),
+                                                          "\nTop IDs: ", top3_ids),
                                          onclick = top3_ids_url),
                                      alpha = comp_alpha)
     }
