@@ -570,6 +570,113 @@ ui <- function(request){fluidPage(
     });
   ")),
 
+  # JavaScript to auto-update browser address bar with input values
+  tags$script(HTML("
+    $(document).ready(function() {
+      // Function to build query string with current input values
+      function buildQueryString() {
+        var params = [];
+
+        // Get current tab
+        var currentTab = $('#main_tabs li.active a').attr('data-value') ||
+                         $('#main_tabs .nav-link.active').attr('data-value') ||
+                         'Country Explorer';
+        params.push('_inputs_&main_tabs=' + encodeURIComponent('\"' + currentTab + '\"'));
+
+        // Country Explorer inputs
+        var country = getShinyInputValue('country');
+        if (country) params.push('country=' + encodeURIComponent(JSON.stringify(country)));
+
+        var toflow = getShinyInputValue('toflow');
+        if (toflow) params.push('toflow=' + encodeURIComponent('\"' + toflow + '\"'));
+
+        var techCat1 = getShinyInputValue('tech_categories_plot1');
+        if (techCat1) params.push('tech_categories_plot1=' + encodeURIComponent(JSON.stringify(techCat1)));
+
+        var bwidthscale = getShinyInputValue('bwidthscale');
+        if (bwidthscale) params.push('bwidthscale=' + encodeURIComponent('\"' + bwidthscale + '\"'));
+
+        var displayMode = getShinyInputValue('display_mode');
+        if (displayMode) params.push('display_mode=' + encodeURIComponent('\"' + displayMode + '\"'));
+
+        var showTop3 = getShinyInputValue('show_top3_ids');
+        if (showTop3 !== null) params.push('show_top3_ids=' + encodeURIComponent(showTop3));
+
+        var techs = getShinyInputValue('techs');
+        if (techs) params.push('techs=' + encodeURIComponent(JSON.stringify(techs)));
+
+        var techsComp = getShinyInputValue('techs_comparison');
+        if (techsComp && techsComp.length > 0) params.push('techs_comparison=' + encodeURIComponent(JSON.stringify(techsComp)));
+
+        var topn = getShinyInputValue('topn');
+        if (topn) params.push('topn=' + encodeURIComponent(topn));
+
+        var mininno = getShinyInputValue('mininno');
+        if (mininno) params.push('mininno=' + encodeURIComponent(mininno));
+
+        // Region Explorer inputs
+        var region = getShinyInputValue('region');
+        if (region) params.push('region=' + encodeURIComponent(JSON.stringify(region)));
+
+        var toflowRegion = getShinyInputValue('toflow_region');
+        if (toflowRegion) params.push('toflow_region=' + encodeURIComponent('\"' + toflowRegion + '\"'));
+
+        var techCat1Region = getShinyInputValue('tech_categories_plot1_region');
+        if (techCat1Region) params.push('tech_categories_plot1_region=' + encodeURIComponent(JSON.stringify(techCat1Region)));
+
+        var bwidthscaleRegion = getShinyInputValue('bwidthscale_region');
+        if (bwidthscaleRegion) params.push('bwidthscale_region=' + encodeURIComponent('\"' + bwidthscaleRegion + '\"'));
+
+        var displayModeRegion = getShinyInputValue('display_mode_region');
+        if (displayModeRegion) params.push('display_mode_region=' + encodeURIComponent('\"' + displayModeRegion + '\"'));
+
+        var showTop3Region = getShinyInputValue('show_top3_ids_region');
+        if (showTop3Region !== null) params.push('show_top3_ids_region=' + encodeURIComponent(showTop3Region));
+
+        var techsRegion = getShinyInputValue('techs_region');
+        if (techsRegion) params.push('techs_region=' + encodeURIComponent(JSON.stringify(techsRegion)));
+
+        var techsCompRegion = getShinyInputValue('techs_comparison_region');
+        if (techsCompRegion && techsCompRegion.length > 0) params.push('techs_comparison_region=' + encodeURIComponent(JSON.stringify(techsCompRegion)));
+
+        var topnRegion = getShinyInputValue('topn_region');
+        if (topnRegion) params.push('topn_region=' + encodeURIComponent(topnRegion));
+
+        var mininnoRegion = getShinyInputValue('mininno_region');
+        if (mininnoRegion) params.push('mininno_region=' + encodeURIComponent(mininnoRegion));
+
+        return '?' + params.join('&');
+      }
+
+      // Helper to get Shiny input values
+      function getShinyInputValue(inputId) {
+        if (Shiny && Shiny.shinyapp && Shiny.shinyapp.$inputValues) {
+          return Shiny.shinyapp.$inputValues[inputId];
+        }
+        return null;
+      }
+
+      // Update the browser address bar
+      function updateBrowserUrl() {
+        var queryString = buildQueryString();
+        var newUrl = window.location.pathname + queryString;
+        history.replaceState(null, '', newUrl);
+      }
+
+      // Listen for any Shiny input changes
+      $(document).on('shiny:inputchanged', function(event) {
+        // Debounce URL updates
+        clearTimeout(window.urlUpdateTimeout);
+        window.urlUpdateTimeout = setTimeout(updateBrowserUrl, 300);
+      });
+
+      // Initial update after Shiny is connected
+      $(document).on('shiny:connected', function() {
+        setTimeout(updateBrowserUrl, 500);
+      });
+    });
+  ")),
+
   # Spacer between bookmark button and tabs
   tags$div(style = "margin-top: 20px;"),
 
