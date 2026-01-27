@@ -188,11 +188,15 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
 
   scaler=ifelse(grepl("strax", istrax_var ),100,1)
 
+  # Filter out "All" from classes since we add it separately below
+  # This prevents double-counting when techmap already has "All" rows
+  classes_filtered <- classes %>% filter(technology != "All")
+
   avstrax <- data %>%
     select(docdb_family_id, appln_id, !!istrax_sym) %>%
     rename(istrax = !!istrax_sym) %>%
     distinct() %>%
-    inner_join(classes, by = "docdb_family_id") %>%
+    inner_join(classes_filtered, by = "docdb_family_id") %>%
     bind_rows(
       data %>%
         select(docdb_family_id, !!istrax_sym) %>%
@@ -261,7 +265,8 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
                                     show_top3_ids=FALSE,
                                     width_svg=10,
                                     height_svg=6,
-                                    plot_title="Spillover returns"
+                                    plot_title="Spillover returns",
+                                    precomputed_data=NULL  # Optional precomputed aggregated data
                                     #battery_classes = NULL,
                                     #hard_to_abate_classes=NULL
                                     ) {
@@ -273,20 +278,34 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
   #patchar_countrymap <- countrymap %>% left_join(ddd)
   #classes=techmap %>% filter(technology=="Green Technology"); toflow="istrax_global"; pdata=patchar_countrymap; country_code="VN";bwidthscale=100;show_top3_ids=TRUE
   #display_mode="confidence"
-  classlist=(classes %>% distinct(technology))$technology
+
+  # Use precomputed data if available, otherwise compute
+  if (!is.null(precomputed_data) && nrow(precomputed_data) > 0) {
+    avstrax <- precomputed_data
+    classlist <- unique(avstrax$technology)
+    message("Using precomputed data with ", nrow(avstrax), " rows")
+  } else {
+    # Require pdata and classes for on-the-fly computation
+    if (is.null(pdata) || is.null(classes)) {
+      stop("Either precomputed_data or both pdata and classes must be provided")
+    }
+
+    classlist=(classes %>% distinct(technology))$technology
+
+    # Filter by country and year
+    filtered <- pdata %>%
+      filter(ctry_code %in% country_code )  %>%
+      distinct()
+
+    # Compute avstrax
+    avstrax <- compute_avstrax(filtered, toflow, classes,colorings#, green_classes, battery_classes,hard_to_abate_classes
+                               )
+  }
 
   #toflow="istrax_global"; pdata=countrymap
   #ylab=ifelse(grepl("Return", toflow ),"Return in %","Millions of $")
   ylab=ifelse(grepl("strax", toflow ),"Return in %","Millions of $")
   #scaler=ifelse(grepl("strax", toflow ),100,1)
-  # Filter by country and year
-  filtered <- pdata %>%
-    filter(ctry_code %in% country_code )  %>%
-    distinct()
-
-  # Compute avstrax
-  avstrax <- compute_avstrax(filtered, toflow, classes,colorings#, green_classes, battery_classes,hard_to_abate_classes
-                             )
   
   # Extract mean for "All"
   allmean <- avstrax %>%
@@ -312,11 +331,7 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
     mutate(
       linnos1 = innos,  # Now correctly uses the innos column, not the scalar
       linnos2 = log(1+innos),
-      bwidthscale = bwidthscale,
-      # Format value label based on variable type
-      value_label = ifelse(is_return,
-                           paste0(round(mean, 1), "%"),
-                           paste0("$", round(mean, 1), " million"))
+      bwidthscale = bwidthscale
     ) %>%
     filter(innos>1) %>%
     mutate(
@@ -332,6 +347,13 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
       ymin = 0,
       ymax = mean
     )
+
+  # Format value label based on variable type - use if/else for scalar condition
+  if (is_return) {
+    avstrax$value_label <- paste0(round(avstrax$mean, 1), "%")
+  } else {
+    avstrax$value_label <- paste0("$", round(avstrax$mean, 1), " million")
+  }
 
   # Create the plot
 
@@ -723,9 +745,11 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   is_return <- grepl("strax", toflow)
 
   # Add formatted value labels for tooltips
-  avstrax$value_label <- ifelse(is_return,
-                                 paste0(round(avstrax$mean, 1), "%"),
-                                 paste0("$", round(avstrax$mean, 1), " million"))
+  if (is_return) {
+    avstrax$value_label <- paste0(round(avstrax$mean, 1), "%")
+  } else {
+    avstrax$value_label <- paste0("$", round(avstrax$mean, 1), " million")
+  }
 
   # Define colors for main and comparison
   main_color <- "#3498db"
@@ -737,9 +761,11 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   avstrax$group <- "Main"
   if (has_comp_data) {
     avstrax_comp$group <- "Comparison"
-    avstrax_comp$value_label <- ifelse(is_return,
-                                        paste0(round(avstrax_comp$mean, 1), "%"),
-                                        paste0("$", round(avstrax_comp$mean, 1), " million"))
+    if (is_return) {
+      avstrax_comp$value_label <- paste0(round(avstrax_comp$mean, 1), "%")
+    } else {
+      avstrax_comp$value_label <- paste0("$", round(avstrax_comp$mean, 1), " million")
+    }
   }
 
   if (show_top3_ids) {
@@ -892,11 +918,13 @@ build_espacenet_search <- function(id_strings) {
 #' @param value_col Column name for values to display (default: "mean")
 #' @param color_scale Color scale for the choropleth
 #' @param plot_title Title for the map
+#' @param is_return Logical, TRUE if values are percentages (returns), FALSE if dollar values
 #' @return A plotly object
 plot_world_map <- function(avstrax_data,
                            value_col = "mean",
                            color_scale = "Viridis",
-                           plot_title = "Returns by Country") {
+                           plot_title = "Returns by Country",
+                           is_return = TRUE) {
   library(plotly)
   library(countrycode)
 
@@ -925,8 +953,8 @@ plot_world_map <- function(avstrax_data,
     return(p)
   }
 
-  # Determine if values are percentages (returns) or absolute values (spillovers)
-  is_percentage <- grepl("strax", value_col) || max(map_data$value, na.rm = TRUE) > 10
+  # Use the explicit is_return parameter for determining format
+  is_percentage <- is_return
 
   # Create hover text - use if/else for scalar condition to avoid ifelse recycling issue
   if (is_percentage) {
@@ -997,10 +1025,12 @@ plot_world_map <- function(avstrax_data,
 #' @param avstrax_data Data frame with ctry_code (NUTS1 codes) and mean columns
 #' @param value_col Column name for values to display (default: "mean")
 #' @param plot_title Title for the map
+#' @param is_return Logical, TRUE if values are percentages (returns), FALSE if dollar values
 #' @return A leaflet object
 plot_uk_regions_map <- function(avstrax_data,
                                  value_col = "mean",
-                                 plot_title = "Returns by UK Region") {
+                                 plot_title = "Returns by UK Region",
+                                 is_return = TRUE) {
   library(leaflet)
   library(sf)
   library(htmltools)
@@ -1128,9 +1158,8 @@ plot_uk_regions_map <- function(avstrax_data,
       value = !!sym(value_col)
     )
 
-  # Determine if values are percentages
-  is_percentage <- nrow(map_data) > 0 &&
-    (grepl("strax", value_col) || max(map_data$value, na.rm = TRUE) > 10)
+  # Use the explicit is_return parameter for determining format
+  is_percentage <- is_return
 
   # Join data to spatial features
   # First, identify the NUTS code column in the sf object
@@ -1170,24 +1199,44 @@ plot_uk_regions_map <- function(avstrax_data,
     pal <- function(x) "#E0E0E0"
   }
 
-  # Create hover labels
+  # Create hover labels - compute display_name first
   uk_sf <- uk_sf %>%
     mutate(
       display_name = ifelse(!is.na(region_name), region_name,
                             ifelse(!is.null(name_col) & name_col %in% names(uk_sf),
-                                   .[[name_col]], nuts_code)),
-      label_text = ifelse(
-        !is.na(value),
-        paste0(
-          "<strong>", display_name, "</strong><br/>",
-          "Value: ", ifelse(is_percentage,
-                            paste0(round(value, 1), "%"),
-                            paste0("$", round(value, 2), "M")), "<br/>",
-          "Innovations: ", scales::comma(innos)
-        ),
-        paste0("<strong>", display_name, "</strong><br/>No data")
-      )
+                                   .[[name_col]], nuts_code))
     )
+
+  # Format value labels based on is_percentage - use if/else for scalar condition
+  if (is_percentage) {
+    uk_sf <- uk_sf %>%
+      mutate(
+        value_formatted = paste0(round(value, 1), "%"),
+        label_text = ifelse(
+          !is.na(value),
+          paste0(
+            "<strong>", display_name, "</strong><br/>",
+            "Value: ", value_formatted, "<br/>",
+            "Innovations: ", scales::comma(innos)
+          ),
+          paste0("<strong>", display_name, "</strong><br/>No data")
+        )
+      )
+  } else {
+    uk_sf <- uk_sf %>%
+      mutate(
+        value_formatted = paste0("$", round(value, 2), "M"),
+        label_text = ifelse(
+          !is.na(value),
+          paste0(
+            "<strong>", display_name, "</strong><br/>",
+            "Value: ", value_formatted, "<br/>",
+            "Innovations: ", scales::comma(innos)
+          ),
+          paste0("<strong>", display_name, "</strong><br/>No data")
+        )
+      )
+  }
 
   # Create leaflet map
   map <- leaflet(uk_sf) %>%
@@ -1216,13 +1265,24 @@ plot_uk_regions_map <- function(avstrax_data,
     ) %>%
     setView(lng = -2.5, lat = 54.5, zoom = 5)
 
-  # Add legend if we have data
+  # Add legend if we have data - reverse order so high values are on top
   if (nrow(map_data) > 0) {
+    # Get the value range
+    val_range <- range(map_data$value, na.rm = TRUE)
+
+    # Create a reversed palette for the legend (high values on top)
+    # We reverse the domain so colors map correctly when legend is drawn top-to-bottom
+    pal_legend <- colorNumeric(
+      palette = "viridis",
+      domain = c(val_range[2], val_range[1]),  # Reversed domain
+      na.color = "#E0E0E0"
+    )
+
     map <- map %>%
       addLegend(
         position = "bottomright",
-        pal = pal,
-        values = ~value,
+        colors = pal(seq(val_range[2], val_range[1], length.out = 5)),  # High to low colors
+        labels = round(seq(val_range[2], val_range[1], length.out = 5), 1),  # High to low labels
         title = ifelse(is_percentage, "Return (%)", "Value ($M)"),
         opacity = 0.7,
         na.label = "No data"

@@ -94,18 +94,95 @@ localpath_fname <- function(fname) {
   return("")
 }
 
+# ============================================================================
+# DEFERRED DATA LOADING STRATEGY
+# ============================================================================
+# For performance, we defer loading of large datasets (techmap, countrymap,
+# regionmap) until after the app displays. When precomputed data is available,
+# the initial view can render without these datasets.
+#
+# This provides a much faster initial load time since:
+# - techmap.fst is ~40 MB
+# - countrymap.fst is ~12 MB
+# - regionmap.fst varies in size
+# ============================================================================
 
-pp=localpath_fname("/techmap.fst")
-if(file.exists(pp)){ 
-  techmap <- read_fst(pp)
+# Initialize placeholders for deferred data
+# These will be populated by the server on session start
+techmap <- NULL
+countrymap <- NULL
+regionmap <- NULL
+regionmap_available <- FALSE
+
+# Function to load big datasets (called asynchronously in server)
+load_big_datasets <- function() {
+  result <- list()
+
+  # Load techmap
+  pp <- localpath_fname("/techmap.fst")
+  if (file.exists(pp)) {
+    result$techmap <- read_fst(pp)
+    message("Techmap loaded locally")
+  } else {
+    result$techmap <- dropbox_read_fst("/techmap.fst")
+    message("Techmap loaded from Dropbox")
+  }
+
+  # Load countrymap
+  pp <- localpath_fname("/countrymap.fst")
+  if (file.exists(pp)) {
+    result$countrymap <- read_fst(pp)
+    message("Countrymap loaded locally")
+  } else {
+    result$countrymap <- dropbox_read_fst("/countrymap.fst")
+    message("Countrymap loaded from Dropbox")
+  }
+
+  # Load regionmap
+  pp_region <- localpath_fname("/regionmap.fst")
+  if (file.exists(pp_region)) {
+    result$regionmap <- read_fst(pp_region)
+    message("Regionmap loaded locally with ", nrow(result$regionmap), " rows")
+  } else {
+    tryCatch({
+      result$regionmap <- dropbox_read_fst("/regionmap.fst")
+      message("Regionmap loaded from Dropbox with ", nrow(result$regionmap), " rows")
+    }, error = function(e) {
+      message("Could not load regionmap: ", e$message)
+      result$regionmap <- NULL
+    })
+  }
+
+  result
+}
+
+# Check if we have precomputed data - if so, we can defer big data loading
+has_precomputed_data <- !is.null(prepdata_path) && dir.exists(prepdata_path)
+
+if (has_precomputed_data) {
+  message("Precomputed data available - deferring big dataset loading for faster startup")
+  # Create minimal placeholder techmap with just technology names for UI initialization
+  # This allows the app UI to render immediately
+  techmap_placeholder <- data.frame(
+    docdb_family_id = integer(0),
+    technology = character(0)
+  )
+  techmap <- techmap_placeholder
+  countrymap <- data.frame(
+    docdb_family_id = integer(0),
+    ctry_code = character(0)
+  )
+  regionmap <- NULL
+  regionmap_available <- FALSE
 } else {
-  techmap <- dropbox_read_fst("/techmap.fst")}
-
-
-
-
-#techmap <- db("/techmap.fst", token)
-
+  # No precomputed data - must load everything upfront
+  message("No precomputed data - loading big datasets synchronously")
+  datasets <- load_big_datasets()
+  techmap <- datasets$techmap
+  countrymap <- datasets$countrymap
+  regionmap <- datasets$regionmap
+  regionmap_available <- !is.null(regionmap) && nrow(regionmap) > 0
+}
 
 #rsconnect::writeManifest()
 enableBookmarking(store = "url")
@@ -117,29 +194,6 @@ thematic::thematic_shiny(font = "Arial")
 theme_set(theme_minimal(base_family = "Arial"))
 update_geom_defaults("text", list(family = "Arial"))
 update_geom_defaults("label", list(family = "Arial"))
-
-# Load data
-
-#files <- list.files(path="istraxes", pattern = "parquet$", full.names = TRUE)
-#countrymap <- read_fst("countrymap.fst")
-#countrymap <- dropbox_read_fst("/countrymap.fst")
-pp=localpath_fname("/countrymap.fst")
-if(file.exists(pp)){
-  countrymap <- read_fst(pp)
-} else {
-  countrymap <- dropbox_read_fst("/countrymap.fst")}
-
-# Load regionmap for Region Explorer tab
-pp_region=localpath_fname("/regionmap.fst")
-if(file.exists(pp_region)){
-  regionmap <- read_fst(pp_region)
-  message("Regionmap loaded locally with ", nrow(regionmap), " rows")
-} else {
-  regionmap <- dropbox_read_fst("/regionmap.fst")
-  message("Regionmap loaded from Dropbox with ", nrow(regionmap), " rows")
-}
-regionmap_available <- !is.null(regionmap) && nrow(regionmap) > 0
-message("Regionmap columns: ", paste(names(regionmap), collapse = ", "))
 
 
 
@@ -170,19 +224,30 @@ message("Regionmap columns: ", paste(names(regionmap), collapse = ", "))
 
 #techmap %>% distinct(technology) %>% pull(technology)
 
-techmap=countrymap %>%
-  select(docdb_family_id) %>% 
-  distinct() %>% 
-  mutate(technology = "All") %>% bind_rows(techmap)
+# Function to process techmap after loading (adds "All" category and normalizes names)
+process_techmap <- function(techmap_raw, countrymap_data) {
+  # Add "All" technology from countrymap
+  techmap_processed <- countrymap_data %>%
+    select(docdb_family_id) %>%
+    distinct() %>%
+    mutate(technology = "All") %>%
+    bind_rows(techmap_raw)
 
-# Correct
-setDT(techmap)
-techmap[, technology := fcase(
-  technology == "Any Green technology", "Green Technology",
-  technology == "Any battery technology", "Battery Technology",
-  technology == "Any Hard to Abate technology", "Hard to Abate Sector Decarbonization",
-  default = technology
-)]
+  # Normalize technology names
+  setDT(techmap_processed)
+  techmap_processed[, technology := fcase(
+    technology == "Any Green technology", "Green Technology",
+    technology == "Any battery technology", "Battery Technology",
+    technology == "Any Hard to Abate technology", "Hard to Abate Sector Decarbonization",
+    default = technology
+  )]
+  techmap_processed
+}
+
+# Process techmap if we have real data loaded (not placeholders)
+if (!has_precomputed_data && nrow(techmap) > 0 && nrow(countrymap) > 0) {
+  techmap <- process_techmap(techmap, countrymap)
+}
 
 green_classes <- c("Green Technology","Green Energy", "Green Transport", "Circular Economy", "Green Manufacturing",
                    "Adaptation", "Green Housing", "Green ICT", "Green Agriculture",
@@ -210,11 +275,21 @@ cpc_sections=c( "Human Necessities",
                 "Fixed Constructions",
                 "Mechanical Engineering; Lighting; Heating; Weapons; Blasting",
                 "Physics",
-                "Electricity",                               
+                "Electricity",
                  "General tagging of new or cross-sectional technology" )
 
 # Get all unique technologies from techmap
-all_techs <- c((techmap %>% distinct(technology))$technology, "All")
+# When using deferred loading with precomputed data, we use known technology categories
+# instead of extracting from techmap (which may be a placeholder)
+if (has_precomputed_data) {
+  # Known technology categories - these match what's in the precomputed data
+  all_techs <- c("All", green_classes, battery_classes, hard_to_abate_classes, ai_classes, cpc_sections)
+  all_techs <- unique(all_techs)
+} else {
+  all_techs <- c((techmap %>% distinct(technology))$technology, "All")
+  # Remove "Other" if it exists - it's not a real technology category
+  all_techs <- setdiff(all_techs, "Other")
+}
 
 # Create grouped technology choices
 # Separate technologies into green, battery, and other categories
@@ -710,7 +785,7 @@ ui <- function(request){fluidPage(
           inputId = "tech_categories_plot1",
           label = "Technology categories",
           choices = grouped_techs,
-          selected = c("Other","AI","Green Technology"),
+          selected = c("AI","Green Technology"),
           multiple = TRUE,
           width = "200%",
           options = list(placeholder = 'Choose one or more technology categories...')
@@ -804,7 +879,7 @@ ui <- function(request){fluidPage(
           inputId = "tech_categories_plot1_region",
           label = "Technology categories",
           choices = grouped_techs,
-          selected = c("Other","AI","Green Technology"),
+          selected = c("All", "AI", "Green Technology"),
           multiple = TRUE,
           width = "200%",
           options = list(placeholder = 'Choose one or more technology categories...')
@@ -883,6 +958,106 @@ server <- function(input, output, session) {
   # Reactive values for window dimensions
   window_dims <- reactiveValues(width = 800, height = 600, initialized = FALSE)
 
+  # ============================================================================
+  # DEFERRED DATA LOADING
+  # ============================================================================
+  # Track loading state for big datasets
+  data_state <- reactiveValues(
+    techmap_loaded = !has_precomputed_data,  # Already loaded if no precomputed
+    countrymap_loaded = !has_precomputed_data,
+    regionmap_loaded = !has_precomputed_data,
+    loading_started = FALSE,
+    loading_complete = !has_precomputed_data
+  )
+
+  # Store loaded data in reactive values (will be populated by deferred loading)
+  loaded_data <- reactiveValues(
+    techmap = if (!has_precomputed_data) techmap else NULL,
+    countrymap = if (!has_precomputed_data) countrymap else NULL,
+    regionmap = if (!has_precomputed_data) regionmap else NULL
+  )
+
+  # Start deferred loading after a short delay (allows UI to render first)
+  observe({
+    if (has_precomputed_data && !data_state$loading_started) {
+      data_state$loading_started <- TRUE
+
+      # Use invalidateLater to defer loading to next tick, allowing UI to render
+      invalidateLater(100)
+    }
+  }) |> bindEvent(TRUE, once = TRUE)
+
+  # Deferred loading observer - loads big datasets in background
+  observe({
+    req(has_precomputed_data)
+    req(data_state$loading_started)
+    req(!data_state$loading_complete)
+
+    message("Starting deferred loading of big datasets...")
+
+    # Load datasets
+    tryCatch({
+      datasets <- load_big_datasets()
+
+      # Process techmap (add "All" category and normalize names)
+      processed_techmap <- process_techmap(datasets$techmap, datasets$countrymap)
+
+      # Update reactive values
+      loaded_data$techmap <- processed_techmap
+      loaded_data$countrymap <- datasets$countrymap
+      loaded_data$regionmap <- datasets$regionmap
+
+      # Update global variables for backward compatibility with plot functions
+      techmap <<- processed_techmap
+      countrymap <<- datasets$countrymap
+      regionmap <<- datasets$regionmap
+      regionmap_available <<- !is.null(datasets$regionmap) && nrow(datasets$regionmap) > 0
+
+      # Mark as loaded
+      data_state$techmap_loaded <- TRUE
+      data_state$countrymap_loaded <- TRUE
+      data_state$regionmap_loaded <- TRUE
+      data_state$loading_complete <- TRUE
+
+      message("Deferred loading complete. Big datasets are now available.")
+    }, error = function(e) {
+      message("Error during deferred loading: ", e$message)
+    })
+  })
+
+  # Helper to get current techmap (prefers loaded data, falls back to global)
+  get_techmap <- reactive({
+    if (!is.null(loaded_data$techmap) && nrow(loaded_data$techmap) > 0) {
+      loaded_data$techmap
+    } else {
+      techmap
+    }
+  })
+
+  # Helper to get current countrymap
+  get_countrymap <- reactive({
+    if (!is.null(loaded_data$countrymap) && nrow(loaded_data$countrymap) > 0) {
+      loaded_data$countrymap
+    } else {
+      countrymap
+    }
+  })
+
+  # Helper to get current regionmap
+  get_regionmap <- reactive({
+    if (!is.null(loaded_data$regionmap) && nrow(loaded_data$regionmap) > 0) {
+      loaded_data$regionmap
+    } else {
+      regionmap
+    }
+  })
+
+  # Reactive for regionmap availability
+  is_regionmap_available <- reactive({
+    rm <- get_regionmap()
+    !is.null(rm) && nrow(rm) > 0
+  })
+
   # Track window resize events
   observe({
     # Get the output container dimensions from session clientData
@@ -901,23 +1076,29 @@ server <- function(input, output, session) {
       invalidateLater(100)
     }
   })
-  
+
   #colorings=list(green=green_classes,battery=battery_classes,hard_to_abate=hard_to_abate_classes,ai=ai_classes)
-  
-  
-  
+
+
+
   #for (ff in files) {
   #  patchar_countrymap <- patchar_countrymap %>% left_join(read_parquet(ff))
   #}
-  
-  
+
+
   patchar_countrymap <- reactive({
     req(input$toflow)
-    
+    # Require countrymap to be loaded for on-the-fly computation
+    req(data_state$countrymap_loaded)
+
+    # Get the current countrymap (from reactive helper)
+    current_countrymap <- get_countrymap()
+    req(nrow(current_countrymap) > 0)
+
     #input=list(toflow="avstrax_global")
     path <- paste0("/istraxes/", input$toflow,".fst")
 
-    
+
     pp=localpath_fname(path)
     if(file.exists(pp)){
       ddd <- read_fst(pp)
@@ -932,8 +1113,8 @@ server <- function(input, output, session) {
     }
 
     #patchar_countrymap <- countrymap %>% left_join(read_fst(path))
-    patchar_countrymap <- countrymap %>% left_join(ddd, by = c("docdb_family_id", "ctry_code"))
-    
+    patchar_countrymap <- current_countrymap %>% left_join(ddd, by = c("docdb_family_id", "ctry_code"))
+
   })
 
   
@@ -943,9 +1124,18 @@ server <- function(input, output, session) {
     req(input$country, input$toflow, input$tech_categories_plot1, input$bwidthscale, input$display_mode, !is.null(input$show_top3_ids))
     req(window_dims$initialized)  # Wait for valid dimensions (important for bookmark restoration)
 
+    # Plot 1 always uses on-the-fly computation (precomputed data doesn't work well
+    # with technology category filtering and color coding)
+    req(data_state$techmap_loaded)
+    req(data_state$countrymap_loaded)
+
     selected_countries <- expand_country_selection(input$country)
+
     # Get the label from the nested toflow_choices list
     flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
+
+    # Get current techmap
+    current_techmap <- get_techmap()
 
     # Filter techmap based on selected technology categories
     # Handle "Other" category to include all non-selected technologies
@@ -955,15 +1145,15 @@ server <- function(input, output, session) {
 
     if(include_other && length(explicit_categories) > 0) {
       # Include explicitly selected categories AND other categories relabeled as "Other"
-      filtered_techmap <- techmap %>%
+      filtered_techmap <- current_techmap %>%
         mutate(technology = ifelse(technology %in% explicit_categories, technology, "Other"))
     } else if(include_other && length(explicit_categories) == 0) {
       # Only "Other" selected - show all categories as "Other"
-      filtered_techmap <- techmap %>%
+      filtered_techmap <- current_techmap %>%
         mutate(technology = "Other")
     } else {
       # No "Other" - just filter to explicitly selected categories
-      filtered_techmap <- techmap %>%
+      filtered_techmap <- current_techmap %>%
         filter(technology %in% explicit_categories)
     }
 
@@ -1020,26 +1210,33 @@ server <- function(input, output, session) {
 
     # Check if we can use pre-computed data:
     # 1. No comparison technologies (pre-computation doesn't cover comparisons)
-    # 2. Country selection matches a known group
-    # 3. Technology selection matches a known category
+    # 2. Technology selection matches a known category
+    # Note: by_country files aggregate BY country for a specific technology category
     if (is.null(input$techs_comparison) || length(input$techs_comparison) == 0) {
-      # Try to match country selection to a pre-computed group
-      country_group <- match_country_group(selected_countries, group_definitions)
       # Try to match tech selection to a pre-computed category
       tech_category <- match_tech_category(input$techs)
 
-      if (!is.null(country_group) && !is.null(tech_category)) {
-        # Try to load pre-computed data
-        precomputed_data <- load_precomputed_by_tech(prepdata_path, input$toflow,
-                                                      paste0(country_group, "_", tech_category))
+      if (!is.null(tech_category)) {
+        # Try to load pre-computed data - by_country files are keyed by tech_category only
+        precomputed_data <- load_precomputed_by_country(prepdata_path, input$toflow, tech_category)
         if (!is.null(precomputed_data)) {
-          message("Using pre-computed data for: ", country_group, " / ", tech_category)
+          message("Using pre-computed data for tech category: ", tech_category)
+          # Filter precomputed data to selected countries if needed
+          # BUT keep the "All" row which is needed for computing the average line
+          selected_countries <- expand_country_selection(input$country)
+          if (!is.null(precomputed_data$ctry_code)) {
+            precomputed_data <- precomputed_data %>%
+              filter(ctry_code %in% selected_countries | ctry_code == "All")
+          }
         }
       }
     }
 
     # Only load and merge full data if pre-computed data is not available
     if (is.null(precomputed_data)) {
+      # Require big datasets for on-the-fly computation
+      req(data_state$countrymap_loaded)
+      req(data_state$techmap_loaded)
       # We first implement the filter from the previous diagram; i.e. we restrict to the countries selected there...
       filtered <- patchar_countrymap() %>%
         filter(ctry_code %in% selected_countries )
@@ -1056,9 +1253,12 @@ server <- function(input, output, session) {
     aspect_ratio <- ifelse(plot_width > 1200, 0.4, ifelse(plot_width > 800, 0.5, 0.6))
     height_inches <- width_inches * aspect_ratio
 
+    # Get current techmap (may be placeholder if still loading)
+    current_techmap <- get_techmap()
+
     p <- plot_avstrax_by_technology(
       pdata = if(is.null(precomputed_data)) filtered else data.frame(),
-      classes = techmap,
+      classes = current_techmap,
       technologies = input$techs,
       toflow = input$toflow,
       custom_colors = custom_colors,
@@ -1090,22 +1290,33 @@ server <- function(input, output, session) {
     # Try to load pre-computed data if available
     avstrax_data <- NULL
 
-    # Try to match selections to pre-computed data
-    country_group <- match_country_group(selected_countries, group_definitions)
+    # Try to match tech selection to pre-computed data
+    # World map shows data BY country for a specific technology, so uses by_country files
     tech_category <- match_tech_category(input$techs)
 
-    if (!is.null(country_group) && !is.null(tech_category)) {
-      avstrax_data <- load_precomputed_by_tech(prepdata_path, input$toflow,
-                                                paste0(country_group, "_", tech_category))
+    if (!is.null(tech_category)) {
+      avstrax_data <- load_precomputed_by_country(prepdata_path, input$toflow, tech_category)
       if (!is.null(avstrax_data)) {
-        message("World map using pre-computed data for: ", country_group, " / ", tech_category)
+        message("World map using pre-computed data for tech: ", tech_category)
+        # Filter to selected countries
+        if (!is.null(avstrax_data$ctry_code)) {
+          avstrax_data <- avstrax_data %>%
+            filter(ctry_code %in% selected_countries)
+        }
       }
     }
 
     # If no pre-computed data, compute on the fly
     if (is.null(avstrax_data)) {
+      # Require big datasets for on-the-fly computation
+      req(data_state$countrymap_loaded)
+      req(data_state$techmap_loaded)
+
+      # Get current techmap
+      current_techmap <- get_techmap()
+
       # Filter by technology class
-      filtered_classes <- techmap %>%
+      filtered_classes <- current_techmap %>%
         filter(technology %in% input$techs) %>%
         distinct()
 
@@ -1123,11 +1334,15 @@ server <- function(input, output, session) {
     avstrax_data <- avstrax_data %>%
       filter(innos >= input$mininno)
 
+    # Determine if this is a return (%) or spillover ($) variable
+    is_return <- grepl("strax", input$toflow)
+
     plot_world_map(
       avstrax_data = avstrax_data,
       value_col = "mean",
       color_scale = "Viridis",
-      plot_title = paste0("World Map: ", sub("^[^.]*\\.", "", flow_label))
+      plot_title = paste0("World Map: ", sub("^[^.]*\\.", "", flow_label)),
+      is_return = is_return
     )
   })
 
@@ -1138,6 +1353,7 @@ server <- function(input, output, session) {
   # Reactive for region data (similar to patchar_countrymap but for regions)
   patchar_regionmap <- reactive({
     req(input$toflow_region)
+    req(data_state$regionmap_loaded || data_state$loading_complete)
 
     path <- paste0("/istraxes/", input$toflow_region,".fst")
 
@@ -1155,20 +1371,25 @@ server <- function(input, output, session) {
       ddd[[value_col]][is.na(ddd[[value_col]])] <- 0
     }
 
+    # Get current regionmap
+    current_regionmap <- get_regionmap()
+    is_available <- is_regionmap_available()
+
     # Join regionmap with istrax data
     # Rename region_code to ctry_code and region_name to country_name for compatibility with plotting functions
-    if (regionmap_available && !is.null(regionmap) && nrow(regionmap) > 0) {
+    if (is_available) {
       # Remove ctry_code from ddd if it exists to avoid duplicate column names after join
-      ddd_for_join <- ddd %>% select(-any_of(c("ctry_code", "country_name")))
+      ddd_for_join <- ddd %>% select(-any_of(c("ctry_name")))#select(-any_of(c("ctry_code", "country_name")))
 
-      patchar_regionmap <- regionmap %>%
-        rename(ctry_code = region_code, country_name = region_name) %>%
-        left_join(ddd_for_join, by = "docdb_family_id")
+      patchar_regionmap <- current_regionmap %>%
+        left_join(ddd_for_join, by = c("docdb_family_id","ctry_code")) %>% 
+        select(-ctry_code) %>% 
+        rename(ctry_code = region_code, country_name = region_name)                     
       message("patchar_regionmap columns after rename: ", paste(names(patchar_regionmap), collapse = ", "))
       message("patchar_regionmap rows: ", nrow(patchar_regionmap))
     } else {
       patchar_regionmap <- data.frame()
-      message("patchar_regionmap is empty - regionmap_available: ", regionmap_available)
+      message("patchar_regionmap is empty - regionmap not available")
     }
 
     patchar_regionmap
@@ -1180,11 +1401,18 @@ server <- function(input, output, session) {
         input$bwidthscale_region, input$display_mode_region, !is.null(input$show_top3_ids_region))
     req(window_dims$initialized)  # Wait for valid dimensions (important for bookmark restoration)
 
+    # Require big datasets for region explorer (regions always need on-the-fly computation or regionmap)
+    req(data_state$regionmap_loaded || data_state$loading_complete)
+
     # Check if regionmap is available
-    shiny::validate(shiny::need(regionmap_available, "Region data not available. Please run prep_UK_regions.Rmd first."))
+    shiny::validate(shiny::need(is_regionmap_available(), "Region data not available. Please run prep_UK_regions.Rmd first."))
 
     selected_regions <- expand_region_selection(input$region)
     flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow_region]
+
+    # Get current techmap
+    current_techmap <- get_techmap()
+    req(nrow(current_techmap) > 0)
 
     # Filter techmap based on selected technology categories
     selected_categories <- input$tech_categories_plot1_region
@@ -1192,13 +1420,13 @@ server <- function(input, output, session) {
     explicit_categories <- setdiff(selected_categories, "Other")
 
     if(include_other && length(explicit_categories) > 0) {
-      filtered_techmap <- techmap %>%
+      filtered_techmap <- current_techmap %>%
         mutate(technology = ifelse(technology %in% explicit_categories, technology, "Other"))
     } else if(include_other && length(explicit_categories) == 0) {
-      filtered_techmap <- techmap %>%
+      filtered_techmap <- current_techmap %>%
         mutate(technology = "Other")
     } else {
-      filtered_techmap <- techmap %>%
+      filtered_techmap <- current_techmap %>%
         filter(technology %in% explicit_categories)
     }
 
@@ -1236,9 +1464,10 @@ server <- function(input, output, session) {
         input$display_mode_region,
         !is.null(input$show_top3_ids_region))
     req(window_dims$initialized)  # Wait for valid dimensions (important for bookmark restoration)
+    req(data_state$regionmap_loaded || data_state$loading_complete)
 
     # Check if regionmap is available
-    shiny::validate(shiny::need(regionmap_available, "Region data not available. Please run prep_UK_regions.Rmd first."))
+    shiny::validate(shiny::need(is_regionmap_available(), "Region data not available. Please run prep_UK_regions.Rmd first."))
 
     selected_regions <- expand_region_selection(input$region)
     flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow_region]
@@ -1249,16 +1478,19 @@ server <- function(input, output, session) {
     # Check if we can use pre-computed data (no comparison technologies)
     if (is.null(input$techs_comparison_region) || length(input$techs_comparison_region) == 0) {
       # Try to match region selection to a pre-computed group
-      region_group <- match_country_group(selected_regions, region_group_definitions)
       # Try to match tech selection to a pre-computed category
       tech_category <- match_tech_category(input$techs_region)
 
-      if (!is.null(region_group) && !is.null(tech_category)) {
-        # Try to load pre-computed data for regions
-        precomputed_data <- load_precomputed_by_region(prepdata_path, input$toflow_region,
-                                                        paste0(region_group, "_", tech_category))
+      if (!is.null(tech_category)) {
+        # Try to load pre-computed data for regions - by_region files are keyed by tech_category
+        precomputed_data <- load_precomputed_by_region(prepdata_path, input$toflow_region, tech_category)
         if (!is.null(precomputed_data)) {
-          message("Using pre-computed region data for: ", region_group, " / ", tech_category)
+          message("Using pre-computed region data for tech: ", tech_category)
+          # Filter to selected regions, BUT keep "All" row for average line
+          if (!is.null(precomputed_data$ctry_code)) {
+            precomputed_data <- precomputed_data %>%
+              filter(ctry_code %in% selected_regions | ctry_code == "All")
+          }
         }
       }
     }
@@ -1282,9 +1514,12 @@ server <- function(input, output, session) {
     aspect_ratio <- ifelse(plot_width > 1200, 0.4, ifelse(plot_width > 800, 0.5, 0.6))
     height_inches <- width_inches * aspect_ratio
 
+    # Get current techmap
+    current_techmap <- get_techmap()
+
     p <- plot_avstrax_by_technology(
       pdata = if(is.null(precomputed_data)) filtered else data.frame(),
-      classes = techmap,
+      classes = current_techmap,
       technologies = input$techs_region,
       toflow = input$toflow_region,
       custom_colors = custom_colors,
@@ -1310,9 +1545,10 @@ server <- function(input, output, session) {
         input$toflow_region,
         input$techs_region,
         input$mininno_region)
+    req(data_state$regionmap_loaded || data_state$loading_complete)
 
     # Check if regionmap is available
-    shiny::validate(shiny::need(regionmap_available, "Region data not available."))
+    shiny::validate(shiny::need(is_regionmap_available(), "Region data not available."))
 
     selected_regions <- expand_region_selection(input$region)
     flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow_region]
@@ -1320,22 +1556,32 @@ server <- function(input, output, session) {
     # Try to load pre-computed data if available
     avstrax_data <- NULL
 
-    # Try to match selections to pre-computed data
-    region_group <- match_country_group(selected_regions, region_group_definitions)
+    # Try to match tech selection to pre-computed data
+    # UK regions map shows data BY region for a specific technology, so uses by_region files
     tech_category <- match_tech_category(input$techs_region)
 
-    if (!is.null(region_group) && !is.null(tech_category)) {
-      avstrax_data <- load_precomputed_by_region(prepdata_path, input$toflow_region,
-                                                  paste0(region_group, "_", tech_category))
+    if (!is.null(tech_category)) {
+      avstrax_data <- load_precomputed_by_region(prepdata_path, input$toflow_region, tech_category)
       if (!is.null(avstrax_data)) {
-        message("UK regions map using pre-computed data for: ", region_group, " / ", tech_category)
+        message("UK regions map using pre-computed data for tech: ", tech_category)
+        # Filter to selected regions
+        if (!is.null(avstrax_data$ctry_code)) {
+          avstrax_data <- avstrax_data %>%
+            filter(ctry_code %in% selected_regions)
+        }
       }
     }
 
     # If no pre-computed data, compute on the fly
     if (is.null(avstrax_data)) {
+      # Require big datasets for on-the-fly computation
+      req(data_state$techmap_loaded)
+
+      # Get current techmap
+      current_techmap <- get_techmap()
+
       # Filter by technology class
-      filtered_classes <- techmap %>%
+      filtered_classes <- current_techmap %>%
         filter(technology %in% input$techs_region) %>%
         distinct()
 
@@ -1357,10 +1603,14 @@ server <- function(input, output, session) {
     avstrax_data <- avstrax_data %>%
       filter(innos >= input$mininno_region)
 
+    # Determine if this is a return (%) or spillover ($) variable
+    is_return <- grepl("strax", input$toflow_region)
+
     plot_uk_regions_map(
       avstrax_data = avstrax_data,
       value_col = "mean",
-      plot_title = paste0("UK Regions: ", sub("^[^.]*\\.", "", flow_label))
+      plot_title = paste0("UK Regions: ", sub("^[^.]*\\.", "", flow_label)),
+      is_return = is_return
     )
   })
 
