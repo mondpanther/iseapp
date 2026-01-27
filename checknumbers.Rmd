@@ -1,0 +1,74 @@
+---
+title: "Check Numbers Investigation"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(fst)
+library(dplyr)
+library(jsonlite)
+```
+
+## Load Data
+
+```{r get-dropbox-path}
+# Function to detect local Dropbox path from Dropbox's config file
+get_dropbox_path <- function() {
+  if (.Platform$OS.type == "windows") {
+    info_paths <- c(
+      file.path(Sys.getenv("APPDATA"), "Dropbox", "info.json"),
+      file.path(Sys.getenv("LOCALAPPDATA"), "Dropbox", "info.json")
+    )
+  } else {
+    info_paths <- file.path(Sys.getenv("HOME"), ".dropbox", "info.json")
+  }
+
+  for (p in info_paths) {
+    if (file.exists(p)) {
+      info <- jsonlite::fromJSON(p)
+      if (!is.null(info$business)) {
+        return(info$business$path)
+      } else if (!is.null(info$personal)) {
+        return(info$personal$path)
+      }
+    }
+  }
+  return(NULL)
+}
+
+# Get the iseapp data path
+dropbox_root <- get_dropbox_path()
+iseapp_path <- file.path(dropbox_root, "Apps", "iseapp")
+message("Using Dropbox path: ", iseapp_path)
+```
+
+```{r load-data}
+# Load the national key data
+data_file <- file.path(iseapp_path, "istraxes", "istrax_nationalkey_2009_2018.fst")
+national_key <- read_fst(data_file)
+
+# Quick overview
+dim(national_key)
+names(national_key)
+head(national_key)
+```
+
+```{r load-avstrax}
+# Load the avstrax global data
+avstrax_file <- file.path(iseapp_path, "istraxes", "avstrax_global.fst")
+avstrax_global <- read_fst(avstrax_file)
+
+# Quick overview
+dim(avstrax_global)
+names(avstrax_global)
+head(avstrax_global)
+```
+
+## Investigation Notes
+
+Add your investigation code and notes below.
+
+```{r}
+# Add your investigation code here
+```

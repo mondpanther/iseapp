@@ -293,15 +293,15 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
     filter(technology == "All") %>%
     pull(mean)
   
-  innos=  avstrax %>%
+  total_innos =  avstrax %>%
     filter(technology == "All") %>%
     pull(innos)
-  
+
   # Prepare data for plotting
   #display_mode="quartiles";bwidthscale="log"
-  if(!"All" %in% classlist) avstrax=avstrax %>% filter(technology != "All") 
-  
-  
+  if(!"All" %in% classlist) avstrax=avstrax %>% filter(technology != "All")
+
+
   # Determine if this is a return (%) or spillover ($) variable
 
   is_return <- grepl("strax", toflow)
@@ -310,7 +310,7 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
     #filter(technology != "All") %>%
     arrange(technology) %>%
     mutate(
-      linnos1 = innos,
+      linnos1 = innos,  # Now correctly uses the innos column, not the scalar
       linnos2 = log(1+innos),
       bwidthscale = bwidthscale,
       # Format value label based on variable type
@@ -409,12 +409,12 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
   #innos=3
   annotation_plot <- ggplot() +
     theme_void() +
-    annotate("text", x = 0.5, y = 0.5, label = paste0(as.character(innos)," Innovations"), size=5 ) +
+    annotate("text", x = 0.5, y = 0.5, label = paste0(as.character(total_innos)," Innovations"), size=5 ) +
     theme(plot.margin = margin(0, 0, -10, 0))
 
 
   # Add subtitle and caption
-  p <- p + labs(subtitle = paste0(as.character(innos), " Innovations"),
+  p <- p + labs(subtitle = paste0(as.character(total_innos), " Innovations"),
                 caption = "© 2025 Innovation Strategy Explorer") +
     theme(plot.subtitle = element_text(size = 14, hjust = 0.5),
           plot.caption = element_text(hjust = 1, size = 10, color = "gray"))
