@@ -1,0 +1,1272 @@
+---
+title: "Prepare istraxes"
+output: html_notebook
+---
+
+C:/Users/rmartin7/AppData/Local/Temp/image.png--- title: "Prepare ISTRAX
+tool" output: #word_document: default html_document: default date:
+"2025-09-04" ---
+
+# Pulling data together
+
+This pulls the data together we already have in our directory.
+Ultimately we want to merge this into a more dynamic data pipeline that
+ideally access the the PATSTAT API.
+
+Note that all directory links are relative so you should be able to find
+all underlying datasets.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE,warning=FALSE,fig.width = 9,fig.height = 10,dpi=2200)
+source("../code/helpers.r")
+library(dplyr)
+library(readr)
+library(readr)
+library(dplyr)
+library(wbstats)
+library(arrow)
+library(readr)
+library(data.table)
+
+```
+
+I am pulling various datasets we have in the one drive to create three
+datastructures. Eventually we should establish a datapipeline that pulls
+that data from the PATSTAT API pipeline. All data should be in the
+shared drive and paths are relative so it should all work on your
+machines.
+
+1.  A dataset at the patent families (docdb level) with various family
+    charactistics that we might want to show (patchar)
+
+2.  A dataset that maps patents to countrys (countrymap). Currently
+    that's done via inventor locations. Note because the same inno can
+    have innovators in multiple countries. The countrymap dataset
+    includes - at least for now - also a national istrax variable. This
+    is a variable which computes istrax such that only spillovers are
+    considered that benefit the source country (i.e. for innovations
+    linked to India say it is flows to other innovators in India). The
+    long term goal - somebody; e.g. Denis, needs to re-run the algorithm
+    for all countries - to have in the patchar dataset a to flow istrax
+    column for every country and country group of interest. Once we have
+    that national istrax is contained in this information.
+
+3.  A dataset that maps patent families to technology classes (techmap,
+    again a family can be in multiple). (Maybe in the medium run we want
+    to replace that with a mapping of all patents to CPC subclasses
+    combined with a separate - and much smaller - mapping from
+    subclasses to specific technology tags)
+
+4.  We combine 1 & 2 to create patchar_countrymap, which is now more
+    convenient for simply computing bar charts with national vs global
+    spillovers istrax.
+
+## Build mapping from patents to countries (countrymap)
+
+
+
+
+
+
+
+```{r}
+url0="../../data/patent_data/patbis2021/data/fromWATSON/innos_ev_nationalkey_2009_2018.dsv"
+test0= read_tsv(url0)
+atest=test0 %>% group_by(ctry_code) %>% summarise(n())
+
+
+url="../../data/patent_data/patbis2021/data/fromWATSON/innos_ctry_indicators.dsv"
+#df=read_tsv("https://www.dropbox.com/scl/fi/84hj4f81d9ups0z3v7gcu/innos_ctry_indicators.dsv?rlkey=5t8qnhib02e44aqpo48yu3m9b&st=0zcqzokk&dl=1")
+
+#url="../../data/patent_data/patbis2021/data/fromWATSON/innos_istraxfield_nationalkey_2009_2018.dsv"
+
+countrymap <- read_tsv(url)
+#countrymap=countrymap %>% distinct(docdb_family_id,ctry_code,istrax) %>% rename(istrax_nationalkey_2009_2018=istrax)
+countrymap=countrymap %>% distinct(docdb_family_id,ctry_code,istrax_nationalkey_2009_2018)
+
+test=countrymap %>% group_by(ctry_code) %>% summarise(nn=n())
+
+nrow(countrymap %>% filter(ctry_code=="CN"))
+
+
+```
+
+## Build patchar
+
+```{r}
+
+url2="../../data/patent_data/patbis2021/data/fromWATSON/innos_istraxfield_global_2009_2018.dsv"
+patchar=read_tsv(url2) %>%  select(docdb_family_id,istrax,alphapvyear_2009_2018,costpvyear_2009_2018,pv,ev) %>% 
+  rename(istrax_global=istrax) %>% 
+   rename(cost=costpvyear_2009_2018,
+          alpha=alphapvyear_2009_2018,
+          ev_global=ev) %>% 
+   mutate(avstrax_global=(ev_global+pv)/cost)
+
+#library(fixest)
+#reg=fepois(pv~ev,patchar) 
+#reg %>% summary()
+
+
+
+
+
+
+```
+
+## Build patchar_countrymap
+
+```{r}
+
+
+
+
+patchar_countrymap = read_tsv(url) %>% select(docdb_family_id,ctry_code,
+                                              ev_nationalkey_2009_2018,pv,
+                            earliest_filing_date,earliest_filing_year,
+                            docdb_family_size,
+                            istrax_nationalkey_2009_2018,
+                            cost) %>% 
+                            mutate(avstrax_nationalkey_2009_2018=(pv+ev_nationalkey_2009_2018)/cost
+                            ) %>% select(-cost)#%>% rename(istrax_nationalkey_2009_2018=istrax)
+
+#...assuming this covers national we need global....
+
+#test=
+```
+### trying building up country stuff from person file...
+
+
+```{r}
+
+library(arrow)
+
+localbigwb="C:\\Users\\rmartin7\\OneDrive - WBG\\projects\\inglobe"
+dfnew=read_parquet(paste0(localbigwb,"\\data\\dfnew.parquet"))
+
+inventors=paste0(localbigwb,"\\data\\inventors.parquet") %>% 
+  read_parquet()
+
+holders=paste0(localbigwb,"\\data\\holders.parquet") %>% 
+  read_parquet()
+
+
+holder_countries=paste0(localbigwb,"\\data\\holder_countries.parquet") %>% 
+  read_parquet()
+
+inventor_countries=paste0(localbigwb,"\\data\\holder_countries.parquet") %>% 
+  read_parquet()
+
+
+```
+
+
+## 😊 build country map from scracth
+
+```{r}
+dfnew %>% names()
+inventors %>% names()
+holders %>% names()
+
+dfnew=dfnew %>% rename(ctry_code=person_ctry_code)
+
+income_classification <- tibble::tribble(
+  ~income_group, ~ctry_code,
+  "High income", c("AD", "AE", "AG", "AR", "AU", "AT", "AW", "BE", "BH", "BM", "BS", "BW", "CA", "CH", "CL", "CN", "CW", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GB", "GI", "GR", "GU", "HK", "HR", "HU", "IE", "IL", "IM", "IS", "IT", "JP", "KR", "KW", "KY", "LI", "LT", "LU", "LV", "MC", "MP", "MT", "MO", "NL", "NO", "NZ", "OM", "PA", "PL", "PR", "PT", "QA", "RO", "SA", "SC", "SG", "SI", "SK", "SM", "SE", "TC", "TT", "TW", "UY", "US", "VI", "VG"),
+  "Upper middle income", c("AL", "AM", "AZ", "BY", "BZ", "BR", "BG", "CO", "CR", "CU", "DM", "DO", "EC", "FJ", "GA", "GD", "GE", "GQ", "GT", "GY", "ID", "IQ", "IR", "JM", "JO", "KZ", "LB", "LC", "LY", "MK", "MU", "MV", "MX", "MY", "NA", "PE", "PY", "RU", "RS", "SR", "SV", "TH", "TM", "TO", "TR", "VE", "ZA", "ME", "XK", "ST", "VC", "WS"),
+  "Lower middle income", c("AO", "BD", "BJ", "BO", "BT", "CI", "CM", "CG", "CV", "DZ", "EG", "GH", "HN", "HT", "IN", "KE", "KG", "KH", "KI", "LA", "LK", "LS", "MA", "MD", "MN", "MM", "MR", "NG", "NI", "NP", "PK", "PG", "PH", "PS", "SB", "SN", "TJ", "TL", "TN", "TZ", "UA", "UZ", "VN", "VU", "ZM", "ZW"),
+  "Low income", c("AF", "BF", "BI", "CD", "CF", "ER", "ET", "GM", "GN", "GW", "KM", "LR", "MG", "ML", "MW", "MZ", "NE", "RW", "SD", "SL", "SO", "SS", "SY", "TD", "TG", "UG", "YE")
+) %>%
+  tidyr::unnest(ctry_code)
+dfnew=dfnew %>% inner_join(income_classification)
+
+
+head(dfnew)
+#xcountrymap=bind_rows(inventors,holders) %>% distinct() %>% inner_join(dfnew) %>% 
+#  distinct(person_ctry_code,docdb_family_id)
+
+#nrow(dfnew %>% filter(is.na(person_ctry_code)))
+test=dfnew %>% group_by(ctry_code) %>% 
+  summarize(n())
+
+
+
+test2=inventors %>% inner_join(patchar)
+rm(test2)
+
+xcountrymap_i = inventors   %>% distinct() %>% inner_join(dfnew %>% select(person_id,ctry_code))
+xcountrymap_i = xcountrymap_i %>% distinct(ctry_code,docdb_family_id)
+rm(xcountrymap)
+
+
+xcountrymap_h = holders   %>% distinct() %>% inner_join(dfnew %>% select(person_id,ctry_code))
+xcountrymap_h = xcountrymap_h %>% distinct(ctry_code,docdb_family_id)
+
+xcountrymap=xcountrymap_h %>% bind_rows(xcountrymap_i) %>% distinct(ctry_code,docdb_family_id)
+
+
+nrow(countrymap %>% filter(ctry_code=="CN"))
+nrow(xcountrymap %>% filter(ctry_code=="CN"))
+
+nrow(countrymap)
+```
+
+### .....add patchar
+
+```{r}
+xcountrymap_patchar=xcountrymap %>% inner_join(patchar)
+
+xcountrymap_patchar %>% inner_join(income_classification) %>% 
+  filter(ctry_code=="CN" #|income_group=="High income"
+         ) %>% group_by(income_group) %>% 
+  summarize(mean(ev_global))
+
+
+
+```
+
+
+
+### let's do that again from the inventor country dataset...
+
+
+```{r}
+
+library(arrow)
+# Define list of tables to read
+tables_to_read <- c( "inventor_countries", "holder_countries")
+
+# Loop through each table and read into a dataframe
+for (table in tables_to_read) {
+  # Create filename
+  local_file <- paste0(localbigwb, "\\data\\", table, ".parquet")
+  
+  # Read parquet file and assign to variable with table name
+  if (file.exists(local_file)) {
+    assign(table, read_parquet(local_file))
+    message("Loaded ", table, " (", nrow(get(table)), " rows)")
+  } else {
+    warning("File not found: ", local_file)
+  }
+}
+
+
+
+holderORinventor_famXcountry = holder_countries %>% 
+  mutate(type="holder") %>%
+  bind_rows(inventor_countries %>% 
+              mutate(type="inventor")) %>% 
+  rename(ctry_code=person_ctry_code) %>% 
+  #filter(type=="inventor") %>% 
+  distinct(docdb_family_id,ctry_code,type) %>% inner_join(patchar) 
+```
+
+
+## just holders
+```{r}
+holderORinventor_famXcountry %>% 
+  filter(ctry_code=="CN" & type=="holder" #|income_group=="High income"
+         ) %>%  
+  summarize(n(),mean(ev_global))
+
+```
+
+## just inventors
+```{r}
+holderORinventor_famXcountry %>% 
+  filter(ctry_code=="CN" & type=="inventor" #|income_group=="High income"
+         ) %>%  
+  summarize(n(),mean(ev_global))
+```
+
+## combined
+```{r}
+holderORinventor_famXcountry %>% 
+  distinct(docdb_family_id,ctry_code,ev_global) %>% 
+  filter(ctry_code=="CN" 
+         ) %>%  
+  summarize(n(),mean(ev_global))
+
+
+```
+
+## Vietnam?
+```{r}
+
+holderORinventor_famXcountry %>% filter(ctry_code=="VN") %>% distinct(docdb_family_id) %>% 
+  nrow()
+```
+
+## HICs?
+
+```{r,eval=FALSE}
+holderORinventor_famXcountry %>% 
+  distinct(docdb_family_id,ctry_code,ev_global,HIC) %>% group_by(HIC) %>% 
+  summarise(n(),mean(ev_global))
+
+```
+
+##👌###We should try here with all...rather than patchar...i.e. get all from bigquery..
+
+
+
+
+### check pv vs ev
+
+```{r}
+library(fixest)
+
+
+test0=patchar_countrymap %>% select(docdb_family_id,ctry_code,docdb_family_size) %>% 
+   inner_join(patchar %>% select(docdb_family_id,ev_global,pv,cost,alpha)) %>% 
+   mutate(lowid=pv<2*cost,
+          thresdist=(pv-2*cost)/(2*cost),
+          pvOcost=pv/cost,
+          istraxid=(alpha+1)/cost*ev_global,
+          evOcost=ev_global/cost) 
+
+
+atest0=test0  %>% group_by(ctry_code) %>% summarize(mean(ev_global))
+atest0 %>% filter(ctry_code=="CN")
+test=test0 %>%
+  select(-ctry_code) %>% distinct()
+
+
+```
+
+```{r}
+   
+#feols(ev ~ pv,test)
+#feols(ev ~  lowid, test)
+
+
+#feols(ev ~  thresdist, test)
+
+#feols(istraxid ~  thresdist, test)
+
+#feols(evOcost ~  pvOcost, test)
+
+
+
+
+#################################################
+
+eu_countries <- c("AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", 
+                  "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", 
+                  "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", 
+                  "SI", "ES", "SE")
+
+# Create a logical variable identifying EU countries
+test0$is_eu <- test0$ctry_code %in% eu_countries
+test0$ctry_group <- ifelse(test0$ctry_code %in% eu_countries, "EU", test0$ctry_code)
+
+
+library(wbstats)
+library(dplyr)
+
+# Get latest population data from World Bank
+pop_data <- wb_data(
+  indicator = "SP.POP.TOTL",
+  start_date = 2023,
+  end_date = 2023
+) %>%
+  select(iso2c, population = SP.POP.TOTL) %>%
+  filter(!is.na(population))
+
+# Merge with your dataframe
+test0 <- test0 %>%
+  left_join(pop_data, by = c("ctry_code" = "iso2c"))
+
+
+
+test0a=test0 %>% group_by(ctry_code) %>% summarize(innos=n(),population=mean(population),innosFL1=sum(docdb_family_size>1))
+test0a$ctry_group <- ifelse(test0a$ctry_code %in% eu_countries, "EU", test0a$ctry_code)
+test0af=test0a %>% mutate(innosOpop=innos/population, innosFL1Opop=innosFL1/population)%>% filter(ctry_group %in% c("EU","CN","US","JP","GB"))
+print(test0af)
+
+library(ggplot2)
+library(dplyr)
+library(ggrepel)
+
+
+
+plot_country_variable <- function(data, 
+                                  var, 
+                                  title = NULL,
+                                  y_label = NULL,
+                                  top_n = 15,
+                                  quantile_threshold = 0.9) {
+  
+  # Use tidy evaluation to handle variable argument
+  var_quo <- enquo(var)
+  var_name <- rlang::as_label(var_quo)
+  
+  # Set default title and y_label if not provided
+  if (is.null(title)) {
+    title <- paste(var_name, "by Country")
+  }
+  if (is.null(y_label)) {
+    y_label <- var_name
+  }
+  
+  # Prepare data with labels
+  data_plot <- data %>%
+    mutate(
+      pop_rank = rank(-population, na.last = "keep"),
+      label = if_else(
+        pop_rank <= top_n | {{var}} > quantile({{var}}, quantile_threshold, na.rm = TRUE), 
+        ctry_code, 
+        ""
+      )
+    ) %>%
+    arrange({{var}})
+  
+  # Create plot
+  ggplot(data_plot, aes(x = reorder(ctry_code, {{var}}), y = {{var}})) +
+    geom_segment(aes(xend = ctry_code, y = 0, yend = {{var}}, 
+                     color = ctry_group, size = population), alpha = 0.7) +
+    geom_point(aes(color = ctry_group, size = population)) +
+    geom_text_repel(aes(label = label), size = 3, max.overlaps = 20) +
+    scale_size_continuous(name = "Population", labels = scales::comma, 
+                          range = c(0.5, 4)) +
+    scale_color_manual(values = c("EU" = "steelblue", "Other" = "coral"),
+                       na.value = "gray60") +
+    coord_flip() +
+    labs(title = title,
+         subtitle = paste0("Point size = population; Top ", top_n, 
+                          " countries + high performers labeled"),
+         x = "Country",
+         y = y_label) +
+    theme_minimal() +
+    theme(axis.text.y = element_blank(),
+          axis.ticks.y = element_blank())
+}
+
+# Usage examples:
+
+
+
+
+plot_country_variable(test0af, innosOpop, 
+                      title = "Innovation per Population by Country",
+                      y_label = "Innovations per Population")
+
+
+
+plot_country_variable(test0af,  innosFL1Opop, 
+                      title = "Multi country Innovations per Population by Country",
+                      y_label = "Innovations per Population")
+
+
+
+
+
+```
+
+```{r}
+test0 %>% filter(ctry_group %in% c("EU","CN","US","JP","GB")) %>% 
+  ggplot( aes(x = ctry_group, y = cost)) +
+  geom_boxplot() +
+  stat_summary(fun = mean, geom = "point", shape = 23, size = 3, 
+               fill = "red", color = "red") +
+  geom_hline(yintercept = mean(test0$cost, na.rm = TRUE), 
+             linetype = "dashed", color = "blue", alpha = 0.5) +
+  labs(title = "Cost Distribution by Country Group",
+       x = "Country Group",
+       y = "Cost",
+       caption = "Red diamonds = group means; Blue dashed line = overall mean") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+
+
+
+
+```
+
+#### nice figures
+
+```{r}
+#test %>% ggplot(aes(x=pvOcost,y=evOcost)) + geom_point()
+
+
+
+
+library(ggplot2)
+library(dplyr)
+
+# Create quintile bins and calculate averages
+test_binned <- test %>%
+  mutate(evOcost_quintile = ntile(evOcost, 10)) %>%
+  group_by(evOcost_quintile) %>%
+  summarise(
+    mean_evOcost = mean(evOcost, na.rm = TRUE),
+    mean_pvOcost = mean(pvOcost, na.rm = TRUE)
+  )
+
+# Create the plot
+ggplot(test_binned, aes(x = mean_evOcost, y = mean_pvOcost)) +
+  geom_point(size = 3) +
+  geom_line() +
+  labs(
+    x = "evOcost (bin averages)",
+    y = "Average pvOcost",
+    title = "Average pvOcost by evOcost Quintiles"
+  ) +
+  theme_minimal()
+
+```
+
+#### now for thresdist
+
+```{r}
+
+library(ggplot2)
+library(dplyr)
+
+# Create quintile bins and calculate averages
+test_binned <- test %>%
+  mutate(thresdist_quintile = ntile(thresdist, 10)) %>%
+  group_by(thresdist_quintile) %>%
+  summarise(
+    mean_thresdist = mean(thresdist, na.rm = TRUE),
+    mean_ev = mean(ev_global, na.rm = TRUE)
+  )
+
+# Create the plot
+ggplot(test_binned, aes(x = mean_thresdist*100, y = mean_ev)) +
+  geom_point(size = 3) +
+  geom_line() +
+  labs(
+    x = "% distance from cutoff threshold",
+    y = "Average external value ($ millions)",
+    title = "External vs private value"
+  ) +
+  theme_minimal()+
+  geom_vline(xintercept = 0, color = "red", linetype = "dashed") 
+
+
+```
+
+#### with horizontal lines...
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Calculate average ev for both lowid groups
+avg_ev_lowid1 <- test %>%
+  filter(lowid == 1) %>%
+  summarise(mean_ev = mean(ev, na.rm = TRUE)) %>%
+  pull(mean_ev)
+
+avg_ev_lowid0 <- test %>%
+  filter(lowid == 0) %>%
+  summarise(mean_ev = mean(ev, na.rm = TRUE)) %>%
+  pull(mean_ev)
+
+# Print the averages
+cat("Average EV for lowid==1:", avg_ev_lowid1, "\n")
+cat("Average EV for lowid==0:", avg_ev_lowid0, "\n")
+
+# Create quintile bins and calculate averages
+test_binned <- test %>%
+  mutate(thresdist_quintile = ntile(thresdist, 10)) %>%
+  group_by(thresdist_quintile) %>%
+  summarise(
+    mean_thresdist = mean(thresdist, na.rm = TRUE),
+    mean_ev = mean(ev, na.rm = TRUE)
+  )
+
+# Create the plot
+ggplot(test_binned, aes(x = mean_thresdist*100, y = mean_ev)) +
+  geom_point(size = 3) +
+  geom_line() +
+  # Horizontal line for lowid==1 (from x=-100 to x=0)
+  geom_segment(aes(x = -100, xend = 0, 
+                   y = avg_ev_lowid1, yend = avg_ev_lowid1),
+               color = "blue", linetype = "dashed", linewidth = 1) +
+  # Horizontal line for lowid==0 (from x=0 to x=125)
+  geom_segment(aes(x = 0, xend = 125, 
+                   y = avg_ev_lowid0, yend = avg_ev_lowid0),
+               color = "darkgreen", linetype = "dashed", linewidth = 1) +
+  # Vertical line at cutoff
+  geom_vline(xintercept = 0, color = "red", linetype = "dashed") +
+  labs(
+    x = "% distance from cutoff threshold",
+    y = "Average external value ($ millions)",
+    title = "External vs private value"
+  ) +
+  theme_minimal()
+
+
+
+#########################################
+library(ggplot2)
+library(dplyr)
+
+# Calculate average ev for both lowid groups
+avg_ev_lowid1 <- test %>%
+  filter(lowid == 1) %>%
+  summarise(mean_ev = mean(ev, na.rm = TRUE)) %>%
+  pull(mean_ev)
+
+avg_ev_lowid0 <- test %>%
+  filter(lowid == 0) %>%
+  summarise(mean_ev = mean(ev, na.rm = TRUE)) %>%
+  pull(mean_ev)
+
+# Print the averages
+cat("Average EV for lowid==1:", avg_ev_lowid1, "\n")
+cat("Average EV for lowid==0:", avg_ev_lowid0, "\n")
+
+# Create quintile bins and calculate averages
+test_binned <- test %>%
+  mutate(thresdist_quintile = ntile(thresdist, 10)) %>%
+  group_by(thresdist_quintile) %>%
+  summarise(
+    mean_thresdist = mean(thresdist, na.rm = TRUE),
+    mean_ev = mean(ev, na.rm = TRUE)
+  )
+
+# Create the plot
+ggplot(test_binned, aes(x = mean_thresdist*100, y = mean_ev)) +
+  geom_point(size = 3) +
+  geom_line() +
+  # Horizontal line for lowid==1 (from x=-100 to x=0)
+  geom_segment(aes(x = -100, xend = 0, 
+                   y = avg_ev_lowid1, yend = avg_ev_lowid1),
+               color = "blue", linetype = "solid", linewidth = 1.5) +
+  # Horizontal line for lowid==0 (from x=0 to x=125)
+  geom_segment(aes(x = 0, xend = 125, 
+                   y = avg_ev_lowid0, yend = avg_ev_lowid0),
+               color = "darkgreen", linetype = "solid", linewidth = 1.5) +
+  # Vertical line at cutoff
+  geom_vline(xintercept = 0, color = "red", linetype = "dashed") +
+  labs(
+    x = "% distance from cutoff threshold",
+    y = "Average external value ($ millions)",
+    title = "External vs private value"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 16, face = "bold"),
+    axis.title.y = element_text(size = 16, face = "bold"),
+    plot.title = element_text(size = 18, face = "bold"),
+    axis.text = element_text(size = 12)
+  )
+
+  
+```
+
+## Build More ISTRAX (we only have EV on file so still need to apply the istrax formula)
+
+The formula is
+
+$$\frac{1}{c}\times EV \times \left(\alpha-\alpha \times I\{PV>2 c\}+I\{PV<2 c\}\right) $$
+
+$$=\frac{1}{c}\times EV \times \left(\alpha-\alpha \times I\{PV>2 c\}+\left(1-I\{PV>2 c\}\right)\right) $$
+
+$$=\frac{1}{c}\times EV \times \left(1+\alpha-\left(\alpha+1\right) \times I\{PV>2 c\}\right) $$
+
+$$ISTRAX_i=\frac{\alpha+1}{c}\times EV_i \times\left(1-  I\{PV_i>2 c\}\right) $$
+
+## combine EVs
+
+```{r}
+
+
+
+
+
+library(rlang)
+
+
+
+
+flist = c( "CN","emde","eu","euplusuk","g7","IN","emdenocn","emdenocnin","hic","AT","GB","DE","FR","US" )
+#flist = c( "FR","US" )
+#flist=("VN")
+for(ff in flist){
+  #ff="CN"
+  ff=ff %>% toupper()
+  newev=paste0("ev_",ff)
+  jurl=paste0("../../data/patent_data/patbis2021/data/fromWATSON/innos_ev_",ff,"_2009_2018.dsv")
+  newdf=read_tsv(jurl)
+  #test=
+  ev_var_name <- names(newdf)[startsWith(names(newdf), "ev")]
+  newdf=newdf %>% select(docdb_family_id,starts_with("ev")) %>% rename( !!newev:=!!sym(ev_var_name) )
+  
+  patchar=patchar %>% left_join( newdf )
+}
+
+
+
+patchar=patchar   %>% distinct() #%>% 
+  #mutate(ev_EMDE=ev_EMDE,
+         #ev_EMDEexCN=ev_EMDENOCN  ,
+         #ev_EMDEexCNIN=ev_EMDENOCNIN,
+         #ev_HIC=ev_HIC) 
+  
+  
+
+#test=patchar  %>% filter(ev_EMDEexCNIN<0)
+#test2=patchar %>% filter(ev_EMDEexCN<0)
+#test3=patchar %>% filter(ev_test<0)
+#test4=patchar %>% filter(ev_EMDE>ev)
+```
+
+# Making Istraxes
+
+```{r}
+
+
+library(dplyr)
+library(stringr)
+
+# Optionally guard against division by zero:
+# patchar <- patchar %>% mutate(cost = na_if(cost, 0))
+
+patchar <- patchar %>%
+  # Create istrax_* columns for every ev_* column
+  mutate(
+    across(
+      .cols = starts_with("ev_"),
+      .fns  = ~ ((alpha + 1) / cost) * .x * as.integer(pv <= 2 * cost),
+      .names = "istrax_{.col}"      # temporary names: istrax_ev_XXX
+    )
+    
+  ) %>%
+  # Drop the extra "ev_" in the new names: istrax_ev_XXX -> istrax_XXX
+  select(-istrax_global) %>% 
+  rename_with(~ str_replace(., "^istrax_ev_", "istrax_"), starts_with("istrax_ev_")) 
+
+  
+patchar <- patchar %>%
+  mutate(
+    across(
+      .cols = starts_with("ev_"),
+      .fns  = ~ (1 / cost) * (.x + pv)  ,
+      .names = "avstrax_{.col}"      # temporary names: istrax_ev_XXX
+    )
+    
+  ) %>%
+  # Drop the extra "ev_" in the new names: istrax_ev_XXX -> istrax_XXX
+  select(-avstrax_global) %>% 
+  rename_with(~ str_replace(., "^avstrax_ev_", "avstrax_"), starts_with("avstrax_ev_"))
+  
+
+
+
+
+```
+
+## Build patchar_countrymap
+
+```{r}
+
+
+
+
+# Add global istrax to patchar_countrympa
+patchar_countrymap = patchar_countrymap %>% left_join(patchar) %>% 
+  select(#-starts_with("ev_"),
+    ,-starts_with("earliest"),-alpha,-cost,-pv,-docdb_family_size,-istrax_G7)
+
+# Note: we have loads of innovations which are not mapped to countries...
+
+#countrymap=patchar_countrymap %>% distinct(docdb_family_id,ctry_code)
+
+#istraxes=patchar_countrymap %>% select(-ctry_code) %>% distinct()
+
+#test2=test %>% select(docdb_family_id)
+
+
+```
+
+
+## ### test the global hypothesis...
+
+```{r}
+
+#patchar_countrymap=patchar_countrymap %>% mutate(testglobal=ev_hic+ev_emde)
+
+patchar_countrymap %>% 
+   mutate(testglobal=ev_HIC+ev_EMDE) %>% 
+
+  filter(ctry_code %in% c("CN", "US", "VN","DE","JP","KR")) %>% 
+  group_by(ctry_code) %>% 
+  summarise(across(c(testglobal, ev_global), mean))
+
+
+
+
+```
+correcting this issue for now by adding hic to emde....
+
+```{r}
+
+
+prefixes <- patchar_countrymap %>% 
+  select(ends_with("_global")) %>% 
+  names() %>% 
+  str_remove("_global$")
+
+for(vvv in prefixes){
+  global_col <- paste0(vvv, "_global")
+  hic_col <- paste0(vvv, "_HIC")
+  emde_col <- paste0(vvv, "_EMDE")
+  
+  patchar_countrymap[[global_col]] <- 
+    patchar_countrymap[[hic_col]] + patchar_countrymap[[emde_col]]
+}
+
+
+```
+
+
+## Build techmap
+
+```{r}
+url="../patent analysis/Data/Other data/docdb_tech_class.csv"
+
+techmap=fread(url)
+techmap=techmap %>% arrange(docdb_family_id) %>% filter(technology!="")
+#head(classes)
+#classes %>% distinct(technology)
+
+green_classes=c("Green Energy",
+                "Green Transport",
+                "Circular Economy",
+                "Green Manufacturing",
+                "Adaptation",
+                "Green Housing",
+                "Green ICT",
+                "Green Agriculture",
+                "GHG Capture",
+                "Any Green")
+
+#classes = classes %>% mutate(green_id=technology %in%  green_classes)
+
+#classes %>% distinct(technology)
+
+
+
+#url="../patent analysis/Data/Other data/docdb_green_or_not.csv"
+
+
+# Add a mapping to green.... Sam, double check if you agree...
+
+url="../../data/patent_data/Y02_docdb_family_id_patstat2021.dsv"
+greenornot=fread(url) %>% mutate(technology="Any Green") %>% select(docdb_family_id, technology)
+#head(greenornot)
+techmap=techmap %>% bind_rows(greenornot) %>% distinct()
+
+
+```
+
+
+##### We should integrate this with extrasectors.RMD which creates some extra sectors....
+
+## Save stuff
+
+```{r}
+
+library(arrow)
+library(fst)
+# Save patchar_countrymap as patchar_countrymap.parquet
+write_fst(patchar_countrymap, "patchar_countrymap.fst",compress=100)
+
+# Save techmap as techmap.parquet
+write_parquet(techmap, "techmap.parquet")
+
+write_fst(patchar, "patchar.fst",compress=100)
+rm(patchar)
+#write_parquet(countrymap, "countrymap.parquet")
+#write_parquet(istraxes, "istraxes.parquet")
+
+```
+
+### save istraxes
+
+```{r}
+#library(qs)
+library(fst)
+# save istraxes in separate files so we can more easily upload to github
+#names(istraxes)
+# Create output directory if it doesn't exist
+if (!dir.exists("istraxes")) {
+  dir.create("istraxes")
+}
+
+# Identify istrax_* columns
+istrax_cols <- grep("^istrax_", names(patchar_countrymap), value = TRUE)
+# Loop through each istrax_* column and save with docdb_family_id and ctry_code
+for (col in istrax_cols) {
+  #col="istraxi_HIC" 
+  #col="istrax_global"
+  #avcol=gsub("^i", "av", col)
+  subset_df <- patchar_countrymap[, c("docdb_family_id","ctry_code", col)]
+  #write_parquet(subset_df, paste0("istraxes/", col, ".parquet"))
+  write_fst(subset_df, paste0("istraxes/", col, ".fst"),compress=100)
+}
+
+
+# Av strax columns
+istrax_cols <- grep("^avstrax_", names(patchar_countrymap), value = TRUE)
+# Loop through each istrax_* column and save with docdb_family_id and ctry_code
+for (col in istrax_cols) {
+  #col="istraxi_HIC" 
+  #col="istrax_global"
+  #avcol=gsub("^i", "av", col)
+  subset_df <- patchar_countrymap[, c("docdb_family_id","ctry_code", col)]
+  #write_parquet(subset_df, paste0("istraxes/", col, ".parquet"))
+  write_fst(subset_df, paste0("istraxes/", col, ".fst"),compress=100)
+}
+
+
+
+# EV columns
+istrax_cols <- grep("^ev_", names(patchar_countrymap), value = TRUE)
+# Loop through each istrax_* column and save with docdb_family_id and ctry_code
+for (col in istrax_cols) {
+  #col="istraxi_HIC" 
+  #col="istrax_global"
+  #avcol=gsub("^i", "av", col)
+  subset_df <- patchar_countrymap[, c("docdb_family_id","ctry_code", col)]
+  #write_parquet(subset_df, paste0("istraxes/", col, ".parquet"))
+  write_fst(subset_df, paste0("istraxes/", col, ".fst"),compress=100)
+}
+
+
+
+
+```
+
+## copy stuff to ISEapp github repo as well
+
+```{r}
+
+if(Sys.info()["nodename"]=="PCACL-9RVSQ74" ){
+  
+  githubdir="C:/Users/rmartin7/GitHub/"  
+  
+}
+
+
+
+# List of relative file paths
+files1 <- list.files(path="istraxes", pattern = "fst$", full.names = TRUE)
+file_list <- c(files1,"techmap.parquet")
+#file_list=files1
+
+
+# Destination root directory
+dest_root1 <- paste0(githubdir,"iseapp/")
+dest_root2 <- paste0(githubdir,"KEVCE/data/")
+
+
+
+# Create destination directories and copy files
+for (file in file_list) {
+  # iseapp directory
+  dest_path <- file.path(dest_root1, file)
+  dest_dir <- dirname(dest_path)
+  
+  if (!dir.exists(dest_dir)) {
+    dir.create(dest_dir, recursive = TRUE)
+  }
+  
+  file.copy(from = file, to = dest_path, overwrite = TRUE)
+  #########################################################
+  
+  # kevce directory
+  dest_path <- file.path(dest_root2, file)
+  dest_dir <- dirname(dest_path)
+  
+  if (!dir.exists(dest_dir)) {
+    dir.create(dest_dir, recursive = TRUE)
+  }
+  
+  file.copy(from = file, to = dest_path, overwrite = TRUE)
+
+
+  
+    
+  
+  
+}
+
+```
+
+# Analysis
+
+```{r}
+
+source("istraxfunctions.r")
+
+```
+
+## Global vs National ISTRAX
+
+Here we compare returns from further innovation at global vs national
+spillovers. Note: going forward we want to add further scopes; e.g. LMIC
+istrax where only spillovers to LMICs are considered.
+
+## Vietnam
+
+toflowlabels: Global Returns, National Returns, Returns within LMICs
+(excl. China), Returns within HICs
+
+toflowcatnames: istrax_global, istrax_nationalkey_2009_2018,
+istrax_EMDEexCN, istrax_HIC
+
+```{r}
+
+
+
+
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap, 
+                        green_classes, 
+                        country_code="VN", 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+plot_avstrax_by_country(patchar_countrymap,
+                        techmap,
+                        green_classes, 
+                        country_code="VN", 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+
+plot_avstrax_by_country(patchar_countrymap,
+                        techmap,
+                        green_classes, 
+                        country_code="VN", 
+                        toflow="istrax_EMDEexCN", 
+                        custom_colors)+ggtitle("Returns within LMICs (excl. China)")
+
+
+
+```
+
+## All dvelopping (ex China)
+
+```{r}
+
+lmics=c("AF","AL","DZ","AO","AR","AM","AZ","BD","BJ","BO","BA","BW","BR","BG","BF","BI","KH","CM","CV","CF","TD","CL","CO","KM","CG","CR","CI","CU","DJ","DM","DO","EC","EG","SV","GQ","ER","ET","FJ","GA","GM","GE","GH","GT","GN","GW","GY","HT","HN","IN","ID","IR","IQ","JM","JO","KZ","KE","KI","KP","KG","LA","LB","LS","LR","LY","MG","MW","MY","MV","ML","MR","MU","MX","MD","MN","ME","MA","MZ","MM","NA","NP","NI","NE","NG","MK","PK","PW","PA","PG","PY","PE","PH","RW","WS","ST","SN","RS","SC","SL","SB","SO","ZA","LK","SD","SR","SY","TJ","TZ","TH","TL","TG","TO","TN","TR","TM","TV","UG","UA","UZ","VU","VE","VN","YE","ZM","ZW")
+
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                        green_classes, 
+                        country_code=lmics, 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                         green_classes, 
+                        country_code=lmics, 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+```
+
+## China
+
+```{r}
+
+
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                        green_classes, 
+                        country_code="CN", 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+plot_avstrax_by_country( patchar_countrymap, 
+                        techmap,
+                        green_classes, 
+                        country_code="CN", 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+
+
+
+
+```
+
+Africa only?
+
+```{r}
+
+lmics=c("TD","DZ","DJ","MZ","GM","GN","UG","GH","SN","ER",
+        "CG","MA","TN","CM","MW","SD","NG","SO","EG","SL",
+        "BF","BJ","ML","NE","MG","RW","CD","EH","CV","GW",
+        "LR","ZA","SZ","ZM","KE","MR","TZ","LY","ZW","TG",
+        "CF","ET","LS","GQ","KM","GA","CI","BI")
+
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                        green_classes, 
+                        country_code=lmics, 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap, 
+                         green_classes, 
+                        country_code=lmics, 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+
+
+
+```
+
+# Turkey
+
+```{r}
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                        green_classes, 
+                        country_code="TR", 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap, green_classes, 
+                        country_code="TR", 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+
+
+
+```
+
+# India
+
+```{r}
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                        green_classes, 
+                        country_code="IN", 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap, green_classes, 
+                        country_code="IN", 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+
+
+
+```
+
+# South Africa
+
+```{r}
+
+test=patchar_countrymap %>% filter(ctry_code=="ZA")
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,green_classes ,
+                        country_code="ZA", 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap, green_classes, 
+                        country_code="ZA", 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+
+
+
+
+
+
+
+
+```
+
+# UK
+
+```{r}
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap, 
+                        green_classes, 
+                        country_code="GB", 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                        green_classes ,
+                        country_code="GB", 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+
+
+
+```
+
+# Germany
+
+```{r}
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                        green_classes , 
+                        country_code="DE", 
+                        toflow="istrax_global", 
+                        custom_colors)+ggtitle("Global Returns")
+
+plot_avstrax_by_country(patchar_countrymap, 
+                        techmap,
+                        green_classes ,
+                        country_code="DE", 
+                        toflow="istrax_nationalkey_2009_2018", 
+                        custom_colors)+ggtitle("National Returns")
+
+
+
+```
+
+
+
+
+
+
+# A check...do we really not have patents from Argentina (or namibia)
+```{r}
+if (Sys.info()["nodename"] == "PCACL-9RVSQ74") {
+  
+  inglobe="C:\\Users\\rmartin7\\OneDrive - Imperial College London\\inglobe"
+  inglobewb="C:\\Users\\rmartin7\\OneDrive - WBG\\projects\\inglobe"
+}
+
+
+
+personfile=paste0(inglobewb,"\\data\\person_address.parquet")
+
+
+personfile=read_parquet(personfile)
+
+head(personfile)
+
+
+
+
+```
