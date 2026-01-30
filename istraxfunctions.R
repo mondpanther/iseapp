@@ -1005,7 +1005,8 @@ build_espacenet_search <- function(id_strings) {
 #' @param custom_colors Custom colors for the plot
 #' @param topn Number of top countries to show (highest RTA)
 #' @param bottomn Number of bottom countries to show (lowest RTA)
-#' @param mininno Minimum innovation count threshold
+#' @param mininno Minimum innovation count threshold (for innos)
+#' @param minallinnos Minimum all innovation count threshold (for Allinnos)
 #' @param bwidthscale "log" or "proportional" for bar width scaling
 #' @param show_top3_ids Whether to show interactive top patent IDs
 #' @param width_svg SVG width in inches
@@ -1015,7 +1016,7 @@ build_espacenet_search <- function(id_strings) {
 #' @param precomputed_avstrax Pre-computed avstrax data (optional)
 #' @return A girafe object
 plot_avstrax_rta <- function(pdata, classes,
-                             technologies, toflow, custom_colors, topn = 20, bottomn = 0, mininno = 5, bwidthscale = "log",
+                             technologies, toflow, custom_colors, topn = 20, bottomn = 0, mininno = 5, minallinnos = 0, bwidthscale = "log",
                              show_top3_ids = FALSE,
                              width_svg = 10,
                              height_svg = 6,
@@ -1096,9 +1097,15 @@ plot_avstrax_rta <- function(pdata, classes,
     )
   }
 
-  # Filter by minimum innovations and valid RTA
+  # Filter by minimum innovations (innos and Allinnos) and valid RTA
   avstrax_filtered <- avstrax %>%
     filter(ctry_code != "All", innos >= mininno, !is.na(RTA))
+
+  # Apply Allinnos filter if the column exists and threshold is set
+  if ("Allinnos" %in% names(avstrax_filtered) && minallinnos > 0) {
+    avstrax_filtered <- avstrax_filtered %>%
+      filter(Allinnos >= minallinnos)
+  }
 
   # Get top n and bottom n countries by RTA
   top_countries <- avstrax_filtered %>%
@@ -1224,7 +1231,8 @@ plot_avstrax_rta <- function(pdata, classes,
 
 #' Plot scatter plot of RTA vs Returns
 #' @param avstrax_data Data frame with ctry_code, RTA, mean, and innos columns
-#' @param mininno Minimum innovation count threshold
+#' @param mininno Minimum innovation count threshold (for innos)
+#' @param minallinnos Minimum all innovation count threshold (for Allinnos)
 #' @param bwidthscale "log" or "proportional" for dot size scaling
 #' @param width_svg SVG width in inches
 #' @param height_svg SVG height in inches
@@ -1234,6 +1242,7 @@ plot_avstrax_rta <- function(pdata, classes,
 #' @return A girafe object
 plot_rta_returns_scatter <- function(avstrax_data,
                                       mininno = 5,
+                                      minallinnos = 0,
                                       bwidthscale = "log",
                                       width_svg = 8,
                                       height_svg = 6,
@@ -1294,6 +1303,12 @@ plot_rta_returns_scatter <- function(avstrax_data,
   # Filter data
   scatter_data <- avstrax_data %>%
     filter(ctry_code != "All", innos >= mininno, !is.na(RTA), !is.na(mean))
+
+  # Apply Allinnos filter if the column exists and threshold is set
+  if ("Allinnos" %in% names(scatter_data) && minallinnos > 0) {
+    scatter_data <- scatter_data %>%
+      filter(Allinnos >= minallinnos)
+  }
 
   # Check if we have data to plot
   if (nrow(scatter_data) == 0) {

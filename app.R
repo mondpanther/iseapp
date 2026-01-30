@@ -602,21 +602,22 @@ ui <- function(request){fluidPage(
   # Add CSS and JavaScript for collapsible plot
   tags$style(HTML("
     .plot-toggle {
-      font-weight: bold;
-      font-size: 16px;
+      font-weight: 400;
+      font-size: 11px;
       cursor: pointer;
-      padding: 10px;
-      background-color: #3498db;
-      color: white;
+      padding: 2px 8px;
+      background-color: transparent;
+      color: #888;
       border: none;
-      border-radius: 5px;
-      margin: 10px 0;
-      transition: background-color 0.3s ease;
+      border-radius: 3px;
+      margin: 4px 0;
+      transition: all 0.2s ease;
       display: inline-block;
       width: auto;
     }
     .plot-toggle:hover {
-      background-color: #2980b9;
+      background-color: rgba(0, 0, 0, 0.05);
+      color: #555;
     }
     .plot-container {
       overflow: hidden;
@@ -631,10 +632,10 @@ ui <- function(request){fluidPage(
         var button = $(this);
         if (plot.is(':visible')) {
           plot.slideUp(300);
-          button.text('▼ More');
+          button.text('▼ more');
         } else {
           plot.slideDown(300);
-          button.text('▲ Less');
+          button.text('▲ less');
         }
       });
       $('#togglePlot1_region').click(function() {
@@ -642,10 +643,54 @@ ui <- function(request){fluidPage(
         var button = $(this);
         if (plot.is(':visible')) {
           plot.slideUp(300);
-          button.text('▼ More');
+          button.text('▼ more');
         } else {
           plot.slideDown(300);
-          button.text('▲ Less');
+          button.text('▲ less');
+        }
+      });
+      $('#toggleReturns').click(function() {
+        var plot = $('#returnsContainer');
+        var button = $(this);
+        if (plot.is(':visible')) {
+          plot.slideUp(300);
+          button.text('▼ more');
+        } else {
+          plot.slideDown(300);
+          button.text('▲ less');
+        }
+      });
+      $('#toggleReturns_region').click(function() {
+        var plot = $('#returnsContainer_region');
+        var button = $(this);
+        if (plot.is(':visible')) {
+          plot.slideUp(300);
+          button.text('▼ more');
+        } else {
+          plot.slideDown(300);
+          button.text('▲ less');
+        }
+      });
+      $('#toggleReturnsBar').click(function() {
+        var plot = $('#returnsBarContainer');
+        var button = $(this);
+        if (plot.is(':visible')) {
+          plot.slideUp(300);
+          button.text('▼ more');
+        } else {
+          plot.slideDown(300);
+          button.text('▲ less');
+        }
+      });
+      $('#toggleReturnsBar_region').click(function() {
+        var plot = $('#returnsBarContainer_region');
+        var button = $(this);
+        if (plot.is(':visible')) {
+          plot.slideUp(300);
+          button.text('▼ more');
+        } else {
+          plot.slideDown(300);
+          button.text('▲ less');
         }
       });
     });
@@ -814,7 +859,7 @@ ui <- function(request){fluidPage(
           value = TRUE
         )
       ),
-      tags$button("▲ Less", id = "togglePlot1", class = "plot-toggle"),
+      tags$button("▲ less", id = "togglePlot1", class = "plot-toggle"),
       tags$div(
         id = "plot1Container",
         withSpinner(girafeOutput("avstrax_plot1", width = "100%", height = "auto"), type = 4, color = "#3498db")
@@ -855,10 +900,18 @@ ui <- function(request){fluidPage(
       ),
       # Returns by Country plot and map
       tags$h4("Returns by Country"),
-      withSpinner(girafeOutput("avstrax_plot2", width = "100%", height = "auto"), type = 4, color = "#3498db"),
-      tags$br(),
-      tags$h4("World Map: Returns"),
-      withSpinner(plotlyOutput("world_map", width = "100%", height = "500px"), type = 4, color = "#3498db"),
+      tags$button("▲ less", id = "toggleReturnsBar", class = "plot-toggle"),
+      tags$div(
+        id = "returnsBarContainer",
+        withSpinner(girafeOutput("avstrax_plot2", width = "100%", height = "auto"), type = 4, color = "#3498db"),
+        tags$button("▲ less", id = "toggleReturns", class = "plot-toggle"),
+        tags$div(
+          id = "returnsContainer",
+          tags$br(),
+          tags$h4("World Map: Returns"),
+          withSpinner(plotlyOutput("world_map", width = "100%", height = "500px"), type = 4, color = "#3498db")
+        )
+      ),
       tags$br(),
       tags$hr(),
       # RTA section with separate controls
@@ -886,6 +939,14 @@ ui <- function(request){fluidPage(
           min = 1,
           max = 500,
           value = 100,
+          width = "350px"
+        ),
+        sliderInput(
+          inputId = "minallinnos_rta",
+          label = "All innovation threshold:",
+          min = 1,
+          max = 5000,
+          value = 500,
           width = "350px"
         )
       ),
@@ -953,7 +1014,7 @@ ui <- function(request){fluidPage(
           value = TRUE
         )
       ),
-      tags$button("▲ Less", id = "togglePlot1_region", class = "plot-toggle"),
+      tags$button("▲ less", id = "togglePlot1_region", class = "plot-toggle"),
       tags$div(
         id = "plot1Container_region",
         withSpinner(girafeOutput("avstrax_plot1_region", width = "100%", height = "auto"), type = 4, color = "#3498db")
@@ -994,10 +1055,18 @@ ui <- function(request){fluidPage(
       ),
       # Returns by Region plot and map
       tags$h4("Returns by Region"),
-      withSpinner(girafeOutput("avstrax_plot2_region", width = "100%", height = "auto"), type = 4, color = "#3498db"),
-      tags$br(),
-      tags$h4("UK Regions Map: Returns"),
-      withSpinner(leafletOutput("uk_regions_map", width = "100%", height = "500px"), type = 4, color = "#3498db"),
+      tags$button("▲ less", id = "toggleReturnsBar_region", class = "plot-toggle"),
+      tags$div(
+        id = "returnsBarContainer_region",
+        withSpinner(girafeOutput("avstrax_plot2_region", width = "100%", height = "auto"), type = 4, color = "#3498db"),
+        tags$button("▲ less", id = "toggleReturns_region", class = "plot-toggle"),
+        tags$div(
+          id = "returnsContainer_region",
+          tags$br(),
+          tags$h4("UK Regions Map: Returns"),
+          withSpinner(leafletOutput("uk_regions_map", width = "100%", height = "500px"), type = 4, color = "#3498db")
+        )
+      ),
       tags$br(),
       tags$hr(),
       # RTA section with separate controls
@@ -1025,6 +1094,14 @@ ui <- function(request){fluidPage(
           min = 1,
           max = 500,
           value = 100,
+          width = "350px"
+        ),
+        sliderInput(
+          inputId = "minallinnos_rta_region",
+          label = "All innovation threshold:",
+          min = 1,
+          max = 5000,
+          value = 500,
           width = "350px"
         )
       ),
@@ -1261,7 +1338,7 @@ server <- function(input, output, session) {
     # Convert pixels to inches (assuming 96 dpi), with aspect ratio that varies with width
     width_inches <- plot_width / 96
     # Wider windows get wider aspect ratio (less height per width)
-    aspect_ratio <- ifelse(plot_width > 1200, 0.4, ifelse(plot_width > 800, 0.5, 0.6))
+    aspect_ratio <- ifelse(plot_width > 1200, 0.5, ifelse(plot_width > 800, 0.6, 0.7))
     height_inches <- width_inches * aspect_ratio
 
     p <- plot_avstrax_by_country(
@@ -1345,9 +1422,12 @@ server <- function(input, output, session) {
     plot_width <- max(window_dims$width, 400)
     # Convert pixels to inches (assuming 96 dpi), with aspect ratio that varies with width
     width_inches <- plot_width / 96
-    # Wider windows get wider aspect ratio (less height per width)
-    aspect_ratio <- ifelse(plot_width > 1200, 0.4, ifelse(plot_width > 800, 0.5, 0.6))
-    height_inches <- width_inches * aspect_ratio
+    # Calculate height based on number of countries to display (topn)
+    # Base height per country bar, with minimum height
+    n_countries <- input$topn
+    height_per_bar <- 0.35  # inches per bar
+    min_height <- 4  # minimum height in inches
+    height_inches <- max(min_height, n_countries * height_per_bar)
 
     # Get current techmap (may be placeholder if still loading)
     current_techmap <- get_techmap()
@@ -1487,8 +1567,11 @@ server <- function(input, output, session) {
     # Calculate responsive dimensions - full width since stacked vertically
     plot_width <- max(window_dims$width, 400)
     width_inches <- plot_width / 96
-    aspect_ratio <- ifelse(plot_width > 1200, 0.4, ifelse(plot_width > 800, 0.5, 0.6))
-    height_inches <- width_inches * aspect_ratio
+    # Calculate height based on number of countries to display (topn + bottomn)
+    n_countries <- input$topn_rta + input$bottomn_rta
+    height_per_bar <- 0.35  # inches per bar
+    min_height <- 4  # minimum height in inches
+    height_inches <- max(min_height, n_countries * height_per_bar)
 
     current_techmap <- get_techmap()
 
@@ -1505,6 +1588,7 @@ server <- function(input, output, session) {
       topn = input$topn_rta,
       bottomn = input$bottomn_rta,
       mininno = input$mininno_rta,
+      minallinnos = input$minallinnos_rta,
       bwidthscale = input$bwidthscale,
       show_top3_ids = input$show_top3_ids,
       width_svg = width_inches,
@@ -1634,6 +1718,7 @@ server <- function(input, output, session) {
     p <- plot_rta_returns_scatter(
       avstrax_data = avstrax_data,
       mininno = input$mininno_rta,
+      minallinnos = input$minallinnos_rta,
       bwidthscale = input$bwidthscale,
       width_svg = width_inches,
       height_svg = height_inches,
@@ -1731,7 +1816,7 @@ server <- function(input, output, session) {
 
     plot_width <- max(window_dims$width, 400)
     width_inches <- plot_width / 96
-    aspect_ratio <- ifelse(plot_width > 1200, 0.4, ifelse(plot_width > 800, 0.5, 0.6))
+    aspect_ratio <- ifelse(plot_width > 1200, 0.5, ifelse(plot_width > 800, 0.6, 0.7))
     height_inches <- width_inches * aspect_ratio
 
     p <- plot_avstrax_by_country(
@@ -1810,8 +1895,11 @@ server <- function(input, output, session) {
 
     plot_width <- max(window_dims$width, 400)
     width_inches <- plot_width / 96
-    aspect_ratio <- ifelse(plot_width > 1200, 0.4, ifelse(plot_width > 800, 0.5, 0.6))
-    height_inches <- width_inches * aspect_ratio
+    # Calculate height based on number of regions to display (topn)
+    n_regions <- input$topn_region
+    height_per_bar <- 0.35  # inches per bar
+    min_height <- 4  # minimum height in inches
+    height_inches <- max(min_height, n_regions * height_per_bar)
 
     # Get current techmap
     current_techmap <- get_techmap()
@@ -1972,8 +2060,11 @@ server <- function(input, output, session) {
     # Calculate responsive dimensions - full width since stacked vertically
     plot_width <- max(window_dims$width, 400)
     width_inches <- plot_width / 96
-    aspect_ratio <- ifelse(plot_width > 1200, 0.4, ifelse(plot_width > 800, 0.5, 0.6))
-    height_inches <- width_inches * aspect_ratio
+    # Calculate height based on number of regions to display (topn + bottomn)
+    n_regions <- input$topn_rta_region + input$bottomn_rta_region
+    height_per_bar <- 0.35  # inches per bar
+    min_height <- 4  # minimum height in inches
+    height_inches <- max(min_height, n_regions * height_per_bar)
 
     current_techmap <- get_techmap()
 
@@ -1990,6 +2081,7 @@ server <- function(input, output, session) {
       topn = input$topn_rta_region,
       bottomn = input$bottomn_rta_region,
       mininno = input$mininno_rta_region,
+      minallinnos = input$minallinnos_rta_region,
       bwidthscale = input$bwidthscale_region,
       show_top3_ids = input$show_top3_ids_region,
       width_svg = width_inches,
@@ -2069,6 +2161,7 @@ server <- function(input, output, session) {
     p <- plot_rta_returns_scatter(
       avstrax_data = avstrax_data,
       mininno = input$mininno_rta_region,
+      minallinnos = input$minallinnos_rta_region,
       bwidthscale = input$bwidthscale_region,
       width_svg = width_inches,
       height_svg = height_inches,
