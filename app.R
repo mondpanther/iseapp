@@ -1529,6 +1529,7 @@ server <- function(input, output, session) {
         input$techs,
         input$topn_rta,
         input$mininno_rta,
+        input$minallinnos_rta,
         input$bwidthscale,
         !is.null(input$show_top3_ids))
     req(window_dims$initialized)
@@ -1545,11 +1546,17 @@ server <- function(input, output, session) {
       if (!is.null(tech_category)) {
         precomputed_data <- load_precomputed_by_country(prepdata_path, input$toflow, tech_category)
         if (!is.null(precomputed_data)) {
-          message("RTA plot using pre-computed data for tech category: ", tech_category)
-          selected_countries <- expand_country_selection(input$country)
-          if (!is.null(precomputed_data$ctry_code)) {
-            precomputed_data <- precomputed_data %>%
-              filter(ctry_code %in% selected_countries | ctry_code == "All")
+          # Check if precomputed data has RTA and Allinnos columns needed for RTA filtering
+          if (!"RTA" %in% names(precomputed_data) || !"Allinnos" %in% names(precomputed_data)) {
+            message("Precomputed data missing RTA or Allinnos columns, will compute on the fly")
+            precomputed_data <- NULL
+          } else {
+            message("RTA plot using pre-computed data for tech category: ", tech_category)
+            selected_countries <- expand_country_selection(input$country)
+            if (!is.null(precomputed_data$ctry_code)) {
+              precomputed_data <- precomputed_data %>%
+                filter(ctry_code %in% selected_countries | ctry_code == "All")
+            }
           }
         }
       }
@@ -1645,9 +1652,15 @@ server <- function(input, output, session) {
       avstrax_data <- compute_avstrax_for_techs(filtered, input$toflow, filtered_classes)
     }
 
-    # Filter by minimum innovations (using RTA-specific threshold)
+    # Filter by minimum innovations (using RTA-specific thresholds)
     avstrax_data <- avstrax_data %>%
       filter(innos >= input$mininno_rta)
+
+    # Apply Allinnos filter if the column exists
+    if ("Allinnos" %in% names(avstrax_data) && input$minallinnos_rta > 0) {
+      avstrax_data <- avstrax_data %>%
+        filter(Allinnos >= input$minallinnos_rta)
+    }
 
     # Plot RTA on world map (RTA is always an index, not a percentage or dollar value)
     plot_world_map(
@@ -1674,17 +1687,19 @@ server <- function(input, output, session) {
     tech_category <- match_tech_category(input$techs)
 
     if (!is.null(tech_category)) {
-      avstrax_data <- load_precomputed_by_country(prepdata_path, input$toflow, tech_category)
-      if (!is.null(avstrax_data)) {
+      precomputed <- load_precomputed_by_country(prepdata_path, input$toflow, tech_category)
+      if (!is.null(precomputed) && "RTA" %in% names(precomputed) && "Allinnos" %in% names(precomputed)) {
         message("RTA scatter plot using pre-computed data for tech: ", tech_category)
-        if (!is.null(avstrax_data$ctry_code)) {
-          avstrax_data <- avstrax_data %>%
+        if (!is.null(precomputed$ctry_code)) {
+          avstrax_data <- precomputed %>%
             filter(ctry_code %in% selected_countries)
+        } else {
+          avstrax_data <- precomputed
         }
       }
     }
 
-    # If no pre-computed data, compute on the fly
+    # If no pre-computed data with RTA and Allinnos, compute on the fly
     if (is.null(avstrax_data)) {
       req(data_state$countrymap_loaded)
       req(data_state$techmap_loaded)
@@ -2008,6 +2023,7 @@ server <- function(input, output, session) {
         input$techs_region,
         input$topn_rta_region,
         input$mininno_rta_region,
+        input$minallinnos_rta_region,
         input$bwidthscale_region,
         !is.null(input$show_top3_ids_region))
     req(window_dims$initialized)
@@ -2027,9 +2043,9 @@ server <- function(input, output, session) {
       if (!is.null(tech_category)) {
         precomputed_data <- load_precomputed_by_region(prepdata_path, input$toflow_region, tech_category)
         if (!is.null(precomputed_data)) {
-          # Check if RTA column exists in precomputed data
-          if (!"RTA" %in% names(precomputed_data)) {
-            message("RTA column not found in precomputed data, will compute on the fly")
+          # Check if RTA and Allinnos columns exist in precomputed data
+          if (!"RTA" %in% names(precomputed_data) || !"Allinnos" %in% names(precomputed_data)) {
+            message("RTA or Allinnos column not found in precomputed data, will compute on the fly")
             precomputed_data <- NULL
           } else {
             message("RTA region plot using pre-computed data for tech: ", tech_category)
@@ -2113,7 +2129,7 @@ server <- function(input, output, session) {
 
     if (!is.null(tech_category)) {
       precomputed <- load_precomputed_by_region(prepdata_path, input$toflow_region, tech_category)
-      if (!is.null(precomputed) && "RTA" %in% names(precomputed)) {
+      if (!is.null(precomputed) && "RTA" %in% names(precomputed) && "Allinnos" %in% names(precomputed)) {
         message("RTA scatter plot (regions) using pre-computed data for tech: ", tech_category)
         if (!is.null(precomputed$ctry_code)) {
           avstrax_data <- precomputed %>%
@@ -2124,7 +2140,7 @@ server <- function(input, output, session) {
       }
     }
 
-    # If no pre-computed data with RTA, compute on the fly
+    # If no pre-computed data with RTA and Allinnos, compute on the fly
     if (is.null(avstrax_data)) {
       req(data_state$techmap_loaded)
 
@@ -2193,7 +2209,7 @@ server <- function(input, output, session) {
 
     if (!is.null(tech_category)) {
       precomputed <- load_precomputed_by_region(prepdata_path, input$toflow_region, tech_category)
-      if (!is.null(precomputed) && "RTA" %in% names(precomputed)) {
+      if (!is.null(precomputed) && "RTA" %in% names(precomputed) && "Allinnos" %in% names(precomputed)) {
         message("RTA UK regions map using pre-computed data for tech: ", tech_category)
         if (!is.null(precomputed$ctry_code)) {
           avstrax_data <- precomputed %>%
@@ -2204,7 +2220,7 @@ server <- function(input, output, session) {
       }
     }
 
-    # If no pre-computed data with RTA, compute on the fly
+    # If no pre-computed data with RTA and Allinnos, compute on the fly
     if (is.null(avstrax_data)) {
       req(data_state$techmap_loaded)
 
@@ -2226,9 +2242,15 @@ server <- function(input, output, session) {
       avstrax_data <- compute_avstrax_for_techs(filtered, input$toflow_region, filtered_classes)
     }
 
-    # Filter by minimum innovations (using RTA-specific threshold)
+    # Filter by minimum innovations (using RTA-specific thresholds)
     avstrax_data <- avstrax_data %>%
       filter(innos >= input$mininno_rta_region)
+
+    # Apply Allinnos filter if the column exists
+    if ("Allinnos" %in% names(avstrax_data) && input$minallinnos_rta_region > 0) {
+      avstrax_data <- avstrax_data %>%
+        filter(Allinnos >= input$minallinnos_rta_region)
+    }
 
     # Plot RTA on UK regions map (RTA is always an index)
     plot_uk_regions_map(
