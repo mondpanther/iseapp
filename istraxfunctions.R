@@ -490,6 +490,12 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
     filtereddata=data %>% inner_join(classes %>% select(docdb_family_id)%>% distinct())
   }
   
+  counted=data %>% fgroup_by(ctry_code) %>% 
+    fsummarize(Allinnos=n()) %>% 
+    ungroup() %>% 
+    mutate(SumAllinnos=sum(Allinnos)) # We need for RTA
+  #counted=counted %>% bind_rows(data.frame(ctry_code="All",Allinnos=sum(counted$innos)))
+  
   #scaler=ifelse()
   # Include country_name if it exists (for regions)
   has_country_name <- "country_name" %in% names(filtereddata)
@@ -519,7 +525,8 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
           mutate(ctry_code = "All")
       )
   }
-
+ 
+  
   # Group by ctry_code (and country_name if it exists)
   if (has_country_name) {
     avstrax <- avstrax %>%
@@ -558,7 +565,9 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
     mutate(
       # Create Espacenet search URL for top 3 IDs (use double quotes for JS to avoid HTML attribute conflicts)
       top3_ids_url = build_espacenet_search(top3_ids)
-    )
+    ) %>% 
+    left_join(counted) %>% 
+    mutate(share_c=innos/Allinnos,share=sum(innos)/SumAllinnos,RTA=2*share_c/(share_c+share))
 
   return(avstrax)
 }
