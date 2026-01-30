@@ -684,14 +684,45 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   if (length(allmean) == 0) allmean <- 0
   if (length(innos) == 0) innos <- 0
 
+  # UK NUTS1 region names mapping (for UK region explorer)
+  uk_regions_names <- c(
+    "UKC" = "North East England",
+    "UKD" = "North West England",
+    "UKE" = "Yorkshire and The Humber",
+    "UKF" = "East Midlands",
+    "UKG" = "West Midlands",
+    "UKH" = "East of England",
+    "UKI" = "London",
+    "UKJ" = "South East England",
+    "UKK" = "South West England",
+    "UKL" = "Wales",
+    "UKM" = "Scotland",
+    "UKN" = "Northern Ireland"
+  )
+
   # Use existing country_name if available (e.g., for regions), otherwise use countrycode
   if (!"country_name" %in% names(avstrax) || all(is.na(avstrax$country_name))) {
-    avstrax$country_name <- countrycode(avstrax$ctry_code, origin = "iso2c", destination = "country.name.en")
+    # First check if codes are UK region codes
+    is_uk_region <- avstrax$ctry_code %in% names(uk_regions_names)
+    # Try to convert using countrycode (works for ISO2 country codes)
+    converted_names <- countrycode(avstrax$ctry_code, origin = "iso2c", destination = "country.name.en", warn = FALSE)
+    # Use UK region names for UK codes, countrycode for countries, fallback to code for unknown
+    avstrax$country_name <- ifelse(
+      is_uk_region,
+      uk_regions_names[avstrax$ctry_code],
+      ifelse(is.na(converted_names), avstrax$ctry_code, converted_names)
+    )
   }
 
   if (has_comparison) {
     if (!"country_name" %in% names(avstrax_comp) || all(is.na(avstrax_comp$country_name))) {
-      avstrax_comp$country_name <- countrycode(avstrax_comp$ctry_code, origin = "iso2c", destination = "country.name.en")
+      is_uk_region_comp <- avstrax_comp$ctry_code %in% names(uk_regions_names)
+      converted_names <- countrycode(avstrax_comp$ctry_code, origin = "iso2c", destination = "country.name.en", warn = FALSE)
+      avstrax_comp$country_name <- ifelse(
+        is_uk_region_comp,
+        uk_regions_names[avstrax_comp$ctry_code],
+        ifelse(is.na(converted_names), avstrax_comp$ctry_code, converted_names)
+      )
     }
   }
 
@@ -1035,9 +1066,34 @@ plot_avstrax_rta <- function(pdata, classes,
 
   if (length(innos) == 0) innos <- 0
 
+  # UK NUTS1 region names mapping (for UK region explorer)
+  uk_regions_names <- c(
+    "UKC" = "North East England",
+    "UKD" = "North West England",
+    "UKE" = "Yorkshire and The Humber",
+    "UKF" = "East Midlands",
+    "UKG" = "West Midlands",
+    "UKH" = "East of England",
+    "UKI" = "London",
+    "UKJ" = "South East England",
+    "UKK" = "South West England",
+    "UKL" = "Wales",
+    "UKM" = "Scotland",
+    "UKN" = "Northern Ireland"
+  )
+
   # Use existing country_name if available (e.g., for regions), otherwise use countrycode
   if (!"country_name" %in% names(avstrax) || all(is.na(avstrax$country_name))) {
-    avstrax$country_name <- countrycode(avstrax$ctry_code, origin = "iso2c", destination = "country.name.en")
+    # First check if codes are UK region codes
+    is_uk_region <- avstrax$ctry_code %in% names(uk_regions_names)
+    # Try to convert using countrycode (works for ISO2 country codes)
+    converted_names <- countrycode(avstrax$ctry_code, origin = "iso2c", destination = "country.name.en", warn = FALSE)
+    # Use UK region names for UK codes, countrycode for countries, fallback to code for unknown
+    avstrax$country_name <- ifelse(
+      is_uk_region,
+      uk_regions_names[avstrax$ctry_code],
+      ifelse(is.na(converted_names), avstrax$ctry_code, converted_names)
+    )
   }
 
   # Filter by minimum innovations and valid RTA
@@ -1166,6 +1222,185 @@ plot_avstrax_rta <- function(pdata, classes,
 }
 
 
+#' Plot scatter plot of RTA vs Returns
+#' @param avstrax_data Data frame with ctry_code, RTA, mean, and innos columns
+#' @param mininno Minimum innovation count threshold
+#' @param bwidthscale "log" or "proportional" for dot size scaling
+#' @param width_svg SVG width in inches
+#' @param height_svg SVG height in inches
+#' @param plot_title Title for the plot
+#' @param x_label Label for x-axis
+#' @param y_label Label for y-axis
+#' @return A girafe object
+plot_rta_returns_scatter <- function(avstrax_data,
+                                      mininno = 5,
+                                      bwidthscale = "log",
+                                      width_svg = 8,
+                                      height_svg = 6,
+                                      plot_title = "RTA vs Returns",
+                                      x_label = "RTA",
+                                      y_label = "Return (%)") {
+
+  library(dplyr)
+  library(ggplot2)
+  library(ggiraph)
+  library(countrycode)
+
+  # Check if required columns exist
+  if (!"RTA" %in% names(avstrax_data) || !"mean" %in% names(avstrax_data)) {
+    p <- ggplot() +
+      annotate("text", x = 0.5, y = 0.5, label = "RTA or Returns data not available", size = 6) +
+      theme_void()
+    return(girafe(ggobj = p,
+                  width_svg = width_svg,
+                  height_svg = height_svg,
+                  options = list(opts_sizing(rescale = TRUE, width = 1))))
+  }
+
+  # UK NUTS1 region names mapping (for UK region explorer)
+  uk_regions_names <- c(
+    "UKC" = "North East England",
+    "UKD" = "North West England",
+    "UKE" = "Yorkshire and The Humber",
+    "UKF" = "East Midlands",
+    "UKG" = "West Midlands",
+    "UKH" = "East of England",
+    "UKI" = "London",
+    "UKJ" = "South East England",
+    "UKK" = "South West England",
+    "UKL" = "Wales",
+    "UKM" = "Scotland",
+    "UKN" = "Northern Ireland"
+  )
+
+  # Add country names if not present
+  if (!"country_name" %in% names(avstrax_data) || all(is.na(avstrax_data$country_name))) {
+    is_uk_region <- avstrax_data$ctry_code %in% names(uk_regions_names)
+    converted_names <- countrycode(avstrax_data$ctry_code, origin = "iso2c", destination = "country.name.en", warn = FALSE)
+    avstrax_data$country_name <- ifelse(
+      is_uk_region,
+      uk_regions_names[avstrax_data$ctry_code],
+      ifelse(is.na(converted_names), avstrax_data$ctry_code, converted_names)
+    )
+  }
+
+
+  # Get the average return value from the "All" row (same as displayed in bar chart)
+  all_mean <- avstrax_data %>%
+    filter(ctry_code == "All") %>%
+    pull(mean)
+  if (length(all_mean) == 0 || is.na(all_mean)) all_mean <- NULL
+
+  # Filter data
+  scatter_data <- avstrax_data %>%
+    filter(ctry_code != "All", innos >= mininno, !is.na(RTA), !is.na(mean))
+
+  # Check if we have data to plot
+  if (nrow(scatter_data) == 0) {
+    p <- ggplot() +
+      annotate("text", x = 0.5, y = 0.5, label = "No data available for selected filters", size = 6) +
+      theme_void()
+    return(girafe(ggobj = p,
+                  width_svg = width_svg,
+                  height_svg = height_svg,
+                  options = list(opts_sizing(rescale = TRUE, width = 1))))
+  }
+
+  # Calculate dot sizes based on innovation count
+  if (bwidthscale == "log") {
+    scatter_data$size_raw <- log(1 + scatter_data$innos)
+  } else {
+    scatter_data$size_raw <- scatter_data$innos
+  }
+
+  # Normalize sizes for plotting (scale to reasonable range)
+  max_size <- max(scatter_data$size_raw, na.rm = TRUE)
+  min_size <- min(scatter_data$size_raw, na.rm = TRUE)
+  if (max_size > min_size) {
+    scatter_data$size_scaled <- 3 + 12 * (scatter_data$size_raw - min_size) / (max_size - min_size)
+  } else {
+    scatter_data$size_scaled <- 7
+  }
+
+  # Create tooltip text
+  scatter_data$tooltip_text <- paste0(
+    "<b>", scatter_data$country_name, "</b><br>",
+    "RTA: ", round(scatter_data$RTA, 2), "<br>",
+    "Return: ", round(scatter_data$mean, 1), "%<br>",
+    "Innovations: ", scales::comma(scatter_data$innos)
+  )
+
+  # Color based on RTA (blue for low, red for high)
+  # Create the scatter plot
+  p <- ggplot(scatter_data, aes(x = RTA, y = mean)) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "gray50", linewidth = 0.8) +
+    geom_point_interactive(
+      aes(
+        size = size_scaled,
+        fill = RTA,
+        tooltip = tooltip_text,
+        data_id = ctry_code
+      ),
+      shape = 21,
+      color = "white",
+      stroke = 0.5,
+      alpha = 0.8
+    ) +
+    scale_fill_gradient2(
+      low = "#08306B",      # Dark blue for low RTA
+      mid = "#FFFFFF",      # White for RTA = 1
+      high = "#B2182B",     # Dark red for high RTA
+      midpoint = 1,
+      name = "RTA"
+    ) +
+    scale_size_identity() +
+    labs(
+      title = plot_title,
+      x = x_label,
+      y = y_label
+    ) +
+    theme_minimal(base_family = "Open Sans") +
+    theme(
+      axis.title.x = element_text(size = 14),
+      axis.title.y = element_text(size = 14),
+      axis.text.x = element_text(size = 12),
+      axis.text.y = element_text(size = 12),
+      text = element_text(family = "Open Sans"),
+      legend.position = "right",
+      legend.title = element_text(size = 11),
+      legend.text = element_text(size = 10),
+      plot.title = element_text(size = 14, hjust = 0.5)
+    ) +
+    annotate("text", x = 1, y = max(scatter_data$mean, na.rm = TRUE) * 0.95,
+             label = "RTA = 1", hjust = -0.1, size = 3.5,
+             family = "Open Sans", color = "gray40")
+
+  # Add horizontal dashed line for average return (from "All" row)
+  if (!is.null(all_mean)) {
+    p <- p +
+      geom_hline(yintercept = all_mean, linetype = "dashed", color = "#3498db", linewidth = 0.8) +
+      annotate("text", x = max(scatter_data$RTA, na.rm = TRUE) * 0.95, y = all_mean,
+               label = paste0("Avg: ", round(all_mean, 1), "%"), vjust = -0.5, size = 3.5,
+               family = "Open Sans", color = "#3498db")
+  }
+
+  # Add caption
+  p <- p + labs(caption = "© 2025 Innovation Strategy Explorer") +
+    theme(plot.caption = element_text(hjust = 1, size = 9, color = "gray"))
+
+  # Return girafe object
+  return(girafe(ggobj = p,
+                width_svg = width_svg,
+                height_svg = height_svg,
+                options = list(
+                  opts_sizing(rescale = TRUE, width = 1),
+                  opts_hover(css = "cursor:pointer;opacity:1;"),
+                  opts_selection(type = "none"),
+                  opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;font-size:12px;")
+                )))
+}
+
+
 # ============================================
 # Map Plotting Functions
 # ============================================
@@ -1212,9 +1447,19 @@ plot_world_map <- function(avstrax_data,
 
   # Use the explicit is_return parameter for determining format
   is_percentage <- is_return
+  is_rta <- value_col == "RTA"
 
   # Create hover text - use if/else for scalar condition to avoid ifelse recycling issue
-  if (is_percentage) {
+  if (is_rta) {
+    map_data <- map_data %>%
+      mutate(
+        hover_text = paste0(
+          "<b>", country_name, "</b><br>",
+          "RTA: ", round(value, 2), "<br>",
+          "Innovations: ", scales::comma(innos)
+        )
+      )
+  } else if (is_percentage) {
     map_data <- map_data %>%
       mutate(
         hover_text = paste0(
@@ -1234,6 +1479,44 @@ plot_world_map <- function(avstrax_data,
       )
   }
 
+  # Determine colorbar title and suffix based on value type
+  if (is_rta) {
+    colorbar_title <- "RTA"
+    colorbar_suffix <- ""
+    # Diverging color scale for RTA: dark blue (low) -> light blue -> white (1.0) -> light red -> dark red (high)
+    # Create custom colorscale centered at RTA = 1
+    rta_min <- min(map_data$value, na.rm = TRUE)
+    rta_max <- max(map_data$value, na.rm = TRUE)
+
+    # Normalize so that 1.0 maps to the midpoint (0.5 in colorscale)
+    # colorscale values must be between 0 and 1
+    if (rta_max > rta_min) {
+      # Calculate where 1.0 falls in the normalized scale
+      mid_point <- (1.0 - rta_min) / (rta_max - rta_min)
+      mid_point <- max(0.01, min(0.99, mid_point))  # Clamp to valid range
+    } else {
+      mid_point <- 0.5
+    }
+
+    # Custom diverging colorscale: blue -> white -> red
+    rta_colorscale <- list(
+      list(0, "rgb(8, 48, 107)"),       # Dark blue
+      list(mid_point * 0.5, "rgb(66, 146, 198)"),  # Medium blue
+      list(mid_point, "rgb(255, 255, 255)"),       # White at RTA = 1
+      list(mid_point + (1 - mid_point) * 0.5, "rgb(239, 138, 98)"),  # Medium red
+      list(1, "rgb(178, 24, 43)")        # Dark red
+    )
+    use_colorscale <- rta_colorscale
+  } else if (is_percentage) {
+    colorbar_title <- "Return (%)"
+    colorbar_suffix <- "%"
+    use_colorscale <- color_scale
+  } else {
+    colorbar_title <- "Value ($M)"
+    colorbar_suffix <- ""
+    use_colorscale <- color_scale
+  }
+
   # Create choropleth
   p <- plotly::plot_ly(
     data = map_data,
@@ -1242,12 +1525,12 @@ plot_world_map <- function(avstrax_data,
     z = ~value,
     text = ~hover_text,
     hoverinfo = "text",
-    colorscale = color_scale,
+    colorscale = use_colorscale,
     reversescale = FALSE,
     marker = list(line = list(color = "white", width = 0.5)),
     colorbar = list(
-      title = list(text = ifelse(is_percentage, "Return (%)", "Value ($M)")),
-      ticksuffix = ifelse(is_percentage, "%", "")
+      title = list(text = colorbar_title),
+      ticksuffix = colorbar_suffix
     )
   ) %>%
     plotly::layout(
@@ -1407,16 +1690,44 @@ plot_uk_regions_map <- function(avstrax_data,
     )
   }
 
+  # Check if value column exists
+  if (!value_col %in% names(avstrax_data)) {
+    return(
+      leaflet() %>%
+        addTiles() %>%
+        setView(lng = -2.5, lat = 54.5, zoom = 5) %>%
+        addControl(
+          html = paste0("<div style='padding: 10px; background: white;'>Column '", value_col, "' not found in data</div>"),
+          position = "topright"
+        )
+    )
+  }
+
   # Filter out "All" and prepare data
   map_data <- avstrax_data %>%
     filter(ctry_code != "All", ctry_code %in% names(uk_regions_names)) %>%
     mutate(
       region_name = uk_regions_names[ctry_code],
       value = !!sym(value_col)
+    ) %>%
+    filter(!is.na(value))  # Remove rows with NA values
+
+  # Handle empty data after filtering
+  if (nrow(map_data) == 0) {
+    return(
+      leaflet() %>%
+        addTiles() %>%
+        setView(lng = -2.5, lat = 54.5, zoom = 5) %>%
+        addControl(
+          html = "<div style='padding: 10px; background: white;'>No valid data available for UK regions</div>",
+          position = "topright"
+        )
     )
+  }
 
   # Use the explicit is_return parameter for determining format
   is_percentage <- is_return
+  is_rta <- value_col == "RTA"
 
   # Join data to spatial features
   # First, identify the NUTS code column in the sf object
@@ -1447,11 +1758,33 @@ plot_uk_regions_map <- function(avstrax_data,
 
   # Create color palette
   if (nrow(map_data) > 0) {
-    pal <- colorNumeric(
-      palette = "viridis",
-      domain = map_data$value,
-      na.color = "#E0E0E0"  # Light gray for regions without data
-    )
+    if (is_rta) {
+      # Diverging palette for RTA: blue (low) -> white (1.0) -> red (high)
+      rta_min <- min(map_data$value, na.rm = TRUE)
+      rta_max <- max(map_data$value, na.rm = TRUE)
+
+      # Create a custom diverging palette centered at 1.0
+      # Use colorRamp to create a smooth gradient
+      rta_colors <- c("#08306B", "#4292C6", "#FFFFFF", "#EF8A62", "#B2182B")
+
+      # Calculate domain to center white at RTA = 1
+      # Extend domain symmetrically around 1 if needed
+      max_deviation <- max(abs(rta_max - 1), abs(1 - rta_min))
+      sym_min <- 1 - max_deviation
+      sym_max <- 1 + max_deviation
+
+      pal <- colorNumeric(
+        palette = rta_colors,
+        domain = c(sym_min, sym_max),
+        na.color = "#E0E0E0"
+      )
+    } else {
+      pal <- colorNumeric(
+        palette = "viridis",
+        domain = map_data$value,
+        na.color = "#E0E0E0"  # Light gray for regions without data
+      )
+    }
   } else {
     pal <- function(x) "#E0E0E0"
   }
@@ -1465,7 +1798,21 @@ plot_uk_regions_map <- function(avstrax_data,
     )
 
   # Format value labels based on is_percentage - use if/else for scalar condition
-  if (is_percentage) {
+  if (is_rta) {
+    uk_sf <- uk_sf %>%
+      mutate(
+        value_formatted = paste0("RTA: ", round(value, 2)),
+        label_text = ifelse(
+          !is.na(value),
+          paste0(
+            "<strong>", display_name, "</strong><br/>",
+            value_formatted, "<br/>",
+            "Innovations: ", scales::comma(innos)
+          ),
+          paste0("<strong>", display_name, "</strong><br/>No data")
+        )
+      )
+  } else if (is_percentage) {
     uk_sf <- uk_sf %>%
       mutate(
         value_formatted = paste0(round(value, 1), "%"),
@@ -1527,23 +1874,44 @@ plot_uk_regions_map <- function(avstrax_data,
     # Get the value range
     val_range <- range(map_data$value, na.rm = TRUE)
 
-    # Create a reversed palette for the legend (high values on top)
-    # We reverse the domain so colors map correctly when legend is drawn top-to-bottom
-    pal_legend <- colorNumeric(
-      palette = "viridis",
-      domain = c(val_range[2], val_range[1]),  # Reversed domain
-      na.color = "#E0E0E0"
-    )
+    if (is_rta) {
+      # For RTA, use symmetric domain centered at 1.0
+      max_deviation <- max(abs(val_range[2] - 1), abs(1 - val_range[1]))
+      sym_min <- 1 - max_deviation
+      sym_max <- 1 + max_deviation
 
-    map <- map %>%
-      addLegend(
-        position = "bottomright",
-        colors = pal(seq(val_range[2], val_range[1], length.out = 5)),  # High to low colors
-        labels = round(seq(val_range[2], val_range[1], length.out = 5), 1),  # High to low labels
-        title = ifelse(is_percentage, "Return (%)", "Value ($M)"),
-        opacity = 0.7,
-        na.label = "No data"
+      # Create legend with diverging colors (high to low)
+      legend_values <- seq(sym_max, sym_min, length.out = 5)
+      legend_colors <- pal(legend_values)
+
+      map <- map %>%
+        addLegend(
+          position = "bottomright",
+          colors = legend_colors,
+          labels = round(legend_values, 2),
+          title = "RTA",
+          opacity = 0.7,
+          na.label = "No data"
+        )
+    } else {
+      # Create a reversed palette for the legend (high values on top)
+      # We reverse the domain so colors map correctly when legend is drawn top-to-bottom
+      pal_legend <- colorNumeric(
+        palette = "viridis",
+        domain = c(val_range[2], val_range[1]),  # Reversed domain
+        na.color = "#E0E0E0"
       )
+
+      map <- map %>%
+        addLegend(
+          position = "bottomright",
+          colors = pal(seq(val_range[2], val_range[1], length.out = 5)),  # High to low colors
+          labels = round(seq(val_range[2], val_range[1], length.out = 5), 1),  # High to low labels
+          title = ifelse(is_percentage, "Return (%)", "Value ($M)"),
+          opacity = 0.7,
+          na.label = "No data"
+        )
+    }
   }
 
   # Add title
