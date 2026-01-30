@@ -4,6 +4,7 @@ library(tidyr)
 library(ggiraph)
 library(scales)
 library(fst)
+library(collapse)  # For fast grouped operations (fgroup_by, fsummarize, etc.)
 
 
 # ============================================
@@ -168,29 +169,24 @@ win_thres=0.01
 ### functions
 
 #### agregate the data...
-compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_classes, battery_classes = NULL,hard_to_abate_classes=NULL,
-                            ) {
+compute_avstrax <- function(data, istrax_var, classes, colorings=NULL) {
+  # Use collapse for fast aggregation, but keep dplyr for data manipulation
+  library(collapse)
   library(dplyr)
 
-
-
-  #data=filtered; istrax_var="istrax_global"
   istrax_sym <- rlang::sym(istrax_var)
 
   # Check if the required column exists in the data
-
   if (!istrax_var %in% names(data)) {
-    # Try to find similar column names for better error message
     similar_cols <- grep("strax|^ev_", names(data), value = TRUE)
     stop(paste0("Column '", istrax_var, "' not found in data. ",
                 "Available similar columns: ", paste(similar_cols, collapse = ", "),
                 ". All columns: ", paste(head(names(data), 20), collapse = ", ")))
   }
 
-  scaler=ifelse(grepl("strax", istrax_var ),100,1)
+  scaler <- ifelse(grepl("strax", istrax_var), 100, 1)
 
   # Filter out "All" from classes since we add it separately below
-  # This prevents double-counting when techmap already has "All" rows
   classes_filtered <- classes %>% filter(technology != "All")
 
   avstrax <- data %>%
@@ -205,55 +201,61 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
         distinct() %>%
         mutate(technology = "All")
     ) %>%
-    distinct() %>%
-    group_by(technology) %>% arrange(technology,-istrax*scaler) %>%
-    mutate(ppp=(1:n())/n()) %>%
-    mutate(top25=ppp<0.25,
-           top50=ppp<0.5,
-           q1=quantile(istrax*scaler, 0.25, na.rm = TRUE),
-           q2=quantile(istrax*scaler, 0.5, na.rm = TRUE),
-           q3=quantile(istrax*scaler, 0.75, na.rm = TRUE)
-  ) %>%
-  summarise(
-    mean = mean(istrax*scaler, na.rm = TRUE),
-    innos = n(),
-    sem = sd(istrax*scaler, na.rm = TRUE) / sqrt(n()),
-    # Quartile bin means: mean of observations within each quartile bin
+    distinct()
 
-    #q1_bin_mean = mean(scaler*istrax[scaler*istrax <= q1], na.rm = TRUE),
-    #q2_bin_mean = mean(scaler*istrax[scaler*istrax <= q2 & scaler*istrax>=q1], na.rm = TRUE),
-    #q3_bin_mean = mean(scaler*istrax[scaler*istrax <= q3 & scaler*istrax>=q2], na.rm = TRUE),
-    #q4_bin_mean = mean(scaler*istrax[scaler*istrax > q3], na.rm = TRUE),
+  # Pre-compute scaled istrax
+  avstrax$istrax_scaled <- avstrax$istrax * scaler
 
-    #q0M_bin_mean= mean(scaler*istrax[(scaler*istrax) <= q2], na.rm = TRUE),
-    #q1M_bin_mean= mean(scaler*istrax[(scaler*istrax) > q2], na.rm = TRUE),
+  # Use collapse for fast grouped aggregation
+  result <- avstrax %>%
+    fgroup_by(technology) %>%
+    fsummarize(
+      mean = fmean(istrax_scaled, na.rm = TRUE),
+      innos = fnobs(istrax_scaled),
+      sd_val = fsd(istrax_scaled, na.rm = TRUE),
+      q1 = fquantile(istrax_scaled, 0.25, na.rm = TRUE),
+      q2 = fquantile(istrax_scaled, 0.5, na.rm = TRUE),
+      q3 = fquantile(istrax_scaled, 0.75, na.rm = TRUE)
+    ) %>%
+    fungroup() %>%
+    as.data.frame()
 
-    top25_bin_mean= mean(scaler*istrax[top25==T], na.rm = TRUE),
-    top50_bin_mean= mean(scaler*istrax[top50==T], na.rm = TRUE),
+  # Calculate sem
+  result$sem <- result$sd_val / sqrt(result$innos)
+  result$sd_val <- NULL
 
-    # Top appln_id values (highest istrax) as comma-separated string
-    top3_ids = paste(head(appln_id[order(-istrax*scaler)], 10), collapse = ", "),
-
-    across(c(q1,q2,q3,top25,top50),mean),
+  # Compute top25/top50 bin means and top3_ids per group using dplyr
+  extras <- avstrax %>%
+    group_by(technology) %>%
+    arrange(technology, -istrax_scaled) %>%
+    mutate(ppp = (1:n()) / n()) %>%
+    summarise(
+      top25_bin_mean = mean(istrax_scaled[ppp < 0.25], na.rm = TRUE),
+      top50_bin_mean = mean(istrax_scaled[ppp < 0.5], na.rm = TRUE),
+      top3_ids = paste(head(appln_id[order(-istrax_scaled)], 10), collapse = ", "),
       .groups = "drop"
     ) %>%
-    mutate(
-      # Create Espacenet search URL for top 3 IDs (use double quotes for JS to avoid HTML attribute conflicts)
-      top3_ids_url = build_espacenet_search(top3_ids),
-      greenclass = ifelse(technology %in% unlist(colorings["green"]), "green",
-                          ifelse( technology %in% unlist(colorings["battery"]), "battery",
-                                  ifelse( technology %in% unlist(colorings["hard_to_abate"]), "hard to abate",
-                                          ifelse( technology %in% unlist(colorings["ai"]), "AI",
-                                                  ifelse( technology %in% unlist(colorings["cpcsecs"]), "CPC Sections",
-                                                          ifelse( technology %in% unlist(colorings["agrifood"]), "agrifood", "other")
-                                                        )
-                                                )
-                                        )
-                                )
-                          )
-      )
- 
-  return(avstrax)
+    as.data.frame()
+
+  # Merge extras with result
+  result <- left_join(result, extras, by = "technology")
+
+  # Add compatibility columns
+  result$top25 <- 0.25
+  result$top50 <- 0.5
+
+  # Create Espacenet search URL
+  result$top3_ids_url <- build_espacenet_search(result$top3_ids)
+
+  # Add greenclass categorization
+  result$greenclass <- ifelse(result$technology %in% unlist(colorings["green"]), "green",
+                       ifelse(result$technology %in% unlist(colorings["battery"]), "battery",
+                       ifelse(result$technology %in% unlist(colorings["hard_to_abate"]), "hard to abate",
+                       ifelse(result$technology %in% unlist(colorings["ai"]), "AI",
+                       ifelse(result$technology %in% unlist(colorings["cpcsecs"]), "CPC Sections",
+                       ifelse(result$technology %in% unlist(colorings["agrifood"]), "agrifood", "other"))))))
+
+  return(result)
 }
 
 
@@ -464,42 +466,42 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
                                       ) {
   #data=patchar_countrymap;istrax_var="istrax_global"; classes=filtered; green_classes=green_classes;classes=data.frame()
 
-
+  # Use collapse for fast aggregation, but keep dplyr for data manipulation
+  library(collapse)
   library(dplyr)
-
 
   istrax_sym <- rlang::sym(istrax_var)
 
   # Check if the required column exists in the data
   if (!istrax_var %in% names(data)) {
-    # Try to find similar column names for better error message
     similar_cols <- grep("strax|^ev_", names(data), value = TRUE)
     stop(paste0("Column '", istrax_var, "' not found in data. ",
                 "Available similar columns: ", paste(similar_cols, collapse = ", "),
                 ". All columns: ", paste(head(names(data), 20), collapse = ", ")))
   }
 
-  scaler=ifelse(grepl("strax", istrax_var ),100,1)
-  
-  # If not filter classes are selected we take all
-  if(nrow(classes)==0){
-     filtereddata=data  
-     #print("aaaaa")
+  scaler <- ifelse(grepl("strax", istrax_var), 100, 1)
+
+  # If no filter classes are selected we take all
+ if(nrow(classes)==0){
+     filtereddata=data
   }  else {
-    #print("bbbbb")
-    filtereddata=data %>% inner_join(classes %>% select(docdb_family_id)%>% distinct())
+    filtereddata <- data %>%
+      inner_join(classes %>% select(docdb_family_id) %>% distinct(), by = "docdb_family_id")
   }
-  
-  counted=data %>% fgroup_by(ctry_code) %>% 
-    fsummarize(Allinnos=n()) %>% 
-    ungroup() %>% 
-    mutate(SumAllinnos=sum(Allinnos)) # We need for RTA
-  #counted=counted %>% bind_rows(data.frame(ctry_code="All",Allinnos=sum(counted$innos)))
-  
-  #scaler=ifelse()
+
+  # Fast count of distinct innovations by country using collapse
+  counted <- data %>%
+    fgroup_by(ctry_code) %>%
+    fsummarize(Allinnos = fndistinct(docdb_family_id)) %>%
+    fungroup() %>%
+    as.data.frame()
+  counted$SumAllinnos <- fndistinct(data$docdb_family_id)  # Total distinct innovations across all countries
+
   # Include country_name if it exists (for regions)
   has_country_name <- "country_name" %in% names(filtereddata)
 
+  # Build avstrax using dplyr for reliable data manipulation
   if (has_country_name) {
     avstrax <- filtereddata %>%
       select(docdb_family_id, appln_id, !!istrax_sym, ctry_code, country_name) %>%
@@ -511,7 +513,8 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
           rename(istrax = !!istrax_sym) %>%
           distinct() %>%
           mutate(ctry_code = "All", country_name = "All")
-      )
+      ) %>%
+      distinct()
   } else {
     avstrax <- filtereddata %>%
       select(docdb_family_id, appln_id, !!istrax_sym, ctry_code) %>%
@@ -523,53 +526,94 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
           rename(istrax = !!istrax_sym) %>%
           distinct() %>%
           mutate(ctry_code = "All")
-      )
+      ) %>%
+      distinct()
   }
- 
-  
-  # Group by ctry_code (and country_name if it exists)
+
+  # Pre-compute scaled istrax
+  avstrax$istrax_scaled <- avstrax$istrax * scaler
+
+  # Use collapse for fast grouped aggregation
   if (has_country_name) {
-    avstrax <- avstrax %>%
-      distinct() %>%
-      group_by(ctry_code, country_name) %>%
-      arrange(ctry_code,-istrax*scaler)
+    result <- avstrax %>%
+      fgroup_by(ctry_code, country_name) %>%
+      fsummarize(
+        mean = fmean(istrax_scaled, na.rm = TRUE),
+        innos = fnobs(istrax_scaled),
+        sd_val = fsd(istrax_scaled, na.rm = TRUE),
+        q1 = fquantile(istrax_scaled, 0.25, na.rm = TRUE),
+        q2 = fquantile(istrax_scaled, 0.5, na.rm = TRUE),
+        q3 = fquantile(istrax_scaled, 0.75, na.rm = TRUE)
+      ) %>%
+      fungroup() %>%
+      as.data.frame()
   } else {
-    avstrax <- avstrax %>%
-      distinct() %>%
-      group_by(ctry_code) %>%
-      arrange(ctry_code,-istrax*scaler)
+    result <- avstrax %>%
+      fgroup_by(ctry_code) %>%
+      fsummarize(
+        mean = fmean(istrax_scaled, na.rm = TRUE),
+        innos = fnobs(istrax_scaled),
+        sd_val = fsd(istrax_scaled, na.rm = TRUE),
+        q1 = fquantile(istrax_scaled, 0.25, na.rm = TRUE),
+        q2 = fquantile(istrax_scaled, 0.5, na.rm = TRUE),
+        q3 = fquantile(istrax_scaled, 0.75, na.rm = TRUE)
+      ) %>%
+      fungroup() %>%
+      as.data.frame()
   }
 
-  avstrax <- avstrax %>%
-    mutate(ppp=(1:n())/n()) %>%
-    mutate(q1=quantile(istrax*scaler, 0.25, na.rm = TRUE),
-           q2=quantile(istrax*scaler, 0.5, na.rm = TRUE),
-           q3=quantile(istrax*scaler, 0.75, na.rm = TRUE),
-           top25=ppp<0.25,
-           top50=ppp<0.5
-    ) %>%
-    summarise(
-      mean = mean(istrax*scaler, na.rm = TRUE),
-      innos = n(),
-      sem = sd(istrax*scaler, na.rm = TRUE) / sqrt(n()),
+  # Calculate sem from sd and n
+  result$sem <- result$sd_val / sqrt(result$innos)
+  result$sd_val <- NULL
 
-      top25_bin_mean= mean(scaler*istrax[top25==T], na.rm = TRUE),
-      top50_bin_mean= mean(scaler*istrax[top50==T], na.rm = TRUE),
+  # Compute top25/top50 bin means and top3_ids per group using dplyr
+  if (has_country_name) {
+    extras <- avstrax %>%
+      group_by(ctry_code, country_name) %>%
+      arrange(ctry_code, country_name, -istrax_scaled) %>%
+      mutate(ppp = (1:n()) / n()) %>%
+      summarise(
+        top25_bin_mean = mean(istrax_scaled[ppp < 0.25], na.rm = TRUE),
+        top50_bin_mean = mean(istrax_scaled[ppp < 0.5], na.rm = TRUE),
+        top3_ids = paste(head(appln_id[order(-istrax_scaled)], 10), collapse = ", "),
+        .groups = "drop"
+      ) %>%
+      as.data.frame()
 
-      # Top appln_id values (highest istrax) as comma-separated string
-      top3_ids = paste(head(appln_id[order(-istrax*scaler)],10), collapse = ", "),
+    result <- left_join(result, extras, by = c("ctry_code", "country_name"))
+  } else {
+    extras <- avstrax %>%
+      group_by(ctry_code) %>%
+      arrange(ctry_code, -istrax_scaled) %>%
+      mutate(ppp = (1:n()) / n()) %>%
+      summarise(
+        top25_bin_mean = mean(istrax_scaled[ppp < 0.25], na.rm = TRUE),
+        top50_bin_mean = mean(istrax_scaled[ppp < 0.5], na.rm = TRUE),
+        top3_ids = paste(head(appln_id[order(-istrax_scaled)], 10), collapse = ", "),
+        .groups = "drop"
+      ) %>%
+      as.data.frame()
 
-      across(c(q1,q2,q3,top25,top50),mean),
-      .groups = "drop"
-    ) %>%
-    mutate(
-      # Create Espacenet search URL for top 3 IDs (use double quotes for JS to avoid HTML attribute conflicts)
-      top3_ids_url = build_espacenet_search(top3_ids)
-    ) %>% 
-    left_join(counted) %>% 
-    mutate(share_c=innos/Allinnos,share=sum(innos)/SumAllinnos,RTA=2*share_c/(share_c+share))
+    result <- left_join(result, extras, by = "ctry_code")
+  }
 
-  return(avstrax)
+  # Add top25/top50 mean columns (kept for compatibility)
+  result$top25 <- 0.25
+  result$top50 <- 0.5
+
+  # Create Espacenet search URL
+  result$top3_ids_url <- build_espacenet_search(result$top3_ids)
+
+  # Join with counted for RTA calculation
+  result <- left_join(result, counted, by = "ctry_code")
+
+  # Calculate RTA
+  total_innos <- fndistinct(filtereddata$docdb_family_id)  # Distinct innovations in filtered data
+  result$share_c <- result$innos / result$Allinnos
+  result$share <- total_innos / result$SumAllinnos[1]
+  result$RTA <-   2*result$share_c / (result$share_c + result$share)
+
+  return(result)
 }
 
 
@@ -918,6 +962,207 @@ build_espacenet_search <- function(id_strings) {
     paste0('window.open("https://worldwide.espacenet.com/patent/search?q=',
            utils::URLencode(query, reserved = TRUE), '")')
   })
+}
+
+
+#' Plot RTA (Revealed Technological Advantage) by country/region
+#' Similar to plot_avstrax_by_technology but plots the RTA variable instead of mean
+#' @param pdata Patent data with country codes
+#' @param classes Technology class mapping
+#' @param technologies Selected technology categories
+#' @param toflow The return flow variable name
+#' @param custom_colors Custom colors for the plot
+#' @param topn Number of top countries to show (highest RTA)
+#' @param bottomn Number of bottom countries to show (lowest RTA)
+#' @param mininno Minimum innovation count threshold
+#' @param bwidthscale "log" or "proportional" for bar width scaling
+#' @param show_top3_ids Whether to show interactive top patent IDs
+#' @param width_svg SVG width in inches
+#' @param height_svg SVG height in inches
+#' @param plot_title Title for the plot
+#' @param x_label Label for x-axis (Country or Region)
+#' @param precomputed_avstrax Pre-computed avstrax data (optional)
+#' @return A girafe object
+plot_avstrax_rta <- function(pdata, classes,
+                             technologies, toflow, custom_colors, topn = 20, bottomn = 0, mininno = 5, bwidthscale = "log",
+                             show_top3_ids = FALSE,
+                             width_svg = 10,
+                             height_svg = 6,
+                             plot_title = "Revealed Technological Advantage (RTA)",
+                             x_label = "Country",
+                             precomputed_avstrax = NULL) {
+
+  library(dplyr)
+
+  library(ggplot2)
+  library(patchwork)
+  library(countrycode)
+
+  # Use pre-computed data if provided, otherwise compute
+  if (!is.null(precomputed_avstrax) && nrow(precomputed_avstrax) > 0) {
+    message("RTA plot using pre-computed avstrax data")
+    avstrax <- precomputed_avstrax
+  } else {
+    # Filter by technology class
+    filtered <- classes %>%
+      filter(technology %in% technologies) %>%
+      distinct()
+
+    if ("All Innovations" %in% technologies) filtered <- data.frame()
+
+    # Compute avstrax for technologies
+    avstrax <- compute_avstrax_for_techs(pdata, toflow, filtered)
+  }
+
+  # Check if RTA column exists
+  if (!"RTA" %in% names(avstrax)) {
+    p <- ggplot() +
+      annotate("text", x = 0.5, y = 0.5, label = "RTA data not available", size = 6) +
+      theme_void()
+    return(girafe(ggobj = p,
+                  width_svg = width_svg,
+                  height_svg = height_svg,
+                  options = list(opts_sizing(rescale = TRUE, width = 1))))
+  }
+
+  # Extract global average RTA (should be around 1.0 for balanced data)
+  # RTA = 1 means country has same specialization as global average
+  global_rta <- 1.0  # Reference line at RTA = 1
+
+  innos <- avstrax %>%
+    filter(ctry_code == "All") %>%
+    pull(innos)
+
+  if (length(innos) == 0) innos <- 0
+
+  # Use existing country_name if available (e.g., for regions), otherwise use countrycode
+  if (!"country_name" %in% names(avstrax) || all(is.na(avstrax$country_name))) {
+    avstrax$country_name <- countrycode(avstrax$ctry_code, origin = "iso2c", destination = "country.name.en")
+  }
+
+  # Filter by minimum innovations and valid RTA
+  avstrax_filtered <- avstrax %>%
+    filter(ctry_code != "All", innos >= mininno, !is.na(RTA))
+
+  # Get top n and bottom n countries by RTA
+  top_countries <- avstrax_filtered %>%
+    arrange(-RTA) %>%
+    head(topn)
+
+  if (bottomn > 0) {
+    bottom_countries <- avstrax_filtered %>%
+      arrange(RTA) %>%
+      head(bottomn)
+    # Combine top and bottom, removing duplicates
+    avstrax <- bind_rows(top_countries, bottom_countries) %>%
+      distinct(ctry_code, .keep_all = TRUE) %>%
+      arrange(-RTA)
+  } else {
+    avstrax <- top_countries
+  }
+
+  # Check if we have data to plot
+  if (nrow(avstrax) == 0) {
+    p <- ggplot() +
+      annotate("text", x = 0.5, y = 0.5, label = "No data available for selected filters", size = 6) +
+      theme_void()
+    return(girafe(ggobj = p,
+                  width_svg = width_svg,
+                  height_svg = height_svg,
+                  options = list(opts_sizing(rescale = TRUE, width = 1))))
+  }
+
+  # Set factor levels based on RTA ordering
+  country_order <- as.character(avstrax$country_name[order(avstrax$RTA)])
+  avstrax$country_name <- factor(as.character(avstrax$country_name), levels = country_order)
+  avstrax$x_pos <- as.numeric(avstrax$country_name)
+
+  # Compute bar widths (proportional to innovations)
+  if (bwidthscale == "log") {
+    avstrax$width_raw <- log(1 + avstrax$innos)
+  } else {
+    avstrax$width_raw <- avstrax$innos
+  }
+  max_width <- max(avstrax$width_raw)
+  avstrax$width <- avstrax$width_raw / max_width
+
+  # Single bar scaling
+  scale_factor <- 0.7
+  avstrax$width_scaled <- avstrax$width * scale_factor
+
+  avstrax <- avstrax %>%
+    mutate(
+      xmin = x_pos - width_scaled / 2,
+      xmax = x_pos + width_scaled / 2,
+      ymin = 0,
+      ymax = RTA
+    )
+
+  # Create value labels for tooltips
+  avstrax$value_label <- paste0("RTA: ", round(avstrax$RTA, 2))
+
+  # Color based on RTA value (above/below 1)
+  main_color <- "#e74c3c"  # Red for RTA plot to distinguish from mean plot
+
+  if (show_top3_ids) {
+    p <- ggplot() +
+      geom_rect_interactive(data = avstrax,
+                            aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
+                                data_id = country_name,
+                                tooltip = paste0(country_name, "\n", value_label,
+                                                 "\nInnovations: ", scales::comma(innos),
+                                                 "\nTop IDs: ", top3_ids),
+                                onclick = top3_ids_url),
+                            fill = main_color)
+  } else {
+    p <- ggplot() +
+      geom_rect(data = avstrax,
+                aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+                fill = main_color)
+  }
+
+  p <- p +
+    scale_x_continuous(breaks = avstrax$x_pos, labels = avstrax$country_name) +
+    labs(
+      title = plot_title,
+      x = x_label,
+      y = "RTA Index"
+    ) +
+    theme_minimal(base_family = "Open Sans") +
+    theme(
+      axis.title.x = element_text(size = 16),
+      axis.title.y = element_text(size = 16),
+      axis.text.x = element_text(size = 14),
+      axis.text.y = element_text(size = 14),
+      text = element_text(family = "Open Sans"),
+      axis.text = element_text(family = "Open Sans"),
+      axis.title = element_text(family = "Open Sans"),
+      legend.position = "none"
+    ) +
+    geom_hline(yintercept = global_rta, linetype = "dashed", color = "black", linewidth = 1) +
+    annotate("text", y = global_rta, x = max(avstrax$x_pos) - 0.6,
+             label = "RTA = 1", angle = -90, vjust = 1.5, size = 4,
+             family = "Open Sans", color = "black") +
+    coord_flip()
+
+  # Add subtitle and caption
+  subtitle_text <- paste0(as.character(innos), " Innovations | RTA > 1 = Specialization advantage")
+
+  p <- p + labs(subtitle = subtitle_text,
+                caption = "© 2025 Innovation Strategy Explorer") +
+    theme(plot.subtitle = element_text(size = 11, hjust = 0.5),
+          plot.caption = element_text(hjust = 1, size = 10, color = "gray"))
+
+  # Return girafe object
+  return(girafe(ggobj = p,
+                width_svg = width_svg,
+                height_svg = height_svg,
+                options = list(
+                  opts_sizing(rescale = TRUE, width = 1),
+                  opts_hover(css = "cursor:pointer;fill:yellow;"),
+                  opts_selection(type = "none"),
+                  opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
+                )))
 }
 
 

@@ -853,10 +853,47 @@ ui <- function(request){fluidPage(
           width = "350px"
         )
       ),
+      # Returns by Country plot and map
+      tags$h4("Returns by Country"),
       withSpinner(girafeOutput("avstrax_plot2", width = "100%", height = "auto"), type = 4, color = "#3498db"),
       tags$br(),
-      tags$h4("World Map View"),
-      withSpinner(plotlyOutput("world_map", width = "100%", height = "500px"), type = 4, color = "#3498db")
+      tags$h4("World Map: Returns"),
+      withSpinner(plotlyOutput("world_map", width = "100%", height = "500px"), type = 4, color = "#3498db"),
+      tags$br(),
+      tags$hr(),
+      # RTA section with separate controls
+      tags$h3("Revealed Technological Advantage (RTA)"),
+      inputPanel(
+        sliderInput(
+          inputId = "topn_rta",
+          label = "Show top n countries",
+          min = 1,
+          max = 200,
+          width = "350px",
+          value = 20
+        ),
+        sliderInput(
+          inputId = "bottomn_rta",
+          label = "Show bottom n countries",
+          min = 0,
+          max = 200,
+          width = "350px",
+          value = 0
+        ),
+        sliderInput(
+          inputId = "mininno_rta",
+          label = "Innovation count threshold:",
+          min = 1,
+          max = 500,
+          value = 100,
+          width = "350px"
+        )
+      ),
+      tags$h4("RTA by Country"),
+      withSpinner(girafeOutput("avstrax_plot2_rta", width = "100%", height = "auto"), type = 4, color = "#e74c3c"),
+      tags$br(),
+      tags$h4("World Map: RTA"),
+      withSpinner(plotlyOutput("world_map_rta", width = "100%", height = "500px"), type = 4, color = "#e74c3c")
     ),
 
     # Tab 2: Region Explorer
@@ -947,10 +984,47 @@ ui <- function(request){fluidPage(
           width = "350px"
         )
       ),
+      # Returns by Region plot and map
+      tags$h4("Returns by Region"),
       withSpinner(girafeOutput("avstrax_plot2_region", width = "100%", height = "auto"), type = 4, color = "#3498db"),
       tags$br(),
-      tags$h4("UK Regions Map View"),
-      withSpinner(leafletOutput("uk_regions_map", width = "100%", height = "500px"), type = 4, color = "#3498db")
+      tags$h4("UK Regions Map: Returns"),
+      withSpinner(leafletOutput("uk_regions_map", width = "100%", height = "500px"), type = 4, color = "#3498db"),
+      tags$br(),
+      tags$hr(),
+      # RTA section with separate controls
+      tags$h3("Revealed Technological Advantage (RTA)"),
+      inputPanel(
+        sliderInput(
+          inputId = "topn_rta_region",
+          label = "Show top n regions",
+          min = 1,
+          max = 50,
+          width = "350px",
+          value = 12
+        ),
+        sliderInput(
+          inputId = "bottomn_rta_region",
+          label = "Show bottom n regions",
+          min = 0,
+          max = 50,
+          width = "350px",
+          value = 0
+        ),
+        sliderInput(
+          inputId = "mininno_rta_region",
+          label = "Innovation count threshold:",
+          min = 1,
+          max = 500,
+          value = 100,
+          width = "350px"
+        )
+      ),
+      tags$h4("RTA by Region"),
+      withSpinner(girafeOutput("avstrax_plot2_region_rta", width = "100%", height = "auto"), type = 4, color = "#e74c3c"),
+      tags$br(),
+      tags$h4("UK Regions Map: RTA"),
+      withSpinner(leafletOutput("uk_regions_map_rta", width = "100%", height = "500px"), type = 4, color = "#e74c3c")
     )
   )
 )
@@ -1352,6 +1426,135 @@ server <- function(input, output, session) {
     )
   })
 
+  # RTA Plot for Country Explorer (below returns plot)
+  output$avstrax_plot2_rta <- renderGirafe({
+    req(input$country,
+        input$toflow,
+        input$techs,
+        input$topn_rta,
+        input$mininno_rta,
+        input$bwidthscale,
+        !is.null(input$show_top3_ids))
+    req(window_dims$initialized)
+
+    selected_countries <- expand_country_selection(input$country)
+    flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
+
+    # Try to load pre-computed data if available
+    precomputed_data <- NULL
+
+    if (is.null(input$techs_comparison) || length(input$techs_comparison) == 0) {
+      tech_category <- match_tech_category(input$techs)
+
+      if (!is.null(tech_category)) {
+        precomputed_data <- load_precomputed_by_country(prepdata_path, input$toflow, tech_category)
+        if (!is.null(precomputed_data)) {
+          message("RTA plot using pre-computed data for tech category: ", tech_category)
+          selected_countries <- expand_country_selection(input$country)
+          if (!is.null(precomputed_data$ctry_code)) {
+            precomputed_data <- precomputed_data %>%
+              filter(ctry_code %in% selected_countries | ctry_code == "All")
+          }
+        }
+      }
+    }
+
+    if (is.null(precomputed_data)) {
+      req(data_state$countrymap_loaded)
+      req(data_state$techmap_loaded)
+      filtered <- patchar_countrymap() %>%
+        filter(ctry_code %in% selected_countries)
+    } else {
+      filtered <- NULL
+    }
+
+    # Calculate responsive dimensions - full width since stacked vertically
+    plot_width <- max(window_dims$width, 400)
+    width_inches <- plot_width / 96
+    aspect_ratio <- ifelse(plot_width > 1200, 0.4, ifelse(plot_width > 800, 0.5, 0.6))
+    height_inches <- width_inches * aspect_ratio
+
+    current_techmap <- get_techmap()
+
+    p <- plot_avstrax_rta(
+      pdata = if(is.null(precomputed_data)) filtered else data.frame(),
+      classes = current_techmap,
+      technologies = input$techs,
+      toflow = input$toflow,
+      custom_colors = custom_colors,
+      topn = input$topn_rta,
+      bottomn = input$bottomn_rta,
+      mininno = input$mininno_rta,
+      bwidthscale = input$bwidthscale,
+      show_top3_ids = input$show_top3_ids,
+      width_svg = width_inches,
+      height_svg = height_inches,
+      plot_title = "RTA by Country",
+      precomputed_avstrax = precomputed_data
+    )
+
+    p
+  })
+
+  # RTA World Map for Country Explorer
+  output$world_map_rta <- renderPlotly({
+    req(input$country,
+        input$toflow,
+        input$techs,
+        input$mininno_rta)
+
+    selected_countries <- expand_country_selection(input$country)
+    flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
+
+    # Try to load pre-computed data if available
+    avstrax_data <- NULL
+
+    tech_category <- match_tech_category(input$techs)
+
+    if (!is.null(tech_category)) {
+      avstrax_data <- load_precomputed_by_country(prepdata_path, input$toflow, tech_category)
+      if (!is.null(avstrax_data)) {
+        message("RTA World map using pre-computed data for tech: ", tech_category)
+        if (!is.null(avstrax_data$ctry_code)) {
+          avstrax_data <- avstrax_data %>%
+            filter(ctry_code %in% selected_countries)
+        }
+      }
+    }
+
+    # If no pre-computed data, compute on the fly
+    if (is.null(avstrax_data)) {
+      req(data_state$countrymap_loaded)
+      req(data_state$techmap_loaded)
+
+      current_techmap <- get_techmap()
+
+      filtered_classes <- current_techmap %>%
+        filter(technology %in% input$techs) %>%
+        distinct()
+
+      if("All Innovations" %in% input$techs) filtered_classes <- data.frame()
+
+      filtered <- patchar_countrymap() %>%
+        filter(ctry_code %in% selected_countries)
+
+      avstrax_data <- compute_avstrax_for_techs(filtered, input$toflow, filtered_classes)
+    }
+
+    # Filter by minimum innovations (using RTA-specific threshold)
+    avstrax_data <- avstrax_data %>%
+      filter(innos >= input$mininno_rta)
+
+    # Plot RTA on world map (RTA is always an index, not a percentage or dollar value)
+    plot_world_map(
+      avstrax_data = avstrax_data,
+      value_col = "RTA",
+      color_scale = "RdYlGn",  # Red-Yellow-Green scale for RTA (red = low, green = high)
+      plot_title = "World Map: RTA Index",
+      is_return = FALSE  # RTA is an index, not a percentage
+    )
+  })
+
   # ============================================
   # Region Explorer Tab - Server Logic
   # ============================================
@@ -1617,6 +1820,145 @@ server <- function(input, output, session) {
       value_col = "mean",
       plot_title = paste0("UK Regions: ", sub("^[^.]*\\.", "", flow_label)),
       is_return = is_return
+    )
+  })
+
+  # RTA Plot for Region Explorer (below returns plot)
+  output$avstrax_plot2_region_rta <- renderGirafe({
+    req(input$region,
+        input$toflow_region,
+        input$techs_region,
+        input$topn_rta_region,
+        input$mininno_rta_region,
+        input$bwidthscale_region,
+        !is.null(input$show_top3_ids_region))
+    req(window_dims$initialized)
+    req(data_state$regionmap_loaded || data_state$loading_complete)
+
+    shiny::validate(shiny::need(is_regionmap_available(), "Region data not available."))
+
+    selected_regions <- expand_region_selection(input$region)
+    flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow_region]
+
+    # Try to load pre-computed data if available
+    precomputed_data <- NULL
+
+    if (is.null(input$techs_comparison_region) || length(input$techs_comparison_region) == 0) {
+      tech_category <- match_tech_category(input$techs_region)
+
+      if (!is.null(tech_category)) {
+        precomputed_data <- load_precomputed_by_region(prepdata_path, input$toflow_region, tech_category)
+        if (!is.null(precomputed_data)) {
+          message("RTA region plot using pre-computed data for tech: ", tech_category)
+          if (!is.null(precomputed_data$ctry_code)) {
+            precomputed_data <- precomputed_data %>%
+              filter(ctry_code %in% selected_regions | ctry_code == "All")
+          }
+        }
+      }
+    }
+
+    if (is.null(precomputed_data)) {
+      region_data <- patchar_regionmap()
+      has_ctry_code <- "ctry_code" %in% names(region_data)
+      shiny::validate(shiny::need(has_ctry_code, "Region data missing required columns."))
+
+      filtered <- region_data %>%
+        filter(ctry_code %in% selected_regions)
+    } else {
+      filtered <- NULL
+    }
+
+    # Calculate responsive dimensions - full width since stacked vertically
+    plot_width <- max(window_dims$width, 400)
+    width_inches <- plot_width / 96
+    aspect_ratio <- ifelse(plot_width > 1200, 0.4, ifelse(plot_width > 800, 0.5, 0.6))
+    height_inches <- width_inches * aspect_ratio
+
+    current_techmap <- get_techmap()
+
+    p <- plot_avstrax_rta(
+      pdata = if(is.null(precomputed_data)) filtered else data.frame(),
+      classes = current_techmap,
+      technologies = input$techs_region,
+      toflow = input$toflow_region,
+      custom_colors = custom_colors,
+      topn = input$topn_rta_region,
+      bottomn = input$bottomn_rta_region,
+      mininno = input$mininno_rta_region,
+      bwidthscale = input$bwidthscale_region,
+      show_top3_ids = input$show_top3_ids_region,
+      width_svg = width_inches,
+      height_svg = height_inches,
+      plot_title = "RTA by Region",
+      x_label = "Region",
+      precomputed_avstrax = precomputed_data
+    )
+
+    p
+  })
+
+  # RTA UK Regions Map for Region Explorer
+  output$uk_regions_map_rta <- renderLeaflet({
+    req(input$region,
+        input$toflow_region,
+        input$techs_region,
+        input$mininno_rta_region)
+    req(data_state$regionmap_loaded || data_state$loading_complete)
+
+    shiny::validate(shiny::need(is_regionmap_available(), "Region data not available."))
+
+    selected_regions <- expand_region_selection(input$region)
+    flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow_region]
+
+    # Try to load pre-computed data if available
+    avstrax_data <- NULL
+
+    tech_category <- match_tech_category(input$techs_region)
+
+    if (!is.null(tech_category)) {
+      avstrax_data <- load_precomputed_by_region(prepdata_path, input$toflow_region, tech_category)
+      if (!is.null(avstrax_data)) {
+        message("RTA UK regions map using pre-computed data for tech: ", tech_category)
+        if (!is.null(avstrax_data$ctry_code)) {
+          avstrax_data <- avstrax_data %>%
+            filter(ctry_code %in% selected_regions)
+        }
+      }
+    }
+
+    # If no pre-computed data, compute on the fly
+    if (is.null(avstrax_data)) {
+      req(data_state$techmap_loaded)
+
+      current_techmap <- get_techmap()
+
+      filtered_classes <- current_techmap %>%
+        filter(technology %in% input$techs_region) %>%
+        distinct()
+
+      if("All Innovations" %in% input$techs_region) filtered_classes <- data.frame()
+
+      region_data <- patchar_regionmap()
+      has_ctry_code <- "ctry_code" %in% names(region_data)
+      shiny::validate(shiny::need(has_ctry_code, "Region data missing required columns."))
+
+      filtered <- region_data %>%
+        filter(ctry_code %in% selected_regions)
+
+      avstrax_data <- compute_avstrax_for_techs(filtered, input$toflow_region, filtered_classes)
+    }
+
+    # Filter by minimum innovations (using RTA-specific threshold)
+    avstrax_data <- avstrax_data %>%
+      filter(innos >= input$mininno_rta_region)
+
+    # Plot RTA on UK regions map (RTA is always an index)
+    plot_uk_regions_map(
+      avstrax_data = avstrax_data,
+      value_col = "RTA",
+      plot_title = "UK Regions: RTA Index",
+      is_return = FALSE  # RTA is an index, not a percentage
     )
   })
 
