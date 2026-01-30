@@ -278,12 +278,16 @@ cpc_sections=c( "Human Necessities",
                 "Electricity",
                  "General tagging of new or cross-sectional technology" )
 
+agrifood_classes=c("Any Agriculture & Food technology", "Input supply", "Primary food and feed production",
+                   "Post-harvest handling & aggregation", "Processing", "Distribution/wholesale",
+                   "Retail/consumption", "Crosscutting")
+
 # Get all unique technologies from techmap
 # When using deferred loading with precomputed data, we use known technology categories
 # instead of extracting from techmap (which may be a placeholder)
 if (has_precomputed_data) {
   # Known technology categories - these match what's in the precomputed data
-  all_techs <- c("All", green_classes, battery_classes, hard_to_abate_classes, ai_classes, cpc_sections)
+  all_techs <- c("All", green_classes, battery_classes, hard_to_abate_classes, ai_classes, cpc_sections, agrifood_classes)
   all_techs <- unique(all_techs)
 } else {
   all_techs <- c((techmap %>% distinct(technology))$technology, "All")
@@ -299,12 +303,13 @@ green_classes_d        =setdiff(green_classes,"Green Technology")
 battery_classes_d      =setdiff(battery_classes,"Battery Technology")
 hard_to_abate_classes_d=setdiff(hard_to_abate_classes,"Hard to Abate Sector Decarbonization")
 ai_classes_d           =setdiff(ai_classes,"AI")
+agrifood_classes_d     =setdiff(agrifood_classes,"Any Agriculture & Food technology")
 
 
-colorings=list(green=green_classes,battery=battery_classes,hard_to_abate=hard_to_abate_classes,ai=ai_classes,cpcsecs=cpc_sections)
+colorings=list(green=green_classes,battery=battery_classes,hard_to_abate=hard_to_abate_classes,ai=ai_classes,cpcsecs=cpc_sections,agrifood=agrifood_classes)
 
 
-other_techs <- c(setdiff(all_techs, c(green_classes, battery_classes,hard_to_abate_classes,cpc_sections)),"Green Technology","Battery Technology","Hard to Abate Sector Decarbonization")
+other_techs <- c(setdiff(all_techs, c(green_classes, battery_classes,hard_to_abate_classes,cpc_sections,agrifood_classes)),"Green Technology","Battery Technology","Hard to Abate Sector Decarbonization","Any Agriculture & Food technology")
 
 grouped_techs <- list(
   "Broad Technology Categories"                         = as.list(setNames(other_techs, other_techs)),
@@ -312,8 +317,9 @@ grouped_techs <- list(
   "AI subcategories"                                    = as.list(setNames(ai_classes_d, ai_classes_d)),
   "Detailed Battery technologies"                       = as.list(setNames(battery_classes_d, battery_classes_d)),
   "Detailed Hard to Abate Sector Decarbonization Technologies" = as.list(setNames(hard_to_abate_classes_d, hard_to_abate_classes_d)),
+  "Agriculture & Food technology"                       = as.list(setNames(agrifood_classes_d, agrifood_classes_d)),
   "CPC Sections"                                        = as.list(setNames(cpc_sections, cpc_sections))
-  
+
 )
 
 

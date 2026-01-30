@@ -150,12 +150,13 @@ match_tech_category <- function(selected_techs, tech_definitions = NULL) {
 
 
 # Define custom colors
-custom_colors <- c("green" = "forestgreen", 
-                   "battery" = "gold", 
+custom_colors <- c("green" = "forestgreen",
+                   "battery" = "gold",
                    "other" = "gray70",
                    "hard to abate"="blue",
                    "AI"="orange",
-                   cpcsecs="purple")
+                   "cpcsecs"="purple",
+                   "agrifood"="burlywood")
 
 
 
@@ -240,10 +241,12 @@ compute_avstrax <- function(data, istrax_var, classes,colorings=NULL#, green_cla
       # Create Espacenet search URL for top 3 IDs (use double quotes for JS to avoid HTML attribute conflicts)
       top3_ids_url = build_espacenet_search(top3_ids),
       greenclass = ifelse(technology %in% unlist(colorings["green"]), "green",
-                          ifelse( technology %in% unlist(colorings["battery"]), "battery", 
+                          ifelse( technology %in% unlist(colorings["battery"]), "battery",
                                   ifelse( technology %in% unlist(colorings["hard_to_abate"]), "hard to abate",
                                           ifelse( technology %in% unlist(colorings["ai"]), "AI",
-                                                  ifelse( technology %in% unlist(colorings["cpcsecs"]), "CPC Sections", "other")
+                                                  ifelse( technology %in% unlist(colorings["cpcsecs"]), "CPC Sections",
+                                                          ifelse( technology %in% unlist(colorings["agrifood"]), "agrifood", "other")
+                                                        )
                                                 )
                                         )
                                 )
