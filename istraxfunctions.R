@@ -609,9 +609,12 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
 
   # Calculate RTA
   total_innos <- fndistinct(filtereddata$docdb_family_id)  # Distinct innovations in filtered data
+  # Get SumAllinnos from counted directly (same value for all rows)
+  # This avoids issues when "All" row is first alphabetically and has NA for SumAllinnos after join
+  sum_all_innos <- counted$SumAllinnos[1]
   result$share_c <- result$innos / result$Allinnos
-  result$share <- total_innos / result$SumAllinnos[1]
-  result$RTA <-   2*result$share_c / (result$share_c + result$share)
+  result$share <- total_innos / sum_all_innos
+  result$RTA <- 2 * result$share_c / (result$share_c + result$share)
 
   return(result)
 }
@@ -1032,7 +1035,6 @@ plot_avstrax_rta <- function(pdata, classes,
 
   # Use pre-computed data if provided, otherwise compute
   if (!is.null(precomputed_avstrax) && nrow(precomputed_avstrax) > 0) {
-    message("RTA plot using pre-computed avstrax data")
     avstrax <- precomputed_avstrax
   } else {
     # Filter by technology class
@@ -1098,13 +1100,16 @@ plot_avstrax_rta <- function(pdata, classes,
   }
 
   # Filter by minimum innovations (innos and Allinnos) and valid RTA
+  message("RTA Debug: Before filter - rows = ", nrow(avstrax), ", mininno = ", mininno, ", minallinnos = ", minallinnos)
   avstrax_filtered <- avstrax %>%
     filter(ctry_code != "All", innos >= mininno, !is.na(RTA))
+  message("RTA Debug: After innos/RTA filter - rows = ", nrow(avstrax_filtered))
 
   # Apply Allinnos filter if the column exists and threshold is set
   if ("Allinnos" %in% names(avstrax_filtered) && minallinnos > 0) {
     avstrax_filtered <- avstrax_filtered %>%
       filter(Allinnos >= minallinnos)
+    message("RTA Debug: After Allinnos filter - rows = ", nrow(avstrax_filtered))
   }
 
   # Get top n and bottom n countries by RTA

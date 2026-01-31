@@ -1777,13 +1777,13 @@ server <- function(input, output, session) {
     # Join regionmap with istrax data
     # Rename region_code to ctry_code and region_name to country_name for compatibility with plotting functions
     if (is_available) {
-      # Remove ctry_code from ddd if it exists to avoid duplicate column names after join
-      ddd_for_join <- ddd %>% select(-any_of(c("ctry_name")))#select(-any_of(c("ctry_code", "country_name")))
+      # Remove ctry_name from ddd if it exists to avoid duplicate column names after join
+      ddd_for_join <- ddd %>% select(-any_of(c("ctry_name")))
 
       patchar_regionmap <- current_regionmap %>%
-        left_join(ddd_for_join, by = c("docdb_family_id","ctry_code")) %>% 
-        select(-ctry_code) %>% 
-        rename(ctry_code = region_code, country_name = region_name)                     
+        left_join(ddd_for_join, by = c("docdb_family_id", "ctry_code")) %>%
+        select(-ctry_code) %>%
+        rename(ctry_code = region_code, country_name = region_name)
       message("patchar_regionmap columns after rename: ", paste(names(patchar_regionmap), collapse = ", "))
       message("patchar_regionmap rows: ", nrow(patchar_regionmap))
     } else {
@@ -2058,19 +2058,18 @@ server <- function(input, output, session) {
       }
     }
 
-    # Always compute on the fly for RTA since precomputed data may not have RTA
-    region_data <- patchar_regionmap()
-    has_ctry_code <- "ctry_code" %in% names(region_data)
-    shiny::validate(shiny::need(has_ctry_code, "Region data missing required columns."))
+    # Only load region data if precomputed data is not available
+    if (is.null(precomputed_data)) {
+      req(data_state$techmap_loaded)
 
-    filtered <- region_data %>%
-      filter(ctry_code %in% selected_regions)
+      region_data <- patchar_regionmap()
+      has_ctry_code <- "ctry_code" %in% names(region_data)
+      shiny::validate(shiny::need(has_ctry_code, "Region data missing required columns."))
 
-    # If precomputed has RTA, use it; otherwise compute fresh
-    if (!is.null(precomputed_data) && "RTA" %in% names(precomputed_data)) {
-      filtered <- NULL
+      filtered <- region_data %>%
+        filter(ctry_code %in% selected_regions)
     } else {
-      precomputed_data <- NULL
+      filtered <- NULL
     }
 
     # Calculate responsive dimensions - full width since stacked vertically

@@ -173,8 +173,9 @@ docdb_nuts1 <- docdb_nuts1 %>%
 ```{r create_regionmap}
 # Create regionmap with the same structure as countrymap
 # This allows the Region Explorer to work similarly to the Country Explorer
+# Include ctry_code for joining with istrax data (which is keyed by docdb_family_id + ctry_code)
 regionmap <- docdb_nuts1 %>%
-  select(docdb_family_id, appln_id, region_code, region_name) %>%
+  select(docdb_family_id, appln_id, ctry_code, region_code, region_name) %>%
   distinct()
 
 message("Regionmap created with ", nrow(regionmap), " rows")
