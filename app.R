@@ -1571,8 +1571,9 @@ server <- function(input, output, session) {
       filtered <- NULL
     }
 
-    # Calculate responsive dimensions - full width since stacked vertically
-    plot_width <- max(window_dims$width, 400)
+    # Calculate responsive dimensions - use actual output width for proper scaling
+    plot_width <- session$clientData$output_avstrax_plot2_rta_width
+    if (is.null(plot_width) || plot_width < 100) plot_width <- 600
     width_inches <- plot_width / 96
     # Calculate height based on number of countries to display (topn + bottomn)
     n_countries <- input$topn_rta + input$bottomn_rta
@@ -2072,8 +2073,9 @@ server <- function(input, output, session) {
       filtered <- NULL
     }
 
-    # Calculate responsive dimensions - full width since stacked vertically
-    plot_width <- max(window_dims$width, 400)
+    # Calculate responsive dimensions - use actual output width for proper scaling
+    plot_width <- session$clientData$output_avstrax_plot2_region_rta_width
+    if (is.null(plot_width) || plot_width < 100) plot_width <- 600
     width_inches <- plot_width / 96
     # Calculate height based on number of regions to display (topn + bottomn)
     n_regions <- input$topn_rta_region + input$bottomn_rta_region

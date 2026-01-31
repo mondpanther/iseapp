@@ -1198,10 +1198,11 @@ plot_avstrax_rta <- function(pdata, classes,
     ) +
     theme_minimal(base_family = "Open Sans") +
     theme(
-      axis.title.x = element_text(size = 16),
-      axis.title.y = element_text(size = 16),
-      axis.text.x = element_text(size = 14),
-      axis.text.y = element_text(size = 14),
+      plot.title = element_text(size = 14, hjust = 0.5),
+      axis.title.x = element_text(size = 14),
+      axis.title.y = element_text(size = 14),
+      axis.text.x = element_text(size = 12),
+      axis.text.y = element_text(size = 12),
       text = element_text(family = "Open Sans"),
       axis.text = element_text(family = "Open Sans"),
       axis.title = element_text(family = "Open Sans"),
@@ -1209,7 +1210,7 @@ plot_avstrax_rta <- function(pdata, classes,
     ) +
     geom_hline(yintercept = global_rta, linetype = "dashed", color = "black", linewidth = 1) +
     annotate("text", y = global_rta, x = max(avstrax$x_pos) - 0.6,
-             label = "RTA = 1", angle = -90, vjust = 1.5, size = 4,
+             label = "RTA = 1", angle = -90, vjust = 1.5, size = 3.5,
              family = "Open Sans", color = "black") +
     coord_flip()
 
@@ -1219,7 +1220,7 @@ plot_avstrax_rta <- function(pdata, classes,
   p <- p + labs(subtitle = subtitle_text,
                 caption = "© 2025 Innovation Strategy Explorer") +
     theme(plot.subtitle = element_text(size = 11, hjust = 0.5),
-          plot.caption = element_text(hjust = 1, size = 10, color = "gray"))
+          plot.caption = element_text(hjust = 1, size = 9, color = "gray"))
 
   # Return girafe object
   return(girafe(ggobj = p,
