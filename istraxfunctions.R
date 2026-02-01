@@ -1355,6 +1355,7 @@ plot_rta_returns_scatter <- function(avstrax_data,
   # Create the scatter plot
   p <- ggplot(scatter_data, aes(x = RTA, y = mean)) +
     geom_vline(xintercept = 1, linetype = "dashed", color = "gray50", linewidth = 0.8) +
+    geom_smooth(method = "lm", formula = y ~ x, se = TRUE, color = "#2ecc71", fill = "#2ecc71", alpha = 0.2, linewidth = 1) +
     geom_point_interactive(
       aes(
         size = size_scaled,
@@ -1407,6 +1408,218 @@ plot_rta_returns_scatter <- function(avstrax_data,
 
   # Add caption
   p <- p + labs(caption = "© 2025 Innovation Strategy Explorer") +
+    theme(plot.caption = element_text(hjust = 1, size = 9, color = "gray"))
+
+  # Return girafe object
+  return(girafe(ggobj = p,
+                width_svg = width_svg,
+                height_svg = height_svg,
+                options = list(
+                  opts_sizing(rescale = TRUE, width = 1),
+                  opts_hover(css = "cursor:pointer;opacity:1;"),
+                  opts_selection(type = "none"),
+                  opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;font-size:12px;")
+                )))
+}
+
+
+# ============================================
+# GDP per Capita Data (World Bank, 2015, PPP, constant 2017 international $)
+# ============================================
+
+# GDP per capita in 2015, PPP (constant 2017 international $) from World Bank
+# Source: World Bank World Development Indicators (NY.GDP.PCAP.PP.KD)
+gdp_per_capita_2015 <- data.frame(
+  ctry_code = c("AD", "AE", "AF", "AG", "AL", "AM", "AO", "AR", "AT", "AU",
+                "AZ", "BA", "BB", "BD", "BE", "BF", "BG", "BH", "BI", "BJ",
+                "BN", "BO", "BR", "BS", "BT", "BW", "BY", "BZ", "CA", "CD",
+                "CF", "CG", "CH", "CI", "CL", "CM", "CN", "CO", "CR", "CU",
+                "CV", "CY", "CZ", "DE", "DJ", "DK", "DM", "DO", "DZ", "EC",
+                "EE", "EG", "ER", "ES", "ET", "FI", "FJ", "FM", "FR", "GA",
+                "GB", "GD", "GE", "GH", "GM", "GN", "GQ", "GR", "GT", "GW",
+                "GY", "HK", "HN", "HR", "HT", "HU", "ID", "IE", "IL", "IN",
+                "IQ", "IR", "IS", "IT", "JM", "JO", "JP", "KE", "KG", "KH",
+                "KI", "KM", "KN", "KP", "KR", "KW", "KZ", "LA", "LB", "LC",
+                "LI", "LK", "LR", "LS", "LT", "LU", "LV", "LY", "MA", "MC",
+                "MD", "ME", "MG", "MK", "ML", "MM", "MN", "MO", "MR", "MT",
+                "MU", "MV", "MW", "MX", "MY", "MZ", "NA", "NE", "NG", "NI",
+                "NL", "NO", "NP", "NZ", "OM", "PA", "PE", "PG", "PH", "PK",
+                "PL", "PR", "PS", "PT", "PW", "PY", "QA", "RO", "RS", "RU",
+                "RW", "SA", "SB", "SC", "SD", "SE", "SG", "SI", "SK", "SL",
+                "SM", "SN", "SO", "SR", "SS", "ST", "SV", "SY", "SZ", "TD",
+                "TG", "TH", "TJ", "TL", "TM", "TN", "TO", "TR", "TT", "TV",
+                "TW", "TZ", "UA", "UG", "US", "UY", "UZ", "VC", "VE", "VN",
+                "VU", "WS", "XK", "YE", "ZA", "ZM", "ZW"),
+  gdp_pc_2015 = c(NA, 67127, 1934, 21071, 12387, 11632, 7640, 22536, 52612, 48401,
+                  16553, 13679, 15943, 4248, 49145, 2042, 21168, 47384, 758, 2967,
+                  76057, 7877, 15065, 31802, 10442, 16687, 18498, 7913, 46780, 1037,
+                  868, 5387, 66025, 4789, 24034, 3665, 14439, 14324, 17682, NA,
+                  7009, 37898, 34817, 51914, 3744, 52752, 11997, 15784, 13966, 11410,
+                  30248, 12035, 1820, 36668, 2086, 45389, 12709, 3587, 43968, 14683,
+                  45071, 14790, 12046, 5267, 2331, 2350, 25039, 28037, 8381, 1971,
+                  11789, 58573, 5232, 24865, 1795, 27180, 11188, 68883, 37347, 6096,
+                  13847, 18765, 50406, 40723, 9025, 10891, 41384, 4373, 3726, 3959,
+                  2036, 2914, 23775, NA, 38292, 60566, 25178, 7327, 14073, 14027,
+                  NA, 12956, 1350, 3145, 30543, 108797, 26078, 15904, 7780, NA,
+                  9614, 18188, 1594, 14949, 2317, 5189, 12456, 107721, 5133, 40160,
+                  22534, 17048, 1480, 18934, 27029, 1344, 10622, 1196, 5670, 5678,
+                  53955, 64192, 3093, 39935, 32993, 27839, 13009, 4302, 8351, 5174,
+                  27963, 37605, 5886, 32871, 16219, 12531, 116582, 24491, 16281, 25218,
+                  2178, 49519, 2517, 27632, 4330, 50338, 88155, 35417, 30693, 1622,
+                  62644, 3371, NA, 18252, 1879, 3821, 8316, NA, 9895, 2154,
+                  1822, 17445, 3280, 5000, 16056, 11604, 6168, 26949, 31251, 4776,
+                  NA, 2864, 12270, 2240, 57486, 21928, 6924, 13107, NA, 6826,
+                  3008, 6260, 10906, 2591, 13572, 3770, 2413),
+  stringsAsFactors = FALSE
+)
+
+
+#' Plot RTA vs GDP per Capita Scatter Plot
+#' @param avstrax_data Data frame with ctry_code, RTA, and innos columns
+#' @param mininno Minimum number of innovations to include a country
+#' @param minallinnos Minimum total innovations filter
+#' @param bwidthscale Scale for bubble width ("log" or "linear")
+#' @param width_svg SVG width in inches
+#' @param height_svg SVG height in inches
+#' @param plot_title Title for the plot
+#' @return A ggiraph object
+plot_rta_gdp_scatter <- function(avstrax_data,
+                                 mininno = 5,
+                                 minallinnos = 0,
+                                 bwidthscale = "log",
+                                 width_svg = 8,
+                                 height_svg = 6,
+                                 plot_title = "RTA vs GDP per Capita") {
+
+  library(dplyr)
+  library(ggplot2)
+  library(ggiraph)
+  library(countrycode)
+
+  # Check if required columns exist
+  if (!"RTA" %in% names(avstrax_data)) {
+    p <- ggplot() +
+      annotate("text", x = 0.5, y = 0.5, label = "RTA data not available", size = 6) +
+      theme_void()
+    return(girafe(ggobj = p,
+                  width_svg = width_svg,
+                  height_svg = height_svg,
+                  options = list(opts_sizing(rescale = TRUE, width = 1))))
+  }
+
+  # UK NUTS1 region names mapping (for filtering out regions)
+  uk_regions <- c("UKC", "UKD", "UKE", "UKF", "UKG", "UKH", "UKI", "UKJ", "UKK", "UKL", "UKM", "UKN")
+
+  # Add country names if not present
+  if (!"country_name" %in% names(avstrax_data) || all(is.na(avstrax_data$country_name))) {
+    converted_names <- countrycode(avstrax_data$ctry_code, origin = "iso2c", destination = "country.name.en", warn = FALSE)
+    avstrax_data$country_name <- ifelse(is.na(converted_names), avstrax_data$ctry_code, converted_names)
+  }
+
+  # Filter data - exclude "All" and UK regions (GDP only available for countries)
+  scatter_data <- avstrax_data %>%
+    filter(ctry_code != "All",
+           !ctry_code %in% uk_regions,
+           innos >= mininno,
+           !is.na(RTA))
+
+  # Apply Allinnos filter if the column exists and threshold is set
+  if ("Allinnos" %in% names(scatter_data) && minallinnos > 0) {
+    scatter_data <- scatter_data %>%
+      filter(Allinnos >= minallinnos)
+  }
+
+  # Join with GDP data
+  scatter_data <- scatter_data %>%
+    left_join(gdp_per_capita_2015, by = "ctry_code") %>%
+    filter(!is.na(gdp_pc_2015), gdp_pc_2015 > 0)
+
+  # Check if we have data to plot
+  if (nrow(scatter_data) == 0) {
+    p <- ggplot() +
+      annotate("text", x = 0.5, y = 0.5, label = "No data available for selected filters", size = 6) +
+      theme_void()
+    return(girafe(ggobj = p,
+                  width_svg = width_svg,
+                  height_svg = height_svg,
+                  options = list(opts_sizing(rescale = TRUE, width = 1))))
+  }
+
+  # Calculate log GDP per capita
+  scatter_data$log_gdp_pc <- log(scatter_data$gdp_pc_2015)
+
+  # Calculate dot sizes based on innovation count
+  if (bwidthscale == "log") {
+    scatter_data$size_raw <- log(1 + scatter_data$innos)
+  } else {
+    scatter_data$size_raw <- scatter_data$innos
+  }
+
+  # Normalize sizes for plotting (scale to reasonable range)
+  max_size <- max(scatter_data$size_raw, na.rm = TRUE)
+  min_size <- min(scatter_data$size_raw, na.rm = TRUE)
+  if (max_size > min_size) {
+    scatter_data$size_scaled <- 3 + 12 * (scatter_data$size_raw - min_size) / (max_size - min_size)
+  } else {
+    scatter_data$size_scaled <- 7
+  }
+
+  # Create tooltip text
+  scatter_data$tooltip_text <- paste0(
+    "<b>", scatter_data$country_name, "</b><br>",
+    "RTA: ", round(scatter_data$RTA, 2), "<br>",
+    "GDP/capita PPP (2015): $", scales::comma(round(scatter_data$gdp_pc_2015)), "<br>",
+    "log(GDP/capita PPP): ", round(scatter_data$log_gdp_pc, 2), "<br>",
+    "Innovations: ", scales::comma(scatter_data$innos)
+  )
+
+  # Create the scatter plot
+  p <- ggplot(scatter_data, aes(x = RTA, y = log_gdp_pc)) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "gray50", linewidth = 0.8) +
+    geom_smooth(method = "lm", formula = y ~ x, se = TRUE, color = "#2ecc71", fill = "#2ecc71", alpha = 0.2, linewidth = 1) +
+    geom_point_interactive(
+      aes(
+        size = size_scaled,
+        fill = RTA,
+        tooltip = tooltip_text,
+        data_id = ctry_code
+      ),
+      shape = 21,
+      color = "white",
+      stroke = 0.5,
+      alpha = 0.8
+    ) +
+    scale_fill_gradient2(
+      low = "#08306B",      # Dark blue for low RTA
+      mid = "#FFFFFF",      # White for RTA = 1
+      high = "#B2182B",     # Dark red for high RTA
+      midpoint = 1,
+      name = "RTA"
+    ) +
+    scale_size_identity() +
+    labs(
+      title = plot_title,
+      x = "RTA",
+      y = "log(GDP per capita PPP in 2015, intl $)"
+    ) +
+    theme_minimal(base_family = "Open Sans") +
+    theme(
+      axis.title.x = element_text(size = 14),
+      axis.title.y = element_text(size = 14),
+      axis.text.x = element_text(size = 12),
+      axis.text.y = element_text(size = 12),
+      text = element_text(family = "Open Sans"),
+      legend.position = "right",
+      legend.title = element_text(size = 11),
+      legend.text = element_text(size = 10),
+      plot.title = element_text(size = 14, hjust = 0.5)
+    ) +
+    annotate("text", x = 1, y = max(scatter_data$log_gdp_pc, na.rm = TRUE) * 0.98,
+             label = "RTA = 1", hjust = -0.1, size = 3.5,
+             family = "Open Sans", color = "gray40")
+
+  # Add caption
+  p <- p + labs(caption = "GDP PPP data: World Bank (2015, constant 2017 intl $) | © 2025 Innovation Strategy Explorer") +
     theme(plot.caption = element_text(hjust = 1, size = 9, color = "gray"))
 
   # Return girafe object

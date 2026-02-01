@@ -938,7 +938,7 @@ ui <- function(request){fluidPage(
           label = "Innovation count threshold:",
           min = 1,
           max = 500,
-          value = 100,
+          value = 1,
           width = "350px"
         ),
         sliderInput(
@@ -946,7 +946,7 @@ ui <- function(request){fluidPage(
           label = "All innovation threshold:",
           min = 1,
           max = 5000,
-          value = 500,
+          value = 100,
           width = "350px"
         )
       ),
@@ -957,7 +957,9 @@ ui <- function(request){fluidPage(
         ),
         column(6,
           tags$h4("RTA vs Returns"),
-          withSpinner(girafeOutput("rta_returns_scatter", width = "100%", height = "auto"), type = 4, color = "#e74c3c")
+          withSpinner(girafeOutput("rta_returns_scatter", width = "100%", height = "auto"), type = 4, color = "#e74c3c"),
+          tags$h4("RTA vs GDP per Capita"),
+          withSpinner(girafeOutput("rta_gdp_scatter", width = "100%", height = "auto"), type = 4, color = "#e74c3c")
         )
       ),
       tags$br(),
@@ -1741,6 +1743,77 @@ server <- function(input, output, session) {
       plot_title = scatter_title,
       x_label = "RTA",
       y_label = "Return (%)"
+    )
+
+    p
+  })
+
+  # RTA vs GDP per Capita Scatter Plot for Country Explorer
+  output$rta_gdp_scatter <- renderGirafe({
+    req(input$country,
+        input$toflow,
+        input$techs,
+        input$mininno_rta)
+
+    selected_countries <- expand_country_selection(input$country)
+
+    # Try to load pre-computed data if available
+    avstrax_data <- NULL
+
+    tech_category <- match_tech_category(input$techs)
+
+    if (!is.null(tech_category)) {
+      precomputed <- load_precomputed_by_country(prepdata_path, input$toflow, tech_category)
+      if (!is.null(precomputed) && "RTA" %in% names(precomputed) && "Allinnos" %in% names(precomputed)) {
+        message("RTA GDP scatter plot using pre-computed data for tech: ", tech_category)
+        if (!is.null(precomputed$ctry_code)) {
+          avstrax_data <- precomputed %>%
+            filter(ctry_code %in% selected_countries)
+        } else {
+          avstrax_data <- precomputed
+        }
+      }
+    }
+
+    # If no pre-computed data with RTA and Allinnos, compute on the fly
+    if (is.null(avstrax_data)) {
+      req(data_state$countrymap_loaded)
+      req(data_state$techmap_loaded)
+
+      current_techmap <- get_techmap()
+
+      filtered_classes <- current_techmap %>%
+        filter(technology %in% input$techs) %>%
+        distinct()
+
+      if("All Innovations" %in% input$techs) filtered_classes <- data.frame()
+
+      filtered <- patchar_countrymap() %>%
+        filter(ctry_code %in% selected_countries)
+
+      avstrax_data <- compute_avstrax_for_techs(filtered, input$toflow, filtered_classes)
+    }
+
+    # Get plot dimensions
+    plot_width <- session$clientData$output_rta_gdp_scatter_width
+    if (is.null(plot_width) || plot_width < 100) plot_width <- 600
+
+    width_inches <- plot_width / 96
+    aspect_ratio <- 0.8
+    height_inches <- width_inches * aspect_ratio
+
+    # Build title with selected technologies
+    tech_label <- paste(input$techs, collapse = ", ")
+    scatter_title <- paste0("RTA vs GDP per Capita: ", tech_label)
+
+    p <- plot_rta_gdp_scatter(
+      avstrax_data = avstrax_data,
+      mininno = input$mininno_rta,
+      minallinnos = input$minallinnos_rta,
+      bwidthscale = input$bwidthscale,
+      width_svg = width_inches,
+      height_svg = height_inches,
+      plot_title = scatter_title
     )
 
     p
