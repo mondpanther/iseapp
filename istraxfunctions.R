@@ -1600,7 +1600,7 @@ plot_rta_gdp_scatter <- function(avstrax_data,
     labs(
       title = plot_title,
       x = "RTA",
-      y = "log(GDP per capita PPP in 2015, intl $)"
+      y = "GDP per capita (log)"
     ) +
     theme_minimal(base_family = "Open Sans") +
     theme(
