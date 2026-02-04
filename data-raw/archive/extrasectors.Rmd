@@ -57,7 +57,7 @@ if (!file.exists(cpcfile)) {
   
   cpcs=cpcs %>% select(docdb_family_id,cpc_class_symbol)
   cpcs=cpcs %>% arrange(docdb_family_id)
-  library(fst2)
+  # library(fst2)
   write_fst(cpcs,cpcfile,compress=100)
 }
 
