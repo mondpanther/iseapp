@@ -11,4 +11,5 @@ dropbox_token.rds
 .DS_Store
 .sass_cache_keys
 *.code-workspace
-data_raw/big_files/
+data_raw/big_files/*
+**/big_files/
