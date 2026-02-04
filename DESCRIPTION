@@ -1,0 +1,24 @@
+Package: innovationStrategyExplorer
+Title: What the Package Does (One Line, Title Case)
+Version: 0.0.0.9000
+Authors@R: 
+    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
+Description: What the package does (one paragraph).
+License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
+    license
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Imports: 
+    bslib,
+    devtools,
+    htmltools,
+    pkgload,
+    prompter,
+    sass,
+    sever,
+    shiny,
+    shinyjs,
+    shinyWidgets,
+    usethis,
+    waiter

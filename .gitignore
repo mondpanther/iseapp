@@ -1,7 +1,13 @@
-.Rproj.user
-.Rhistory
 .RData
 .Ruserdata
 .Renviron
-.httr-oauth
 dropbox_token.rds
+
+*.Rproj
+.Rproj.user
+.Rhistory
+.Rdata
+.httr-oauth
+.DS_Store
+.sass_cache_keys
+*.code-workspace

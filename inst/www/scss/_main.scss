@@ -1,0 +1,65 @@
+// techMarker_scss_colors
+//$zrsa-green: #76ba43;
+//$zrsa-gray: #2b302d;
+//$zrsa-bluegreen: #0e3d45;
+//$zrsa-red: #ef4136;
+$navbar-col: #FFFFFF;
+$sidebar-col: rgba(0,0,0, 0.05);
+$background-dark-col: #2B302D;
+$background-light-col: #FFFFFF;
+$background-gray-col: rgba(0,0,0, 0.05);
+$primary-col: #76BA43;
+$primary-col-rgba: rgba(118, 186, 67, 0.10);
+$secondary-col1: #0E3D45;
+$secondary-col1-rgba: rgba(14, 61, 69, 0.10);
+$secondary-col2: #EF4136;
+$secondary-col2-rgba: rgba(239, 65, 54, 0.10);
+$inactive-tab-col: #666666;
+$font-dark: #2B302D;
+$font-light: #FFFFFF;
+$font-black: #000000;
+$font-white: #FFFFFF;
+$font-gray: #2B302D;
+
+html {
+	.error {
+		color: red;
+	}
+
+	h1 {
+	  color: $primary-col;
+	}
+
+  nav {
+    #navbar_page {
+      li:last-of-type {
+        position: absolute;
+        right: 25px;
+      }
+    }
+
+    span[class="navbar-brand"] {
+      height: 50px;
+      width: 50px;
+    }
+  }
+
+  li[class="dropdown nav-item"] {
+    position: absolute;
+    right: 25px;
+  }
+
+  #zrsa-footer {
+    position: absolute;
+    bottom: 10px;
+    display: inline-flex;
+    justify-content: center;
+    font-size: 12px;
+    border: 1px solid black;
+    width: 300px;
+    right: 25px;
+    border-radius: 6px;
+  }
+  
+}
+
