@@ -14,9 +14,16 @@
 #' For deployment or sharing:
 #' Include renv.lock in version control
 #' Recipients should run renv::restore() to recreate the exact package environment
-
-pkgload::load_all(export_all = FALSE, helpers = FALSE, attach_testthat = FALSE)
-runAppPackage()
+#' 
+pkgload::load_all(export_all = FALSE,
+                  helpers = FALSE,
+                  attach_testthat = FALSE)
+# Override Positron's Shiny browser setting
+options(shiny.launch.browser = function(url) {
+#   utils::browseURL(url) # for deployments
+  utils::browseURL(url, browser = "C:/Program Files/Google/Chrome/Application/chrome.exe") # for development
+})
+innovationStrategyExplorer::runAppPackage()
 
 #' Package development/testing workflow:
 #' devtools::document()          # Generate/update documentation from roxygen comments
