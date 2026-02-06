@@ -4,11 +4,9 @@
 \alias{load_precomputed_by_tech}
 \title{Try to load pre-computed data for "by technology" aggregation}
 \usage{
-load_precomputed_by_tech(prepdata_path, toflow, country_group_name)
+load_precomputed_by_tech(toflow, country_group_name)
 }
 \arguments{
-\item{prepdata_path}{Path to prepdata directory}
-
 \item{toflow}{The toflow variable name}
 
 \item{country_group_name}{Name of the country group}
