@@ -13,3 +13,5 @@ dropbox_token.rds
 *.code-workspace
 data_raw/big_files/*
 **/big_files/
+
+inst/extdata/*
