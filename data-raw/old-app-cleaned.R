@@ -18,73 +18,10 @@ library(gdtools)
 library(gfonts)
 library(leaflet)
 library(sf)
-source("dropbox_auth.R")
-source("istraxfunctions.R")
-
-
-# Register Google Font
-register_gfont("Open Sans")
-
-# Function to detect local Dropbox path from Dropbox's config file
-get_dropbox_path <- function() {
-  # Dropbox stores its configuration in info.json
-  # This works for both personal and team Dropbox accounts
-
-  if (.Platform$OS.type == "windows") {
-    info_paths <- c(
-      file.path(Sys.getenv("APPDATA"), "Dropbox", "info.json"),
-      file.path(Sys.getenv("LOCALAPPDATA"), "Dropbox", "info.json")
-    )
-  } else {
-    info_paths <- file.path(Sys.getenv("HOME"), ".dropbox", "info.json")
-  }
-
-  for (p in info_paths) {
-    if (file.exists(p)) {
-      info <- jsonlite::fromJSON(p)
-      if (!is.null(info$business)) {
-        return(info$business$path)
-      } else if (!is.null(info$personal)) {
-        return(info$personal$path)
-      }
-    }
-  }
-  return(NULL)
-}
-
-# Try to find local Dropbox Apps/iseapp folder
-get_local_iseapp_path <- function() {
-  # First check environment variable
-  env_path <- Sys.getenv("ISEAPP_PATH_LOCAL")
-  if (nzchar(env_path) && dir.exists(env_path)) {
-    return(env_path)
-  }
-  # Try to detect Dropbox path automatically
-  dropbox_root <- get_dropbox_path()
-  if (!is.null(dropbox_root)) {
-    iseapp_path <- file.path(dropbox_root, "Apps", "iseapp")
-    if (dir.exists(iseapp_path)) {
-      return(iseapp_path)
-    }
-  }
-  return(NULL)
-}
-
-# Get the local path (cached)
-iseapp_local_path <- get_local_iseapp_path()
-if (!is.null(iseapp_local_path)) {
-  message("Using local Dropbox path: ", iseapp_local_path)
-} else {
-  message("Local Dropbox not found, will use online Dropbox")
-}
+source("R/functions_istraxfunctions.R")
 
 # Get prepdata path for pre-computed data
-prepdata_path <- get_prepdata_path(iseapp_local_path)
-if (!is.null(prepdata_path)) {
-  message("Pre-computed data available at: ", prepdata_path)
-} else {
-  message("No pre-computed data directory found - will compute on-the-fly")
-}
+prepdata_path <- "inst/extdata/prepdata"
 
 localpath_fname <- function(fname) {
   if (!is.null(iseapp_local_path)) {
@@ -93,19 +30,6 @@ localpath_fname <- function(fname) {
   }
   return("")
 }
-
-# ============================================================================
-# DEFERRED DATA LOADING STRATEGY
-# ============================================================================
-# For performance, we defer loading of large datasets (techmap, countrymap,
-# regionmap) until after the app displays. When precomputed data is available,
-# the initial view can render without these datasets.
-#
-# This provides a much faster initial load time since:
-# - techmap.fst is ~40 MB
-# - countrymap.fst is ~12 MB
-# - regionmap.fst varies in size
-# ============================================================================
 
 # Initialize placeholders for deferred data
 # These will be populated by the server on session start
@@ -119,39 +43,16 @@ load_big_datasets <- function() {
   result <- list()
 
   # Load techmap
-  pp <- localpath_fname("/techmap.fst")
-  if (file.exists(pp)) {
-    result$techmap <- read_fst(pp)
-    message("Techmap loaded locally")
-  } else {
-    result$techmap <- dropbox_read_fst("/techmap.fst")
-    message("Techmap loaded from Dropbox")
-  }
+  pp <- localpath_fname("inst/extdata/techmap.fst")
+  result$techmap <- read_fst(pp)
 
   # Load countrymap
-  pp <- localpath_fname("/countrymap.fst")
-  if (file.exists(pp)) {
-    result$countrymap <- read_fst(pp)
-    message("Countrymap loaded locally")
-  } else {
-    result$countrymap <- dropbox_read_fst("/countrymap.fst")
-    message("Countrymap loaded from Dropbox")
-  }
+  pp <- localpath_fname("inst/extdata/countrymap.fst")
+  result$countrymap <- read_fst(pp)
 
   # Load regionmap
-  pp_region <- localpath_fname("/regionmap.fst")
-  if (file.exists(pp_region)) {
-    result$regionmap <- read_fst(pp_region)
-    message("Regionmap loaded locally with ", nrow(result$regionmap), " rows")
-  } else {
-    tryCatch({
-      result$regionmap <- dropbox_read_fst("/regionmap.fst")
-      message("Regionmap loaded from Dropbox with ", nrow(result$regionmap), " rows")
-    }, error = function(e) {
-      message("Could not load regionmap: ", e$message)
-      result$regionmap <- NULL
-    })
-  }
+  pp_region <- localpath_fname("inst/extdata/regionmap.fst")
+  result$regionmap <- read_fst(pp_region)
 
   result
 }
@@ -160,9 +61,6 @@ load_big_datasets <- function() {
 has_precomputed_data <- !is.null(prepdata_path) && dir.exists(prepdata_path)
 
 if (has_precomputed_data) {
-  message("Precomputed data available - deferring big dataset loading for faster startup")
-  # Create minimal placeholder techmap with just technology names for UI initialization
-  # This allows the app UI to render immediately
   techmap_placeholder <- data.frame(
     docdb_family_id = integer(0),
     technology = character(0)
@@ -174,55 +72,10 @@ if (has_precomputed_data) {
   )
   regionmap <- NULL
   regionmap_available <- FALSE
-} else {
-  # No precomputed data - must load everything upfront
-  message("No precomputed data - loading big datasets synchronously")
-  datasets <- load_big_datasets()
-  techmap <- datasets$techmap
-  countrymap <- datasets$countrymap
-  regionmap <- datasets$regionmap
-  regionmap_available <- !is.null(regionmap) && nrow(regionmap) > 0
 }
 
 #rsconnect::writeManifest()
 enableBookmarking(store = "url")
-
-# Harmonize UI and plot fonts across environments
-thematic::thematic_shiny(font = "Arial")
-
-# Ensure figures default to a sans-serif font as well
-theme_set(theme_minimal(base_family = "Arial"))
-update_geom_defaults("text", list(family = "Arial"))
-update_geom_defaults("label", list(family = "Arial"))
-
-
-
-
-#for (ff in files) {
-#  patchar_countrymap <- patchar_countrymap %>% left_join(read_parquet(ff))
-#}
-
-#techmap <- read_fst("techmap.fst")
-
-
-
-#df <- reactive({
-#  url <- "https://www.dropbox.com/scl/fi/j09lnxxd2wa2e1rlkywtd/techmap.fst?rlkey=rhq6w51bh9bzqz8rywmlwfuqj&st=f0napf4g&dl=1"
-  
-#  temp_file <- tempfile(fileext = ".fst")
-#  download.file(url, temp_file, mode = "wb", quiet = TRUE)
-#  techmap <- read_fst(temp_file)
-#  unlink(temp_file)
-#})
-
-
-#temp_file <- tempfile(fileext = ".fst")
-#drop_download("/techmap.fst", local_path = temp_file, overwrite = TRUE)
-#techmap <- read_fst(temp_file)
-#unlink(temp_file)
-
-
-#techmap %>% distinct(technology) %>% pull(technology)
 
 # Function to process techmap after loading (adds "All" category and normalizes names)
 process_techmap <- function(techmap_raw, countrymap_data) {
@@ -242,11 +95,6 @@ process_techmap <- function(techmap_raw, countrymap_data) {
     default = technology
   )]
   techmap_processed
-}
-
-# Process techmap if we have real data loaded (not placeholders)
-if (!has_precomputed_data && nrow(techmap) > 0 && nrow(countrymap) > 0) {
-  techmap <- process_techmap(techmap, countrymap)
 }
 
 green_classes <- c("Green Technology","Green Energy", "Green Transport", "Circular Economy", "Green Manufacturing",
@@ -289,10 +137,6 @@ if (has_precomputed_data) {
   # Known technology categories - these match what's in the precomputed data
   all_techs <- c("All", green_classes, battery_classes, hard_to_abate_classes, ai_classes, cpc_sections, agrifood_classes)
   all_techs <- unique(all_techs)
-} else {
-  all_techs <- c((techmap %>% distinct(technology))$technology, "All")
-  # Remove "Other" if it exists - it's not a real technology category
-  all_techs <- setdiff(all_techs, "Other")
 }
 
 # Create grouped technology choices
@@ -364,10 +208,8 @@ spillovers = list(
   
 )
 
-
 toflow_choices <- list("Marginal Returns"= marginal,"Average Returns"=average,
                        "Average Spillovers"=spillovers)
-
 
 get_available_iso2 <- function() {
   candidates <- c("country_code", "iso2c", "iso2")
@@ -500,301 +342,8 @@ get_region_name <- function(code) {
 
 # Define UI
 ui <- function(request){fluidPage(
-  # Add Google Font
-  addGFontHtmlDependency(family = "Open Sans"),
-  
-  # Add custom CSS
-  tags$head(
-    tags$script(async = NA, 
-                src = "https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"),
-    tags$script(HTML("
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-      gtag('config', 'G-YY70D2F685');
-    ")),
-    tags$style(HTML("
-      h1 {
-        font-family: 'Courier New', monospace;
-        font-size: 50px;
-        font-weight: bold;
-        color: #2C3E50;
-      }
-      .intro-text {
-        font-family: 'Arial', sans-serif;
-        font-size: 20px;
-        color: #34495E;
-        margin-bottom: 20px;
-      }
-      body {
-        font-family: 'Open Sans', sans-serif;
-      }
-      svg text {
-        font-family: 'Open Sans', sans-serif !important;
-      }
-    "))
-  ),
-  
-  tags$h1("Welcome to ISE - The Innovation Strategy Explorer"),
-  
-  tags$style(HTML("
-  details {
-    margin-bottom: 20px;
-    font-family: 'Arial', sans-serif;
-    font-size: 15px;
-    color: #34495E;
-  }
-  summary.toggle-summary {
-    font-weight: bold;
-    font-size: 15px;
-    cursor: pointer;
-    padding: 10px;
-    background-color: #ecf0f1;
-    border: 1px solid #bdc3c7;
-    border-radius: 5px;
-    transition: background-color 0.3s ease;
-  }
-  summary.toggle-summary:hover {
-    background-color: #d0d7de;
-  }
-")),
-  
-  
-  #titlePanel("Welcome to ISE - The Innovation Strategy Explorer"),
-  
-  tags$details(
-    tags$summary("▼ About this tool", class = "toggle-summary"),
-    tags$br(),
-    tags$p("This tool supports the development of an innovation strategy at various scopes
-     for either governments or (impact) investors.
-     It examines where marginal spillover from innovation are highest and
-     thus there is a case for further investments in R&D.
-     The tool builds on the methodology proposed in Guillard et al. ",
-      tags$a(href = "https://cep.lse.ac.uk/_NEW/publications/abstract.asp?index=8614",
-             target = "_blank", "Efficient Industrial Policy - Standing on the Shoulders of Hidden Giants."),
-      " The figures show the returns from further investment in R&D in different technology areas and specific
-     countries via knowledge spillovers; that is a return of 100% means that further R&D investment of 1000 Euro
-     will lead to extra profits worth 1000 Euro for innovators different from the investor undertaking the additional spending.",
-      tags$br(),
-      "The methodology is informed by data from patents. Spillovers are derived from citations between patents. Crucially, the approach takes
-     into account direct as well as indirect citations where one innovation is connected to another via a citation chain of any degree of separation.
-     The private economic value of an innovation to an inventor is derived using the approach proposed by Kogan et al ",
-      tags$a(href = "https://academic.oup.com/qje/article-abstract/132/2/665/3076284?redirectedFrom=fulltext",
-             target = "_blank", "Technological Innovation, Resource Allocation, and Growth"),
-      tags$br(),
-      "You can display the average returns for different countries or country groups broken down by technology areas. You can also examine this for different scopes of spillovers.",
-      "Global Returns takes into account spillover benefits to inventors anywhere. Returns LMICs only take into account spillover benefits to innovators in Low and Medium Income countries.",
-      class = "intro-text"
-    )
-  ),
 
   bookmarkButton("Bookmark current data view...."),
-  # Add CSS and JavaScript for collapsible plot
-  tags$style(HTML("
-    .plot-toggle {
-      font-weight: 400;
-      font-size: 11px;
-      cursor: pointer;
-      padding: 2px 8px;
-      background-color: transparent;
-      color: #888;
-      border: none;
-      border-radius: 3px;
-      margin: 4px 0;
-      transition: all 0.2s ease;
-      display: inline-block;
-      width: auto;
-    }
-    .plot-toggle:hover {
-      background-color: rgba(0, 0, 0, 0.05);
-      color: #555;
-    }
-    .plot-container {
-      overflow: hidden;
-      transition: max-height 0.3s ease;
-    }
-  ")),
-
-  tags$script(HTML("
-    $(document).ready(function() {
-      $('#togglePlot1').click(function() {
-        var plot = $('#plot1Container');
-        var button = $(this);
-        if (plot.is(':visible')) {
-          plot.slideUp(300);
-          button.text('▼ more');
-        } else {
-          plot.slideDown(300);
-          button.text('▲ less');
-        }
-      });
-      $('#togglePlot1_region').click(function() {
-        var plot = $('#plot1Container_region');
-        var button = $(this);
-        if (plot.is(':visible')) {
-          plot.slideUp(300);
-          button.text('▼ more');
-        } else {
-          plot.slideDown(300);
-          button.text('▲ less');
-        }
-      });
-      $('#toggleReturns').click(function() {
-        var plot = $('#returnsContainer');
-        var button = $(this);
-        if (plot.is(':visible')) {
-          plot.slideUp(300);
-          button.text('▼ more');
-        } else {
-          plot.slideDown(300);
-          button.text('▲ less');
-        }
-      });
-      $('#toggleReturns_region').click(function() {
-        var plot = $('#returnsContainer_region');
-        var button = $(this);
-        if (plot.is(':visible')) {
-          plot.slideUp(300);
-          button.text('▼ more');
-        } else {
-          plot.slideDown(300);
-          button.text('▲ less');
-        }
-      });
-      $('#toggleReturnsBar').click(function() {
-        var plot = $('#returnsBarContainer');
-        var button = $(this);
-        if (plot.is(':visible')) {
-          plot.slideUp(300);
-          button.text('▼ more');
-        } else {
-          plot.slideDown(300);
-          button.text('▲ less');
-        }
-      });
-      $('#toggleReturnsBar_region').click(function() {
-        var plot = $('#returnsBarContainer_region');
-        var button = $(this);
-        if (plot.is(':visible')) {
-          plot.slideUp(300);
-          button.text('▼ more');
-        } else {
-          plot.slideDown(300);
-          button.text('▲ less');
-        }
-      });
-    });
-  ")),
-
-  # JavaScript to auto-update browser address bar with input values
-  tags$script(HTML("
-    $(document).ready(function() {
-      // Function to build query string with current input values
-      function buildQueryString() {
-        var params = [];
-
-        // Get current tab
-        var currentTab = $('#main_tabs li.active a').attr('data-value') ||
-                         $('#main_tabs .nav-link.active').attr('data-value') ||
-                         'Country Explorer';
-        params.push('_inputs_&main_tabs=' + encodeURIComponent('\"' + currentTab + '\"'));
-
-        // Country Explorer inputs
-        var country = getShinyInputValue('country');
-        if (country) params.push('country=' + encodeURIComponent(JSON.stringify(country)));
-
-        var toflow = getShinyInputValue('toflow');
-        if (toflow) params.push('toflow=' + encodeURIComponent('\"' + toflow + '\"'));
-
-        var techCat1 = getShinyInputValue('tech_categories_plot1');
-        if (techCat1) params.push('tech_categories_plot1=' + encodeURIComponent(JSON.stringify(techCat1)));
-
-        var bwidthscale = getShinyInputValue('bwidthscale');
-        if (bwidthscale) params.push('bwidthscale=' + encodeURIComponent('\"' + bwidthscale + '\"'));
-
-        var displayMode = getShinyInputValue('display_mode');
-        if (displayMode) params.push('display_mode=' + encodeURIComponent('\"' + displayMode + '\"'));
-
-        var showTop3 = getShinyInputValue('show_top3_ids');
-        if (showTop3 !== null) params.push('show_top3_ids=' + encodeURIComponent(showTop3));
-
-        var techs = getShinyInputValue('techs');
-        if (techs) params.push('techs=' + encodeURIComponent(JSON.stringify(techs)));
-
-        var techsComp = getShinyInputValue('techs_comparison');
-        if (techsComp && techsComp.length > 0) params.push('techs_comparison=' + encodeURIComponent(JSON.stringify(techsComp)));
-
-        var topn = getShinyInputValue('topn');
-        if (topn) params.push('topn=' + encodeURIComponent(topn));
-
-        var mininno = getShinyInputValue('mininno');
-        if (mininno) params.push('mininno=' + encodeURIComponent(mininno));
-
-        // Region Explorer inputs
-        var region = getShinyInputValue('region');
-        if (region) params.push('region=' + encodeURIComponent(JSON.stringify(region)));
-
-        var toflowRegion = getShinyInputValue('toflow_region');
-        if (toflowRegion) params.push('toflow_region=' + encodeURIComponent('\"' + toflowRegion + '\"'));
-
-        var techCat1Region = getShinyInputValue('tech_categories_plot1_region');
-        if (techCat1Region) params.push('tech_categories_plot1_region=' + encodeURIComponent(JSON.stringify(techCat1Region)));
-
-        var bwidthscaleRegion = getShinyInputValue('bwidthscale_region');
-        if (bwidthscaleRegion) params.push('bwidthscale_region=' + encodeURIComponent('\"' + bwidthscaleRegion + '\"'));
-
-        var displayModeRegion = getShinyInputValue('display_mode_region');
-        if (displayModeRegion) params.push('display_mode_region=' + encodeURIComponent('\"' + displayModeRegion + '\"'));
-
-        var showTop3Region = getShinyInputValue('show_top3_ids_region');
-        if (showTop3Region !== null) params.push('show_top3_ids_region=' + encodeURIComponent(showTop3Region));
-
-        var techsRegion = getShinyInputValue('techs_region');
-        if (techsRegion) params.push('techs_region=' + encodeURIComponent(JSON.stringify(techsRegion)));
-
-        var techsCompRegion = getShinyInputValue('techs_comparison_region');
-        if (techsCompRegion && techsCompRegion.length > 0) params.push('techs_comparison_region=' + encodeURIComponent(JSON.stringify(techsCompRegion)));
-
-        var topnRegion = getShinyInputValue('topn_region');
-        if (topnRegion) params.push('topn_region=' + encodeURIComponent(topnRegion));
-
-        var mininnoRegion = getShinyInputValue('mininno_region');
-        if (mininnoRegion) params.push('mininno_region=' + encodeURIComponent(mininnoRegion));
-
-        return '?' + params.join('&');
-      }
-
-      // Helper to get Shiny input values
-      function getShinyInputValue(inputId) {
-        if (Shiny && Shiny.shinyapp && Shiny.shinyapp.$inputValues) {
-          return Shiny.shinyapp.$inputValues[inputId];
-        }
-        return null;
-      }
-
-      // Update the browser address bar
-      function updateBrowserUrl() {
-        var queryString = buildQueryString();
-        var newUrl = window.location.pathname + queryString;
-        history.replaceState(null, '', newUrl);
-      }
-
-      // Listen for any Shiny input changes
-      $(document).on('shiny:inputchanged', function(event) {
-        // Debounce URL updates
-        clearTimeout(window.urlUpdateTimeout);
-        window.urlUpdateTimeout = setTimeout(updateBrowserUrl, 300);
-      });
-
-      // Initial update after Shiny is connected
-      $(document).on('shiny:connected', function() {
-        setTimeout(updateBrowserUrl, 500);
-      });
-    });
-  ")),
-
-  # Spacer between bookmark button and tabs
-  tags$div(style = "margin-top: 20px;"),
 
   # Tabbed interface
   tabsetPanel(
@@ -811,6 +360,7 @@ ui <- function(request){fluidPage(
           choices = grouped_choices,
           selected = "All countries",
           multiple = TRUE,
+          width = "100%",
           options = list(placeholder = 'Choose one or more countries or groups...')
         ),
         selectizeInput(
@@ -819,7 +369,7 @@ ui <- function(request){fluidPage(
           choices = toflow_choices,
           selected = "istrax_global",
           multiple = FALSE,
-          width = "400px",
+          width = "100%",
           options = list(placeholder = 'Choose a return flow...')
         ),
         selectizeInput(
@@ -828,7 +378,7 @@ ui <- function(request){fluidPage(
           choices = grouped_techs,
           selected = c("AI","Green Technology"),
           multiple = TRUE,
-          width = "200%",
+          width = "100%",
           options = list(placeholder = 'Choose one or more technology categories...')
         ),
         radioButtons(
@@ -1241,14 +791,6 @@ server <- function(input, output, session) {
       invalidateLater(100)
     }
   })
-
-  #colorings=list(green=green_classes,battery=battery_classes,hard_to_abate=hard_to_abate_classes,ai=ai_classes)
-
-
-
-  #for (ff in files) {
-  #  patchar_countrymap <- patchar_countrymap %>% left_join(read_parquet(ff))
-  #}
 
 
   patchar_countrymap <- reactive({
