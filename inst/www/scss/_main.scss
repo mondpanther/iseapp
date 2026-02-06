@@ -1,40 +1,112 @@
-// techMarker_scss_colors
-//$zrsa-green: #76ba43;
-//$zrsa-gray: #2b302d;
-//$zrsa-bluegreen: #0e3d45;
-//$zrsa-red: #ef4136;
+// Color palette from IFC report
 $navbar-col: #FFFFFF;
-$sidebar-col: rgba(0,0,0, 0.05);
-$background-dark-col: #2B302D;
+$sidebar-col: #fafff2ff; 
+$background-dark-col: #0E3D45;
 $background-light-col: #FFFFFF;
 $background-gray-col: rgba(0,0,0, 0.05);
-$primary-col: #0E3D45;
+$primary-col: #006c5b;
 $primary-col-rgba: rgba(14, 61, 69, 0.10);
-$secondary-col1: #76BA43;
-$secondary-col1-rgba: rgba(118, 186, 67, 0.10);
-$secondary-col2: #EF4136;
-$secondary-col2-rgba: rgba(239, 65, 54, 0.10);
-$inactive-tab-col: #666666;
-$font-dark: #2B302D;
-$font-light: #FFFFFF;
-$font-black: #000000;
-$font-white: #FFFFFF;
-$font-gray: #2B302D;
+$accent-col: #789d49;  // Lime green
+$accent-col-rgba: rgba(118, 186, 67, 0.10);
+$secondary-col: #EF4136;  // Red accent
+$secondary-col-rgba: rgba(239, 65, 54, 0.10);
+$green-bg: #dde8cd;
 $tan-bg: #E8E4D9;
+$inactive-tab-col: #666666;
+$font-dark: #0E3D45;
+$font-light: #FFFFFF;
+$border-radius: 8px;
 
+// Typography
 html {
-	.error {
-		color: red;
-	}
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: $font-dark;
+  
+  body {
+    background-color: #FAFAFA;
+  }
 
-	h1 {
-	  color: $primary-col;
-	}
+  .error {
+    color: $secondary-col;
+    font-weight: 500;
+  }
 
-  nav {
+  h1, h2, h3, h4, h5, h6 {
+    color: $primary-col;
+    font-weight: 600;
+  }
+
+  h1 {
+    font-size: 2rem;
+    margin-bottom: 1.5rem;
+  }
+
+  h5 {
+    font-size: 0.875rem;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  p {
+    color: $font-dark;
+  }
+
+  // Navbar styling
+  nav.navbar {
+    background-color: $navbar-col !important;
+    border-bottom: 1px solid rgba(0,0,0,0.08);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+
     span[class="navbar-brand"] {
       height: 50px;
       width: 50px;
+    }
+
+    .navbar-brand {
+      padding: 0;
+      margin: 0;
+      font-size: unset
+    }
+
+    .navbar-title-container {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      height: inherit;
+      margin: 0 auto;
+
+      .navbar-logo {
+        height: 40px;
+      }
+
+      .navbar-separator {
+        width: 1px;
+        height: 40px;
+        background-color: #D1D5DB;
+      }
+
+      .navbar-title-text {
+        margin: 0;
+        font-size: 1.5rem;
+        line-height: 1;
+      }
+    }
+
+    .nav-link {
+      color: $primary-col;
+      font-weight: 500;
+      transition: all 0.2s ease;
+
+      &:hover {
+        color: $accent-col;
+      }
+
+      &.active {
+        color: $accent-col;
+        font-weight: 600;
+      }
     }
   }
 
@@ -43,50 +115,353 @@ html {
     right: 25px;
   }
 
-  // Add curved decorative elements
-  .page-content {
-    position: relative;
-    
-    &::before {
-      content: "";
-      position: absolute;
-      width: 300px;
-      height: 300px;
-      border-radius: 50%;
-      background: $tan-bg;
-      opacity: 0.3;
-      z-index: -1;
-    }
+  // Sidebar styling
+
+  .sidebar {
+    background-color: $sidebar-col !important;
+    border-radius: $border-radius;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    border: none;
   }
 
-  // Sidebar styling
   .side_input {
-    margin-bottom: 15px;
+    margin-bottom: 1.25rem;
   }
   
   .side_input_cont {
-    margin-bottom: 20px;
+    margin-bottom: 1.75rem;
   }
-  
-  // Navbar alignment - push tabs to the right
-  .navbar-nav {
-    margin-left: auto;
+
+  // Form inputs styling
+  .form-control, .selectize-input {
+    border: 1px solid #D1D5DB;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+
+    &:focus {
+      border-color: $accent-col;
+      box-shadow: 0 0 0 3px $accent-col-rgba;
+    }
   }
-  
+
+  .form-label {
+    color: $font-dark;
+    font-weight: 500;
+    font-size: 0.875rem;
+    margin-bottom: 0.5rem;
+  }
+
+  // Radio buttons and checkboxes
+  .radio, .checkbox {
+    margin-bottom: 0.5rem;
+    
+    label {
+      font-weight: 400;
+      color: $font-dark;
+    }
+  }
+
+  input[type="radio"]:checked,
+  input[type="checkbox"]:checked {
+    background-color: $accent-col;
+    border-color: $accent-col;
+  }
+
+  // Card styling
+  .card {
+    border: none;
+    border-radius: $border-radius;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    margin-bottom: 1.5rem;
+    background-color: $background-light-col;
+
+    .card-header {
+      background-color: transparent;
+      border-bottom: 2px solid $background-gray-col;
+      font-weight: 600;
+      color: $primary-col;
+    }
+
+  }
+
   // Card tab styling
   .nav-tabs {
-    border-bottom: 2px solid $background-gray-col;
+    border-bottom: 2px solid #E5E7EB;
+    gap: 0.5rem;
     
     .nav-link {
       font-weight: 500;
       color: $inactive-tab-col;
+      border: none;
+      border-bottom: 3px solid transparent;
+      transition: all 0.2s ease;
+      border-radius: 0;
+
+      &:hover {
+        color: $primary-col;
+        border-bottom-color: rgba(14, 61, 69, 0.3);
+      }
       
       &.active {
         color: $primary-col;
-        border-bottom: 3px solid $primary-col;
+        background-color: transparent;
+        border-bottom: 3px solid $accent-col;
+        font-weight: 600;
       }
     }
   }
-  
+
+  // Button styling
+  .btn {
+    border-radius: 6px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    border: none;
+
+    &.btn-primary {
+      background-color: $accent-col;
+      color: $font-light;
+
+      &:hover {
+        background-color: darken($accent-col, 10%);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(118, 186, 67, 0.3);
+      }
+    }
+
+    &.btn-secondary {
+      background-color: $primary-col;
+      color: $font-light;
+
+      &:hover {
+        background-color: lighten($primary-col, 10%);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(14, 61, 69, 0.3);
+      }
+    }
+
+    &.btn-outline-primary {
+      border: 2px solid $accent-col;
+      color: $accent-col;
+      background-color: transparent;
+
+      &:hover {
+        background-color: $accent-col;
+        color: $font-light;
+      }
+    }
+  }
+
+  // Action button
+  .action-button {
+    background-color: $accent-col;
+    color: $font-light;
+    border: none;
+    border-radius: 6px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:hover {
+      background-color: darken($accent-col, 10%);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 8px rgba(118, 186, 67, 0.3);
+    }
+  }
+
+  // Download button
+  .shiny-download-link {
+    background-color: $secondary-col;
+    color: $font-light;
+    border-radius: 6px;
+    text-decoration: none;
+    display: inline-block;
+    font-weight: 500;
+    transition: all 0.2s ease;
+
+    &:hover {
+      background-color: darken($secondary-col, 10%);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 8px rgba(239, 65, 54, 0.3);
+      text-decoration: none;
+      color: $font-light;
+    }
+  }
+
+  // Plot containers
+  .plotly, .shiny-plot-output {
+    border-radius: $border-radius;
+    overflow: hidden;
+  }
+
+  // Value box styling (if using bslib value boxes)
+  .value-box {
+    background: linear-gradient(135deg, $primary-col 0%, lighten($primary-col, 15%) 100%);
+    color: $font-light;
+    border-radius: $border-radius;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+
+    .value-box-title {
+      font-size: 0.875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      opacity: 0.9;
+    }
+
+    .value-box-value {
+      font-size: 2rem;
+      font-weight: 700;
+      margin: 0.5rem 0;
+    }
+
+    &.accent {
+      background: linear-gradient(135deg, $accent-col 0%, lighten($accent-col, 15%) 100%);
+    }
+  }
+
+  // Alert/notification styling
+  .alert {
+    border-radius: $border-radius;
+    border: none;
+
+    &.alert-info {
+      background-color: $primary-col-rgba;
+      color: $primary-col;
+      border-left: 4px solid $primary-col;
+    }
+
+    &.alert-success {
+      background-color: $accent-col-rgba;
+      color: darken($accent-col, 20%);
+      border-left: 4px solid $accent-col;
+    }
+
+    &.alert-warning {
+      background-color: $secondary-col-rgba;
+      color: darken($secondary-col, 20%);
+      border-left: 4px solid $secondary-col;
+    }
+  }
+
+  // Scrollbar styling
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #F3F4F6;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #D1D5DB;
+    border-radius: 4px;
+
+    &:hover {
+      background: #9CA3AF;
+    }
+  }
+
+  // Loading spinner
+  .shiny-spinner-output-container {
+    .load-container {
+      .loader {
+        border-top-color: $accent-col;
+      }
+    }
+  }
 }
+
+// // techMarker_scss_colors
+// //$zrsa-green: #76ba43;
+// //$zrsa-gray: #2b302d;
+// //$zrsa-bluegreen: #0e3d45;
+// //$zrsa-red: #ef4136;
+// $navbar-col: #FFFFFF;
+// $sidebar-col: rgba(0,0,0, 0.05);
+// $background-dark-col: #2B302D;
+// $background-light-col: #FFFFFF;
+// $background-gray-col: rgba(0,0,0, 0.05);
+// $primary-col: #0E3D45;
+// $primary-col-rgba: rgba(14, 61, 69, 0.10);
+// $secondary-col1: #76BA43;
+// $secondary-col1-rgba: rgba(118, 186, 67, 0.10);
+// $secondary-col2: #EF4136;
+// $secondary-col2-rgba: rgba(239, 65, 54, 0.10);
+// $inactive-tab-col: #666666;
+// $font-dark: #2B302D;
+// $font-light: #FFFFFF;
+// $font-black: #000000;
+// $font-white: #FFFFFF;
+// $font-gray: #2B302D;
+// $tan-bg: #E8E4D9;
+
+// html {
+// 	.error {
+// 		color: red;
+// 	}
+
+// 	h1 {
+// 	  color: $primary-col;
+// 	}
+
+//   nav {
+//     span[class="navbar-brand"] {
+//       height: 50px;
+//       width: 50px;
+//     }
+//   }
+
+//   li[class="dropdown nav-item"] {
+//     position: absolute;
+//     right: 25px;
+//   }
+
+//   // Add curved decorative elements
+//   .page-content {
+//     position: relative;
+    
+//     &::before {
+//       content: "";
+//       position: absolute;
+//       width: 300px;
+//       height: 300px;
+//       border-radius: 50%;
+//       background: $tan-bg;
+//       opacity: 0.3;
+//       z-index: -1;
+//     }
+//   }
+
+//   // Sidebar styling
+//   .side_input {
+//     margin-bottom: 15px;
+//   }
+  
+//   .side_input_cont {
+//     margin-bottom: 20px;
+//   }
+  
+//   // Navbar alignment - push tabs to the right
+//   .navbar-nav {
+//     margin-left: auto;
+//   }
+  
+//   // Card tab styling
+//   .nav-tabs {
+//     border-bottom: 2px solid $background-gray-col;
+    
+//     .nav-link {
+//       font-weight: 500;
+//       color: $inactive-tab-col;
+      
+//       &.active {
+//         color: $primary-col;
+//         border-bottom: 3px solid $primary-col;
+//       }
+//     }
+//   }
+  
+// }
 
