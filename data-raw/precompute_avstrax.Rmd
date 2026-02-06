@@ -1,0 +1,579 @@
+---
+title: "Pre-compute avstrax Data for ISE App Performance"
+output: html_notebook
+---
+
+# Overview
+
+This notebook analyzes the ISE Shiny app to identify all parameter combinations that affect
+the `avstrax` computation, and pre-computes the aggregated data frames to speed up the app.
+
+The pre-computed data will be stored in `prepdata/` subfolder in the iseapp Dropbox folder.
+
+## Parameter Analysis
+
+The app has two main visualizations that require expensive computation:
+
+### Plot 1: Returns by Technology (for selected countries)
+**Function:** `plot_avstrax_by_country()` calls `compute_avstrax()`
+
+Parameters affecting computation:
+- `toflow`: The return flow variable (istrax_*, avstrax_*, ev_*)
+- `country_code`: Selected countries or country groups
+- `tech_categories`: Technology categories to display
+
+### Plot 2: Returns by Country (for selected technologies)
+**Function:** `plot_avstrax_by_technology()` calls `compute_avstrax_for_techs()`
+
+Parameters affecting computation:
+- `toflow`: The return flow variable
+- `techs`: Selected technology categories
+- Country filtering (from Plot 1 selection)
+
+### Region Plots
+Same structure as country plots but using regionmap instead of countrymap.
+
+## Pre-computation Strategy
+
+We'll pre-compute for the most common combinations:
+
+1. **By Technology** (for Plot 1): For each `toflow` × `country_group`
+2. **By Country** (for Plot 2): For each `toflow` × `technology_category`
+3. **By Region** (for Region tab): For each `toflow` × `technology_category`
+
+# Setup
+
+```{r setup}
+library(fst)
+library(dplyr)
+library(tidyr)
+library(data.table)
+
+# source("dropbox_auth.R")
+
+# # Dropbox path detection (same as app.R)
+# get_dropbox_path <- function() {
+#   if (.Platform$OS.type == "windows") {
+#     info_paths <- c(
+#       file.path(Sys.getenv("APPDATA"), "Dropbox", "info.json"),
+#       file.path(Sys.getenv("LOCALAPPDATA"), "Dropbox", "info.json")
+#     )
+#   } else {
+#     info_paths <- file.path(Sys.getenv("HOME"), ".dropbox", "info.json")
+#   }
+#   for (p in info_paths) {
+#     if (file.exists(p)) {
+#       info <- jsonlite::fromJSON(p)
+#       if (!is.null(info$business)) return(info$business$path)
+#       else if (!is.null(info$personal)) return(info$personal$path)
+#     }
+#   }
+#   return(NULL)
+# }
+
+# get_local_iseapp_path <- function() {
+#   env_path <- Sys.getenv("ISEAPP_PATH_LOCAL")
+#   if (nzchar(env_path) && dir.exists(env_path)) return(env_path)
+#   dropbox_root <- get_dropbox_path()
+#   if (!is.null(dropbox_root)) {
+#     iseapp_path <- file.path(dropbox_root, "Apps", "iseapp")
+#     if (dir.exists(iseapp_path)) return(iseapp_path)
+#   }
+#   return(NULL)
+# }
+# iseapp_local_path <- get_local_iseapp_path()
+
+iseapp_local_path <- "."
+
+message("Using iseapp path: ", iseapp_local_path)
+
+localpath_fname <- function(fname) {
+  # Remove leading slashes and construct path from package root
+  fname <- sub("^/+", "", fname)
+  return(file.path(fname))
+}
+
+# Create prepdata directory
+# prepdata_path <- file.path(iseapp_local_path, "prepdata")
+prepdata_path <- "inst/extdata/prepdata"
+if (!dir.exists(prepdata_path)) {
+  dir.create(prepdata_path, recursive = TRUE)
+  message("Created prepdata directory: ", prepdata_path)
+}
+```
+
+# Define All Parameter Options
+
+```{r define-parameters}
+# ============================================
+# TOFLOW OPTIONS (Return flow variables)
+# ============================================
+# These are the istrax files in the istraxes folder
+
+toflow_vars <- c(
+  # Marginal Returns
+  "istrax_global",
+  "istrax_nationalkey_2009_2018",
+  "istrax_EMDE",
+  "istrax_EMDENOCN",
+  "istrax_EMDENOCNIN",
+  "istrax_HIC",
+  "istrax_EU",
+  "istrax_US",
+  "istrax_CN",
+  "istrax_GB",
+  "istrax_AT",
+  "istrax_FR",
+  # Average Returns
+  "avstrax_global",
+  "avstrax_nationalkey_2009_2018",
+  "avstrax_EMDE",
+  "avstrax_EMDENOCN",
+  "avstrax_EMDENOCNIN",
+  "avstrax_HIC",
+  "avstrax_EU",
+  "avstrax_US",
+  "avstrax_CN",
+  "avstrax_GB",
+  "avstrax_AT",
+  "avstrax_FR",
+  # Spillovers
+  "ev_global",
+  "ev_nationalkey_2009_2018",
+  "ev_EMDE",
+  "ev_EMDENOCN",
+  "ev_EMDENOCNIN",
+  "ev_HIC",
+  "ev_EU",
+  "ev_US",
+  "ev_CN",
+  "ev_GB",
+  "ev_AT",
+  "ev_FR"
+)
+
+# ============================================
+# COUNTRY GROUP OPTIONS
+# ============================================
+all_countries <- sort(unique(na.omit(countrycode::codelist$iso2c)))
+
+lmics <- c("AF","AL","DZ","AO","AR","AM","AZ","BD","BJ","BO","BA","BW","BR","BG",
+           "BF","BI","KH","CM","CV","CF","TD","CL","CN","CO","KM","CG","CR","CI",
+           "CU","DJ","DM","DO","EC","EG","SV","GQ","ER","ET","FJ","GA","GM","GE",
+           "GH","GT","GN","GW","GY","HT","HN","IN","ID","IR","IQ","JM","JO","KZ",
+           "KE","KI","KP","KG","LA","LB","LS","LR","LY","MG","MW","MY","MV","ML",
+           "MR","MU","MX","MD","MN","ME","MA","MZ","MM","NA","NP","NI","NE","NG",
+           "MK","PK","PW","PA","PG","PY","PE","PH","RW","WS","ST","SN","RS","SC",
+           "SL","SB","SO","ZA","LK","SD","SR","SY","TJ","TZ","TH","TL","TG","TO",
+           "TN","TR","TM","TV","UG","UA","UZ","VU","VE","VN","YE","ZM","ZW")
+
+eu_countries <- c("AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR",
+                  "HU","IE","IT","LV","LT","LU","MT","NL","PL","PT","RO","SK",
+                  "SI","ES","SE")
+
+hic <- setdiff(all_countries, lmics)
+
+country_groups <- list(
+  "All_countries" = all_countries,
+  "LMICs" = lmics,
+  "LMICs_excl_China" = setdiff(lmics, "CN"),
+  "EU_countries" = eu_countries,
+  "High_income_countries" = hic
+)
+
+# ============================================
+# TECHNOLOGY CATEGORY OPTIONS
+# ============================================
+green_classes <- c("Green Technology", "Green Energy", "Green Transport",
+                   "Circular Economy", "Green Manufacturing", "Adaptation",
+                   "Green Housing", "Green ICT", "Green Agriculture", "GHG Capture")
+
+battery_classes <- c("Battery Technology", "Lithium Extraction & Processing",
+                     "Graphite & Carbon Materials", "Cathode Materials", "Anode Materials",
+                     "Electrolytes & Additives", "Separators", "Battery Cell Design & Assembly",
+                     "Battery Management Systems (BMS)", "Electric Vehicles & Mobility",
+                     "Battery Recycling & Recovery")
+
+hard_to_abate_classes <- c("Hard to Abate Sector Decarbonization", "Aviation Decarbonisation",
+                           "Cement & Concrete Decarbonisation", "Chemicals & Plastics Decarbonisation",
+                           "Shipping Decarbonisation", "Steel & Iron Decarbonisation")
+
+ai_classes <- c("AI", "Machine Learning", "Deep Learning", "Natural Language Processing (NLP)",
+                "Computer Vision", "Speech Recognition & Synthesis", "Robotics & Autonomous Systems",
+                "Knowledge Representation & Reasoning", "Planning & Decision Making", "Generative AI",
+                "Semiconductors", "Cloud & Data Infrastructure", "Data Rettrieval & Processing System",
+                "Platform & Frameworks", "Deployment & Support")
+
+cpc_sections <- c("Human Necessities", "Performing Operations; Transporting ",
+                  "Chemistry; Metallurgy ", "Textiles; Paper", "Fixed Constructions",
+                  "Mechanical Engineering; Lighting; Heating; Weapons; Blasting",
+                  "Physics", "Electricity", "General tagging of new or cross-sectional technology")
+
+agrifood_classes <- c("Any Agriculture & Food technology", "Input supply", 
+                      "Primary food and feed production", "Post-harvest handling & aggregation", 
+                      "Processing", "Distribution/wholesale", "Retail/consumption", "Crosscutting")
+
+colorings <- list(
+  green = green_classes,
+  battery = battery_classes,
+  hard_to_abate = hard_to_abate_classes,
+  ai = ai_classes,
+  cpcsecs = cpc_sections,
+  agrifood = agrifood_classes
+)
+
+
+# Key technology categories for pre-computation
+tech_categories <- list(
+  "All" = "All",
+  "Green_Technology" = "Green Technology",
+  "Battery_Technology" = "Battery Technology",
+  "Hard_to_Abate" = "Hard to Abate Sector Decarbonization",
+  "AI" = "AI",
+  "Other" = "Other"
+)
+
+# ============================================
+# UK REGION OPTIONS
+# ============================================
+uk_regions <- c("UKC", "UKD", "UKE", "UKF", "UKG", "UKH", "UKI", "UKJ", "UKK", "UKL", "UKM", "UKN")
+
+cat("Parameter summary:\n")
+cat("- toflow variables:", length(toflow_vars), "\n")
+cat("- Country groups:", length(country_groups), "\n")
+cat("- Technology categories:", length(tech_categories), "\n")
+cat("- UK regions:", length(uk_regions), "\n")
+```
+
+# Load Base Data
+
+```{r load-base-data}
+# Load countrymap
+pp <- localpath_fname("inst/extdata/countrymap.fst")
+if (file.exists(pp)) {
+  countrymap <- read_fst(pp)
+  message("Loaded countrymap: ", nrow(countrymap), " rows")
+} else {
+  stop("countrymap.fst not found")
+}
+
+# Load techmap
+pp <- localpath_fname("inst/extdata/techmap.fst")
+if (file.exists(pp)) {
+  techmap <- read_fst(pp)
+  message("Loaded techmap: ", nrow(techmap), " rows")
+} else {
+  stop("techmap.fst not found")
+}
+
+# Add "All" technology
+techmap <- countrymap %>%
+  select(docdb_family_id) %>%
+  distinct() %>%
+  mutate(technology = "All") %>%
+  bind_rows(techmap)
+
+# Standardize technology names
+setDT(techmap)
+techmap[, technology := fcase(
+  technology == "Any Green technology", "Green Technology",
+  technology == "Any battery technology", "Battery Technology",
+  technology == "Any Hard to Abate technology", "Hard to Abate Sector Decarbonization",
+  default = technology
+)]
+
+# Load regionmap if available
+pp_region <- localpath_fname("inst/extdata/regionmap.fst")
+if (file.exists(pp_region)) {
+  regionmap <- read_fst(pp_region)
+  message("Loaded regionmap: ", nrow(regionmap), " rows")
+} else {
+  regionmap <- NULL
+  message("regionmap.fst not found - skipping region pre-computation")
+}
+```
+
+# Pre-computation Functions
+
+```{r precompute-functions}
+source("R/functions_istraxfunctions.R")
+
+# Function to generate safe filename
+safe_filename <- function(...) {
+  parts <- c(...)
+  name <- paste(parts, collapse = "_")
+  name <- gsub("[^a-zA-Z0-9_]", "_", name)
+  name <- gsub("_+", "_", name)
+  name <- gsub("^_|_$", "", name)
+  paste0(name, ".fst")
+}
+
+# Pre-compute avstrax by technology for a given toflow and country group
+precompute_by_tech <- function(toflow, country_group_name, country_codes) {
+  # Load istrax data
+  istrax_path <- file.path("inst/extdata/istraxes", paste0(toflow, ".fst"))
+  if (!file.exists(istrax_path)) {
+    message("  Skipping - istrax file not found: ", toflow)
+    return(NULL)
+  }
+
+  istrax_data <- read_fst(istrax_path)
+
+  # Replace missing values with 0 in the value column
+  # Some files (avstrax, ev) contain NAs that need to be treated as 0
+  if (toflow %in% names(istrax_data)) {
+    istrax_data[[toflow]][is.na(istrax_data[[toflow]])] <- 0
+  }
+
+  # Join with countrymap on both docdb_family_id and ctry_code
+  data <- countrymap %>%
+    filter(ctry_code %in% country_codes) %>%
+    left_join(istrax_data, by = c("docdb_family_id", "ctry_code"))
+
+  if (nrow(data) == 0) {
+    message("  Skipping - no data for country group: ", country_group_name)
+    return(NULL)
+  }
+
+  # Compute avstrax using the existing function
+  # We need to pass techmap as classes
+  result <- tryCatch({
+    compute_avstrax(data, toflow, techmap, colorings = colorings)
+  }, error = function(e) {
+    message("  Error computing avstrax: ", e$message)
+    return(NULL)
+  })
+
+  if (!is.null(result)) {
+    result$toflow <- toflow
+    result$country_group <- country_group_name
+  }
+
+  return(result)
+}
+
+# Pre-compute avstrax by country for a given toflow and technology
+precompute_by_country <- function(toflow, tech_name, tech_filter) {
+  # Load istrax data
+  istrax_path <- file.path("inst/extdata/istraxes", paste0(toflow, ".fst"))
+  if (!file.exists(istrax_path)) {
+    message("  Skipping - istrax file not found: ", toflow)
+    return(NULL)
+  }
+
+  istrax_data <- read_fst(istrax_path)
+
+  # Replace missing values with 0 in the value column
+  # Some files (avstrax, ev) contain NAs that need to be treated as 0
+  if (toflow %in% names(istrax_data)) {
+    istrax_data[[toflow]][is.na(istrax_data[[toflow]])] <- 0
+  }
+
+  # Join with countrymap on both docdb_family_id and ctry_code
+  data <- countrymap %>%
+    left_join(istrax_data, by = c("docdb_family_id", "ctry_code"))
+
+  # Filter techmap for specific technology
+  if (tech_filter == "All") {
+    classes <- data.frame()  # Empty = all innovations
+  } else if (tech_filter == "Other") {
+    # Other = not in green, battery, hard_to_abate, ai
+    exclude_techs <- c(green_classes, battery_classes, hard_to_abate_classes, ai_classes)
+    classes <- techmap %>% filter(!technology %in% exclude_techs)
+  } else {
+    classes <- techmap %>% filter(technology == tech_filter)
+  }
+
+  # Compute avstrax by country
+  result <- tryCatch({
+    compute_avstrax_for_techs(data, toflow, classes)
+  }, error = function(e) {
+    message("  Error computing avstrax: ", e$message)
+    return(NULL)
+  })
+
+  if (!is.null(result)) {
+    result$toflow <- toflow
+    result$tech_category <- tech_name
+  }
+
+  return(result)
+}
+```
+
+# Run Pre-computation
+
+```{r run-precompute-by-tech, message=TRUE}
+# Pre-compute by technology for each toflow × country_group combination
+message("=== Pre-computing by Technology ===\n")
+
+for (toflow in toflow_vars) {
+  message("\nProcessing toflow: ", toflow)
+
+  for (group_name in names(country_groups)) {
+    filename <- safe_filename("by_tech", toflow, group_name)
+    filepath <- file.path(prepdata_path, filename)
+
+    # Skip if file already exists
+    if (file.exists(filepath)) {
+      message("  Country group: ", group_name, " - SKIPPED (file exists)")
+      next
+    }
+
+    message("  Country group: ", group_name)
+
+    result <- precompute_by_tech(toflow, group_name, country_groups[[group_name]])
+
+    if (!is.null(result) && nrow(result) > 0) {
+      write_fst(result, filepath, compress = 50)
+      message("    Saved: ", filename, " (", nrow(result), " rows)")
+    }
+  }
+}
+```
+
+```{r run-precompute-by-country, message=TRUE}
+# Pre-compute by country for each toflow × technology combination
+message("\n=== Pre-computing by Country ===\n")
+
+for (toflow in toflow_vars) {
+  message("\nProcessing toflow: ", toflow)
+
+  for (tech_name in names(tech_categories)) {
+    filename <- safe_filename("by_country", toflow, tech_name)
+    filepath <- file.path(prepdata_path, filename)
+
+    # Skip if file already exists
+    if (file.exists(filepath)) {
+      message("  Technology: ", tech_name, " - SKIPPED (file exists)")
+      next
+    }
+
+    message("  Technology: ", tech_name)
+
+    result <- precompute_by_country(toflow, tech_name, tech_categories[[tech_name]])
+
+    if (!is.null(result) && nrow(result) > 0) {
+      write_fst(result, filepath, compress = 50)
+      message("    Saved: ", filename, " (", nrow(result), " rows)")
+    }
+  }
+}
+```
+
+```{r run-precompute-regions, message=TRUE}
+# Pre-compute for regions (if regionmap available)
+if (!is.null(regionmap) && nrow(regionmap) > 0) {
+  message("\n=== Pre-computing by Region ===\n")
+
+  for (toflow in toflow_vars) {
+    message("\nProcessing toflow: ", toflow)
+
+    # Load istrax data
+    istrax_path <- file.path("inst/extdata/istraxes", paste0(toflow, ".fst"))
+    if (!file.exists(istrax_path)) {
+      message("  Skipping - istrax file not found")
+      next
+    }
+
+    istrax_data <- read_fst(istrax_path)
+
+    # Replace missing values with 0 in the value column
+    # Some files (avstrax, ev) contain NAs that need to be treated as 0
+    if (toflow %in% names(istrax_data)) {
+      istrax_data[[toflow]][is.na(istrax_data[[toflow]])] <- 0
+    }
+
+    # Keep ctry_code in istrax_data for joining (patents have country-specific returns)
+    # Remove ctry_name to avoid column conflicts
+    istrax_data_for_join <- istrax_data %>% select(-any_of("ctry_name"))
+
+    for (tech_name in names(tech_categories)) {
+      filename <- safe_filename("by_region", toflow, tech_name)
+      filepath <- file.path(prepdata_path, filename)
+
+      # Skip if file already exists
+      if (file.exists(filepath)) {
+        message("  Technology: ", tech_name, " - SKIPPED (file exists)")
+        next
+      }
+
+      message("  Technology: ", tech_name)
+
+      # Prepare region data - join by both docdb_family_id and ctry_code to get GB-specific returns
+      # Then rename region_code to ctry_code for compatibility with plotting functions
+      region_data <- regionmap %>%
+        left_join(istrax_data_for_join, by = c("docdb_family_id", "ctry_code")) %>%
+        select(-ctry_code) %>%
+        rename(ctry_code = region_code, country_name = region_name)
+
+      # Filter techmap
+      if (tech_categories[[tech_name]] == "All") {
+        classes <- data.frame()
+      } else if (tech_categories[[tech_name]] == "Other") {
+        exclude_techs <- c(green_classes, battery_classes, hard_to_abate_classes, ai_classes)
+        classes <- techmap %>% filter(!technology %in% exclude_techs)
+      } else {
+        classes <- techmap %>% filter(technology == tech_categories[[tech_name]])
+      }
+
+      result <- tryCatch({
+        compute_avstrax_for_techs(region_data, toflow, classes)
+      }, error = function(e) {
+        message("    Error: ", e$message)
+        return(NULL)
+      })
+
+      if (!is.null(result) && nrow(result) > 0) {
+        result$toflow <- toflow
+        result$tech_category <- tech_name
+
+        write_fst(result, filepath, compress = 50)
+        message("    Saved: ", filename, " (", nrow(result), " rows)")
+      }
+    }
+  }
+} else {
+  message("\nSkipping region pre-computation - regionmap not available")
+}
+```
+
+# Summary
+
+```{r summary}
+# List all pre-computed files
+files <- list.files(prepdata_path, pattern = "\\.fst$", full.names = TRUE)
+message("\n=== Pre-computation Complete ===\n")
+message("Total files created: ", length(files))
+message("Location: ", prepdata_path)
+
+# Show file sizes
+if (length(files) > 0) {
+  file_info <- file.info(files)
+  total_size <- sum(file_info$size) / 1024 / 1024
+  message("Total size: ", round(total_size, 2), " MB")
+
+  cat("\nFiles by type:\n")
+  cat("- by_tech files:", sum(grepl("by_tech", files)), "\n")
+  cat("- by_country files:", sum(grepl("by_country", files)), "\n")
+  cat("- by_region files:", sum(grepl("by_region", files)), "\n")
+}
+```
+
+# How to Add New Options
+
+When adding new options to the app, update the following:
+
+1. **New toflow variable**: Add to `toflow_vars` list and ensure the .fst file exists in `istraxes/`
+
+2. **New country group**: Add to `country_groups` list with the ISO2 country codes
+
+3. **New technology category**: Add to `tech_categories` list
+
+4. **New region**: Update UK regions list if needed
+
+Then re-run this notebook to regenerate the pre-computed files.
+
+```{r session-info}
+sessionInfo()
+```
