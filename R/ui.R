@@ -33,7 +33,7 @@ ui <- function(req) {
     #   "Developed by ZevRoss Spatial Analysis, LLC"
     # ),
     collapsible = TRUE,
-    window_title = "Shiny Template",
+    window_title = "Innovation Strategy Explorer",
     title = shiny::tags$img(
       src = file.path(pkgload::pkg_name(), "img/main_logo.svg"),
       style = "height: inherit"

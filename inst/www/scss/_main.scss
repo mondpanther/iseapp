@@ -8,10 +8,10 @@ $sidebar-col: rgba(0,0,0, 0.05);
 $background-dark-col: #2B302D;
 $background-light-col: #FFFFFF;
 $background-gray-col: rgba(0,0,0, 0.05);
-$primary-col: #76BA43;
-$primary-col-rgba: rgba(118, 186, 67, 0.10);
-$secondary-col1: #0E3D45;
-$secondary-col1-rgba: rgba(14, 61, 69, 0.10);
+$primary-col: #0E3D45;
+$primary-col-rgba: rgba(14, 61, 69, 0.10);
+$secondary-col1: #76BA43;
+$secondary-col1-rgba: rgba(118, 186, 67, 0.10);
 $secondary-col2: #EF4136;
 $secondary-col2-rgba: rgba(239, 65, 54, 0.10);
 $inactive-tab-col: #666666;
@@ -20,6 +20,7 @@ $font-light: #FFFFFF;
 $font-black: #000000;
 $font-white: #FFFFFF;
 $font-gray: #2B302D;
+$tan-bg: #E8E4D9;
 
 html {
 	.error {
@@ -31,13 +32,6 @@ html {
 	}
 
   nav {
-    // #navbar_page {
-    //   li:last-of-type {
-    //     position: absolute;
-    //     right: 25px;
-    //   }
-    // }
-
     span[class="navbar-brand"] {
       height: 50px;
       width: 50px;
@@ -49,17 +43,21 @@ html {
     right: 25px;
   }
 
-  // #zrsa-footer {
-  //   position: absolute;
-  //   bottom: 10px;
-  //   display: inline-flex;
-  //   justify-content: center;
-  //   font-size: 12px;
-  //   border: 1px solid black;
-  //   width: 300px;
-  //   right: 25px;
-  //   border-radius: 6px;
-  // }
+  // Add curved decorative elements
+  .page-content {
+    position: relative;
+    
+    &::before {
+      content: "";
+      position: absolute;
+      width: 300px;
+      height: 300px;
+      border-radius: 50%;
+      background: $tan-bg;
+      opacity: 0.3;
+      z-index: -1;
+    }
+  }
 
   // Sidebar styling
   .side_input {
