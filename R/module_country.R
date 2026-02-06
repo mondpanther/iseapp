@@ -258,8 +258,8 @@ country_module_server <- function(id) {
         waiter::waiter_show(
           html = shiny::tagList(
             waiter::spin_fading_circles(),
-            shiny::h3("Loading large datasets", style = "color: #333; margin-top: 20px;"),
-            shiny::p("This may take a few seconds...", style = "color: #666;")
+            shiny::h1("Loading datasets", style = "margin-top: 20px;"),
+            shiny::p("Please be patient...", style = "")
           ),
           color = waiter::transparent(0.5)
         )
