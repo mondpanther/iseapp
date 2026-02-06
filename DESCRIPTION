@@ -12,7 +12,11 @@ RoxygenNote: 7.3.2
 Imports: 
     bslib,
     devtools,
+    dplyr,
+    fst,
     htmltools,
+    leaflet,
+    countrycode,
     pkgload,
     prompter,
     sass,
