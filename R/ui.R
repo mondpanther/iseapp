@@ -20,10 +20,11 @@ ui <- function(req) {
       shinyjs::useShinyjs(),
       prompter::use_prompt(),
       sever::useSever(),
+      waiter::use_waiter(),
       waiter::autoWaiter(color = "#ffffff", fadeout = 10),
 
       shiny::tags$head(
-        shiny::tags$link(rel = "icon", href = file.path(pkgload::pkg_name(), "img/main_logo.svg")),
+        # shiny::tags$link(rel = "icon", href = file.path(pkgload::pkg_name(), "img/ifc_logo.svg")),
         shiny::tags$link(href = file.path(pkgload::pkg_name(), "css/custom-styles.min.css"), rel = "stylesheet", type = "text/css"),
         shiny::tags$script(src = file.path(pkgload::pkg_name(), "js/custom-js.js"))
       )
@@ -34,9 +35,27 @@ ui <- function(req) {
     # ),
     collapsible = TRUE,
     window_title = "Innovation Strategy Explorer",
-    title = shiny::tags$img(
-      src = file.path(pkgload::pkg_name(), "img/main_logo.svg"),
-      style = "height: inherit"
+    title = shiny::tags$div(
+      class = "navbar-title-container",
+      shiny::tags$img(
+        src = file.path(pkgload::pkg_name(), "img/prinz_logo.png"),
+        class = "navbar-logo"
+      ),
+      shiny::tags$img(
+        src = file.path(pkgload::pkg_name(), "img/zrsa_logo.svg"),
+        class = "navbar-logo"
+      ),
+      shiny::tags$img(
+        src = file.path(pkgload::pkg_name(), "img/ifc_logo.svg"),
+        class = "navbar-logo"
+      ),
+      shiny::tags$div(
+        class = "navbar-separator"
+      ),
+      shiny::tags$h1(
+        "Innovation Strategy Explorer",
+        class = "navbar-title-text"
+      )
     ),
     id = "navbar_page",
 

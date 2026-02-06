@@ -19,7 +19,14 @@ server <- function(input, output, session) {
   # App Server logic here
 
   # Call Modules
-  country_module_server("country")
-  region_module_server("region")
-  globe_module_server("globe")
+  observeEvent(c(req(input$navbar_page == "Country Explorer")), once = TRUE, {
+    country_module_server("country")
+  })
+  observeEvent(c(req(input$navbar_page == "Region Explorer")), once = TRUE, {
+    region_module_server("region")
+  })
+  observeEvent(c(req(input$navbar_page == "Globe")), once = TRUE, {
+    globe_module_server("globe")
+  })
+  
 }
