@@ -19,6 +19,7 @@ server <- function(input, output, session) {
   # App Server logic here
 
   # Call Modules
-  home_module_server("home")
-  other_module_server("other")
+  country_module_server("country")
+  region_module_server("region")
+  globe_module_server("globe")
 }

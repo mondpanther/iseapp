@@ -31,12 +31,12 @@ html {
 	}
 
   nav {
-    #navbar_page {
-      li:last-of-type {
-        position: absolute;
-        right: 25px;
-      }
-    }
+    // #navbar_page {
+    //   li:last-of-type {
+    //     position: absolute;
+    //     right: 25px;
+    //   }
+    // }
 
     span[class="navbar-brand"] {
       height: 50px;
@@ -49,16 +49,45 @@ html {
     right: 25px;
   }
 
-  #zrsa-footer {
-    position: absolute;
-    bottom: 10px;
-    display: inline-flex;
-    justify-content: center;
-    font-size: 12px;
-    border: 1px solid black;
-    width: 300px;
-    right: 25px;
-    border-radius: 6px;
+  // #zrsa-footer {
+  //   position: absolute;
+  //   bottom: 10px;
+  //   display: inline-flex;
+  //   justify-content: center;
+  //   font-size: 12px;
+  //   border: 1px solid black;
+  //   width: 300px;
+  //   right: 25px;
+  //   border-radius: 6px;
+  // }
+
+  // Sidebar styling
+  .side_input {
+    margin-bottom: 15px;
+  }
+  
+  .side_input_cont {
+    margin-bottom: 20px;
+  }
+  
+  // Navbar alignment - push tabs to the right
+  .navbar-nav {
+    margin-left: auto;
+  }
+  
+  // Card tab styling
+  .nav-tabs {
+    border-bottom: 2px solid $background-gray-col;
+    
+    .nav-link {
+      font-weight: 500;
+      color: $inactive-tab-col;
+      
+      &.active {
+        color: $primary-col;
+        border-bottom: 3px solid $primary-col;
+      }
+    }
   }
   
 }

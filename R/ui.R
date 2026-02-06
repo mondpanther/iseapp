@@ -17,10 +17,10 @@ ui <- function(req) {
     ),
     header = list(
       
-shinyjs::useShinyjs(),
-prompter::use_prompt(),
-sever::useSever(),
-waiter::autoWaiter(color = "#ffffff", fadeout = 10),
+      shinyjs::useShinyjs(),
+      prompter::use_prompt(),
+      sever::useSever(),
+      waiter::autoWaiter(color = "#ffffff", fadeout = 10),
 
       shiny::tags$head(
         shiny::tags$link(rel = "icon", href = file.path(pkgload::pkg_name(), "img/main_logo.svg")),
@@ -28,10 +28,10 @@ waiter::autoWaiter(color = "#ffffff", fadeout = 10),
         shiny::tags$script(src = file.path(pkgload::pkg_name(), "js/custom-js.js"))
       )
     ),
-    footer = shiny::tags$footer(
-      id = "zrsa-footer",
-      "Developed by ZevRoss Spatial Analysis, LLC"
-    ),
+    # footer = shiny::tags$footer(
+    #   id = "zrsa-footer",
+    #   "Developed by ZevRoss Spatial Analysis, LLC"
+    # ),
     collapsible = TRUE,
     window_title = "Shiny Template",
     title = shiny::tags$img(
@@ -39,13 +39,20 @@ waiter::autoWaiter(color = "#ffffff", fadeout = 10),
       style = "height: inherit"
     ),
     id = "navbar_page",
+
+    bslib::nav_spacer(),
+
     shiny::tabPanel(
-      "Home",
-      home_module_ui("home")
+      "Country Explorer",
+      country_module_ui("country")
     ),
     shiny::tabPanel(
-      "Other",
-      other_module_ui("other")
+      "Region Explorer",
+      region_module_ui("region")
+    ),
+    shiny::tabPanel(
+      "Globe",
+      globe_module_ui("globe")
     ),
     shiny::tabPanel(
       "About",
