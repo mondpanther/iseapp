@@ -75,14 +75,14 @@ globe_module_ui <- function(id) {
   )
 }
 
-#' Globe module Server
+#' Country module Server
 #'
 #' @param id the ID of the module
 #'
-#' @importFrom shiny moduleServer
+#' @importFrom shiny moduleServer observeEvent observe req reactive reactiveValues bindEvent invalidateLater parseQueryString updateQueryString
 #'
 #' @keywords internal
-globe_module_server <- function(id) {
+globe_module_server <- function(id, parent_session) {
   shiny::moduleServer(
     id,
     function(input, output, session) {
@@ -118,21 +118,29 @@ globe_module_server <- function(id) {
       # LOAD DATA
       ###############################################################
       
-      data_path <- system.file("extdata", "long_final.fst", package = "innovationStrategyExplorer")
-      df_raw <- fst::read_fst(data_path)
+      data_path <- system.file("extdata", "long_final.parquet", package = "innovationStrategyExplorer")
+      con <- DBI::dbConnect(duckdb::duckdb())
+      duckdb::duckdb_register(con, "df", arrow::read_parquet(data_path, as_data_frame = FALSE))
+
+      # Clean up connection on session end
+      shiny::onSessionEnded(function() {
+        DBI::dbDisconnect(con, shutdown = TRUE)
+      })
       
-      df <- df_raw |>
-        dplyr::arrange(sce_country, tech_group, tech_subgroup, source_id, wave) |>
-        dplyr::mutate(
-          wave = as.integer(wave),
-          chain_id = paste0(
-            sce_country, "_",
-            tech_group, "_",
-            ifelse(is.na(tech_subgroup), "ALL", tech_subgroup), "_",
-            sample_size, "_",
-            source_id
-          )
-        )
+      metadata <- DBI::dbGetQuery(con, "
+        SELECT DISTINCT 
+          sce_country,
+          sce_tech_display,
+          tech_group,
+          sample_size
+        FROM df
+      ")
+
+      # Get min/max wave separately (simpler)
+      wave_range <- DBI::dbGetQuery(con, "
+        SELECT MIN(wave) as min_wave, MAX(wave) as max_wave
+        FROM df
+      ")
       
       ###############################################################
       # COUNTRY GROUP DEFINITIONS
@@ -183,9 +191,9 @@ globe_module_server <- function(id) {
       ###############################################################
       
       tech_group_definitions <- list(
-        "All"        = unique(df$sce_tech_display[df$tech_group == "All"]),
-        "Green"      = unique(df$sce_tech_display[df$tech_group == "Green"]),
-        "Non-Green"  = unique(df$sce_tech_display[df$tech_group == "Non-Green"])
+        "All"        = unique(metadata$sce_tech_display[metadata$tech_group == "All"]),
+        "Green"      = unique(metadata$sce_tech_display[metadata$tech_group == "Green"]),
+        "Non-Green"  = unique(metadata$sce_tech_display[metadata$tech_group == "Non-Green"])
       )
       
       tech_group_definitions <- lapply(
@@ -195,7 +203,7 @@ globe_module_server <- function(id) {
       
       grouped_tech_choices <- list(
         "Technology Groups" = names(tech_group_definitions),
-        "Individual Technologies" = sort(unique(df$sce_tech_display))
+        "Individual Technologies" = sort(unique(metadata$sce_tech_display))
       )
       
       expand_tech_selection <- function(selected) {
@@ -218,7 +226,7 @@ globe_module_server <- function(id) {
           "sce_country",
           choices = list(
             "Predefined Groups" = names(group_definitions),
-            "Individual Countries" = sort(unique(df$sce_country))
+            "Individual Countries" = sort(unique(metadata$sce_country))
           ),
           selected = "Africa"
         )
@@ -233,16 +241,16 @@ globe_module_server <- function(id) {
         shiny::updateSliderInput(
           session,
           "max_wave",
-          min = min(df$wave),
-          max = max(df$wave),
+          min = wave_range$min_wave,
+          max = wave_range$max_wave,
           value = 1
         )
         
         shiny::updateSelectInput(
           session,
           "sample_size",
-          choices = sort(unique(df$sample_size)),
-          selected = sort(unique(df$sample_size))[1]
+          choices = sort(unique(metadata$sample_size)),
+          selected = sort(unique(metadata$sample_size))[1]
         )
         
         # Mark initialization as complete and hide waiter
@@ -328,17 +336,39 @@ globe_module_server <- function(id) {
       # REACTIVE DATA FILTERING
       ###############################################################
       
+      # edges_filtered <- shiny::reactive({
+      #   selected_countries <- expand_country_selection(input$sce_country)
+      #   selected_techs <- expand_tech_selection(input$sce_tech_display)
+        
+      #   df |>
+      #     dplyr::filter(
+      #       sce_country %in% selected_countries,
+      #       sce_tech_display %in% selected_techs,
+      #       wave <= input$max_wave,
+      #       sample_size == input$sample_size
+      #     )
+      # })
+
       edges_filtered <- shiny::reactive({
         selected_countries <- expand_country_selection(input$sce_country)
         selected_techs <- expand_tech_selection(input$sce_tech_display)
         
-        df |>
-          dplyr::filter(
-            sce_country %in% selected_countries,
-            sce_tech_display %in% selected_techs,
-            wave <= input$max_wave,
-            sample_size == input$sample_size
-          )
+        # Build query with glue_sql for proper vector expansion
+        query <- glue::glue_sql(
+          "SELECT *,
+            sce_country || '_' || tech_group || '_' || 
+            COALESCE(tech_subgroup, 'ALL') || '_' || 
+            sample_size || '_' || source_id as chain_id
+          FROM df
+          WHERE sce_country IN ({selected_countries*})
+            AND sce_tech_display IN ({selected_techs*})
+            AND wave <= {input$max_wave}
+            AND sample_size = {input$sample_size}
+          ORDER BY sce_country, tech_group, tech_subgroup, source_id, wave",
+          .con = con
+        )
+        
+        DBI::dbGetQuery(con, query)
       })
       
       nodes_filtered <- shiny::reactive({
@@ -365,9 +395,8 @@ globe_module_server <- function(id) {
       ###############################################################
 
       shiny::observe({
-        # Only trigger when button is clicked or first load
-        initialization_complete()
-        input$render_map
+        # Don't run until initialization is complete
+        shiny::req(initialization_complete())
         
         edges <- edges_filtered()
         nodes <- nodes_filtered()
@@ -413,7 +442,8 @@ globe_module_server <- function(id) {
               opacity = 0.4
             )
         }
-      })
+      }) |> shiny::bindEvent(input$render_map, ignoreNULL = FALSE, ignoreInit = FALSE)
+
     }
   )
 }

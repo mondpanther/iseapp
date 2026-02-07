@@ -168,14 +168,35 @@ country_module_ui <- function(id) {
 #'
 #' @param id the ID of the module
 #'
-#' @importFrom shiny moduleServer
+#' @importFrom shiny moduleServer observeEvent observe req reactive reactiveValues bindEvent invalidateLater parseQueryString updateQueryString
 #'
 #' @keywords internal
-country_module_server <- function(id) {
+country_module_server <- function(id, parent_session) {
   shiny::moduleServer(
     id,
     function(input, output, session) {
       ns <- session$ns
+
+      # Restore subtab from URL on load
+      shiny::observe({
+        query <- parseQueryString(parent_session$clientData$url_search)
+        
+        # Only restore if we're on the correct main tab
+        if (!is.null(query$tab) &&!is.null(query$subtab) && query$tab == "Country Explorer") {
+          bslib::nav_select(id = "inner_tabs", selected = query$subtab, session = session)
+        }
+      })
+      
+      # Update URL when subtab changes
+      # shiny::observeEvent(input$inner_tabs, {
+      #   query <- shiny::parseQueryString(parent_session$clientData$url_search)
+      #   query$subtab <- input$inner_tabs
+        
+      #   query_string <- paste(names(query), query, sep = "=", collapse = "&")
+      #   shiny::updateQueryString(paste0("?", query_string), 
+      #                   mode = "push", 
+      #                   session = parent_session)
+      # }, ignoreInit = TRUE)
 
       # Get prepdata path
       prepdata_path <- system.file("extdata", "prepdata", package = "shinyTemplate")
@@ -561,6 +582,28 @@ country_module_server <- function(id) {
           color_scale = "Viridis",
           plot_title = paste0("World Map: ", sub("^[^.]*\\.", "", flow_label)),
           is_return = is_return
+        )
+      })
+
+      # Restore inputs from URL parameters
+      shiny::observe({
+        restore_module_inputs(
+          params = parent_session$userData$restore_params,
+          module_prefix = "country-",
+          tab_name = "Country Explorer",
+          input_configs = list(
+            inner_tabs = "nav",
+            country = "selectize",
+            toflow = "selectize",
+            tech_categories_plot1 = "selectize",
+            techs = "selectize",
+            bwidthscale = "radio",
+            display_mode = "radio",
+            show_top3_ids = "checkbox",
+            topn = "numeric",
+            mininno = "numeric"
+          ),
+          session = session
         )
       })
     }

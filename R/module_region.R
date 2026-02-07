@@ -152,11 +152,32 @@ region_module_ui <- function(id) {
 #' @importFrom shiny moduleServer
 #'
 #' @keywords internal
-region_module_server <- function(id) {
+region_module_server <- function(id, parent_session) {
   shiny::moduleServer(
     id,
     function(input, output, session) {
       ns <- session$ns
+
+      # Restore subtab from URL on load
+      shiny::observe({
+        query <- parseQueryString(parent_session$clientData$url_search)
+        
+        # Only restore if we're on the correct main tab
+        if (!is.null(query$tab) &&!is.null(query$subtab) && query$tab == "Region Explorer") {
+          bslib::nav_select(id = "inner_tabs", selected = query$subtab, session = session)
+        }
+      })
+      
+      # Update URL when subtab changes
+      shiny::observeEvent(input$inner_tabs, {
+        query <- shiny::parseQueryString(parent_session$clientData$url_search)
+        query$subtab <- input$inner_tabs
+        
+        query_string <- paste(names(query), query, sep = "=", collapse = "&")
+        shiny::updateQueryString(paste0("?", query_string), 
+                        mode = "push", 
+                        session = parent_session)
+      }, ignoreInit = TRUE)
       
       # Placeholder outputs
       output$chart1 <- shiny::renderPlot({
