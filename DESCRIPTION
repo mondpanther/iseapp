@@ -25,4 +25,7 @@ Imports:
     shinyjs,
     shinyWidgets,
     usethis,
-    waiter
+    waiter,
+    duckdb,
+    DBI,
+    arrow
