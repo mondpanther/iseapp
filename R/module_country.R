@@ -137,17 +137,13 @@ country_module_ui <- function(id) {
       bslib::nav_panel(
         "Returns by Technology",
         shiny::div(
-          style = "padding: 20px;",
-          # Interactive chart with ggiraph
-          ggiraph::girafeOutput(ns("avstrax_plot1"), height = "auto")
+          ggiraph::girafeOutput(ns("avstrax_plot1"), height = "100%")
         )
       ),
 
       bslib::nav_panel(
         "Returns by Country",
         shiny::div(
-          style = "padding: 20px;",
-          # Interactive chart with ggiraph
           ggiraph::girafeOutput(ns("avstrax_plot2"), height = "auto")
         )
       ),
@@ -155,7 +151,6 @@ country_module_ui <- function(id) {
       bslib::nav_panel(
         "World Map",
         shiny::div(
-          style = "padding: 20px;",
           shiny::h3("World Map: Returns"),
           plotly::plotlyOutput(ns("world_map"), height = "500px")
         )
@@ -373,6 +368,20 @@ country_module_server <- function(id, parent_session) {
 
       #   patchar_countrymap <- current_countrymap %>% left_join(ddd, by = c("docdb_family_id", "ctry_code"))
       # })
+
+      observe({
+        width <- session$clientData[[paste0("output_", ns("avstrax_plot1"), "_width")]]
+        if (!is.null(width) && width > 0) {
+          window_dims$width <- width
+        }
+      })
+
+      observe({
+        width <- session$clientData[[paste0("output_", ns("avstrax_plot2"), "_width")]]
+        if (!is.null(width) && width > 0) {
+          window_dims$width <- width
+        }
+      })
       
       # Chart 1: Main avstrax plot
       output$avstrax_plot1 <- ggiraph::renderGirafe({
