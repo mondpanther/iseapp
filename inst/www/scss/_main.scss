@@ -1,19 +1,22 @@
 // Color palette from IFC report
 $navbar-col: #FFFFFF;
-$sidebar-col: #fafff2ff; 
-$background-dark-col: #0E3D45;
+$sidebar-col: #F4F5F7; 
+$background-dark-col: #414141;
 $background-light-col: #FFFFFF;
 $background-gray-col: rgba(0,0,0, 0.05);
-$primary-col: #006c5b;
+$primary-col: #0170BC;
 $primary-col-rgba: rgba(14, 61, 69, 0.10);
-$accent-col: #789d49;  // Lime green
-$accent-col-rgba: rgba(118, 186, 67, 0.10);
+$accent-col: #0170BC;
+$accent-col-rgba: rgba(14, 61, 69, 0.10);
 $secondary-col: #EF4136;  // Red accent
 $secondary-col-rgba: rgba(239, 65, 54, 0.10);
+$error-col: #EF4136;  // Red accent
+$error-col-rgba: rgba(239, 65, 54, 0.10);
+$gray-bg: #F4F5F7;
 $green-bg: #dde8cd;
 $tan-bg: #E8E4D9;
 $inactive-tab-col: #666666;
-$font-dark: #0E3D45;
+$font-dark: #414141;
 $font-light: #FFFFFF;
 $border-radius: 8px;
 
@@ -27,7 +30,7 @@ html {
   }
 
   .error {
-    color: $secondary-col;
+    color: $error-col;
     font-weight: 500;
   }
 
@@ -64,6 +67,10 @@ html {
       width: 50px;
     }
 
+    .navbar-title-text {
+      color: $font-dark;
+    }
+
     .navbar-brand {
       padding: 0;
       margin: 0;
@@ -95,7 +102,7 @@ html {
     }
 
     .nav-link {
-      color: $primary-col;
+      color: $inactive-tab-col;
       font-weight: 500;
       transition: all 0.2s ease;
 
@@ -269,78 +276,15 @@ html {
     }
   }
 
-  // Download button
-  .shiny-download-link {
-    background-color: $secondary-col;
-    color: $font-light;
-    border-radius: 6px;
-    text-decoration: none;
-    display: inline-block;
-    font-weight: 500;
-    transition: all 0.2s ease;
-
-    &:hover {
-      background-color: darken($secondary-col, 10%);
-      transform: translateY(-1px);
-      box-shadow: 0 4px 8px rgba(239, 65, 54, 0.3);
-      text-decoration: none;
-      color: $font-light;
-    }
-  }
-
   // Plot containers
   .plotly, .shiny-plot-output {
     border-radius: $border-radius;
     overflow: hidden;
   }
 
-  // Value box styling (if using bslib value boxes)
-  .value-box {
-    background: linear-gradient(135deg, $primary-col 0%, lighten($primary-col, 15%) 100%);
-    color: $font-light;
-    border-radius: $border-radius;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-
-    .value-box-title {
-      font-size: 0.875rem;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      opacity: 0.9;
-    }
-
-    .value-box-value {
-      font-size: 2rem;
-      font-weight: 700;
-      margin: 0.5rem 0;
-    }
-
-    &.accent {
-      background: linear-gradient(135deg, $accent-col 0%, lighten($accent-col, 15%) 100%);
-    }
-  }
-
-  // Alert/notification styling
-  .alert {
-    border-radius: $border-radius;
-    border: none;
-
-    &.alert-info {
-      background-color: $primary-col-rgba;
-      color: $primary-col;
-      border-left: 4px solid $primary-col;
-    }
-
-    &.alert-success {
-      background-color: $accent-col-rgba;
-      color: darken($accent-col, 20%);
-      border-left: 4px solid $accent-col;
-    }
-
-    &.alert-warning {
-      background-color: $secondary-col-rgba;
-      color: darken($secondary-col, 20%);
-      border-left: 4px solid $secondary-col;
-    }
+  .girafe_container_std {
+      height: calc(100vh - 200px);
+      width: 100%;
   }
 
   // Scrollbar styling
@@ -372,96 +316,4 @@ html {
     }
   }
 }
-
-// // techMarker_scss_colors
-// //$zrsa-green: #76ba43;
-// //$zrsa-gray: #2b302d;
-// //$zrsa-bluegreen: #0e3d45;
-// //$zrsa-red: #ef4136;
-// $navbar-col: #FFFFFF;
-// $sidebar-col: rgba(0,0,0, 0.05);
-// $background-dark-col: #2B302D;
-// $background-light-col: #FFFFFF;
-// $background-gray-col: rgba(0,0,0, 0.05);
-// $primary-col: #0E3D45;
-// $primary-col-rgba: rgba(14, 61, 69, 0.10);
-// $secondary-col1: #76BA43;
-// $secondary-col1-rgba: rgba(118, 186, 67, 0.10);
-// $secondary-col2: #EF4136;
-// $secondary-col2-rgba: rgba(239, 65, 54, 0.10);
-// $inactive-tab-col: #666666;
-// $font-dark: #2B302D;
-// $font-light: #FFFFFF;
-// $font-black: #000000;
-// $font-white: #FFFFFF;
-// $font-gray: #2B302D;
-// $tan-bg: #E8E4D9;
-
-// html {
-// 	.error {
-// 		color: red;
-// 	}
-
-// 	h1 {
-// 	  color: $primary-col;
-// 	}
-
-//   nav {
-//     span[class="navbar-brand"] {
-//       height: 50px;
-//       width: 50px;
-//     }
-//   }
-
-//   li[class="dropdown nav-item"] {
-//     position: absolute;
-//     right: 25px;
-//   }
-
-//   // Add curved decorative elements
-//   .page-content {
-//     position: relative;
-    
-//     &::before {
-//       content: "";
-//       position: absolute;
-//       width: 300px;
-//       height: 300px;
-//       border-radius: 50%;
-//       background: $tan-bg;
-//       opacity: 0.3;
-//       z-index: -1;
-//     }
-//   }
-
-//   // Sidebar styling
-//   .side_input {
-//     margin-bottom: 15px;
-//   }
-  
-//   .side_input_cont {
-//     margin-bottom: 20px;
-//   }
-  
-//   // Navbar alignment - push tabs to the right
-//   .navbar-nav {
-//     margin-left: auto;
-//   }
-  
-//   // Card tab styling
-//   .nav-tabs {
-//     border-bottom: 2px solid $background-gray-col;
-    
-//     .nav-link {
-//       font-weight: 500;
-//       color: $inactive-tab-col;
-      
-//       &.active {
-//         color: $primary-col;
-//         border-bottom: 3px solid $primary-col;
-//       }
-//     }
-//   }
-  
-// }
 
