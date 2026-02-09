@@ -23,6 +23,7 @@ options(shiny.launch.browser = function(url) {
 #   utils::browseURL(url) # for deployments
   utils::browseURL(url, browser = "C:/Program Files/Google/Chrome/Application/chrome.exe") # for development
 })
+
 innovationStrategyExplorer::runAppPackage()
 
 #' Package development/testing workflow:

@@ -8,6 +8,7 @@ runAppPackage <- function() {
   # Run the Shiny app
   shiny::shinyApp(
     ui = ui,
-    server = server
+    server = server,
+    enableBookmarking = "url"
   )
 }
