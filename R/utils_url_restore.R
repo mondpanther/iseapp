@@ -8,6 +8,7 @@
 #' 
 #' @keywords internal
 restore_module_inputs <- function(params, module_prefix, tab_name, input_configs, session) {
+
   if (is.null(params)) return()
   
   # Check if we're on the correct tab

@@ -100,20 +100,6 @@ globe_module_server <- function(id, parent_session) {
         color = waiter::transparent(0.5)
       )
       
-      # Show waiter on first load
-      # shiny::observe({
-      #   if (!initialization_complete()) {
-      #     waiter::waiter_show(
-      #       html = shiny::tagList(
-      #         waiter::spin_fading_circles(),
-      #         shiny::h1("Loading map data", style = "margin-top: 20px;"),
-      #         shiny::p("Please be patient...", style = "")
-      #       ),
-      #       color = waiter::transparent(0.5)
-      #     )
-      #   }
-      # }) |> shiny::bindEvent(TRUE, once = TRUE)
-      
       ###############################################################
       # LOAD DATA
       ###############################################################
