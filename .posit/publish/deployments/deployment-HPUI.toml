@@ -11,7 +11,7 @@ id = '019c34f8-ebab-0595-53bd-06ea9b9a8c56'
 dashboard_url = 'https://connect.posit.cloud/zevross-spatial/content/019c34f8-ebab-0595-53bd-06ea9b9a8c56'
 direct_url = 'https://019c34f8-ebab-0595-53bd-06ea9b9a8c56.share.connect.posit.cloud'
 logs_url = 'https://connect.posit.cloud/zevross-spatial/content/019c34f8-ebab-0595-53bd-06ea9b9a8c56/history'
-deployed_at = '2026-02-09T11:34:06-05:00'
+deployed_at = '2026-02-09T13:08:23-05:00'
 files = [
   '.posit/publish/Innovation Strategy Explorer-SDHC.toml',
   '.posit/publish/deployments/deployment-HPUI.toml',
@@ -702,7 +702,7 @@ account_name = 'zevross-spatial'
 
 [deployment_error]
 code = 'unknown'
-message = 'Bundle upload failed: error uploading bundle: Post "https://intake.connect.posit.cloud/?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJidW5kbGVfaWQiOiIwMTljNDMzYy0zYmQ5LTVjNmQtMjM5ZC01YTQxZDcyYzg3MWEiLCJjb250ZW50X2lkIjoiMDE5YzM0ZjgtZWJhYi0wNTk1LTUzYmQtMDZlYTliOWE4YzU2IiwiZXhwIjoxNzcwNjU0ODQ2LCJpc3MiOiJ2aXZpZC1pbnRha2UiLCJtYXhfYnl0ZXMiOjUzNjg3MDkxMjB9.8YcOnz0-3tM-Jq3WLjo-aNBhc4-rGRKMwEhiMXcv7FY": context deadline exceeded (Client.Timeout exceeded while awaiting headers)'
+message = 'Bundle upload failed: error uploading bundle: Post "https://intake.connect.posit.cloud/?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJidW5kbGVfaWQiOiIwMTljNDM5Mi04ZDQxLWE3NjgtM2UwYy0yYTNlYWEyYmM0N2QiLCJjb250ZW50X2lkIjoiMDE5YzM0ZjgtZWJhYi0wNTk1LTUzYmQtMDZlYTliOWE4YzU2IiwiZXhwIjoxNzcwNjYwNTAzLCJpc3MiOiJ2aXZpZC1pbnRha2UiLCJtYXhfYnl0ZXMiOjUzNjg3MDkxMjB9.maEIbH9ay1TC2S9xznrCwovu_Y9m47tdD3VYM98jq60": context deadline exceeded (Client.Timeout exceeded while awaiting headers)'
 operation = 'publish/uploadBundle'
 
 [configuration]
