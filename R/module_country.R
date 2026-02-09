@@ -259,53 +259,53 @@ country_module_server <- function(id, parent_session) {
       }) |> bindEvent(TRUE, once = TRUE)
 
       # Deferred loading observer - loads big datasets in background
-      observe({
-        req(has_precomputed_data)
-        req(data_state$loading_started)
-        req(!data_state$loading_complete)
+      # observe({
+      #   req(has_precomputed_data)
+      #   req(data_state$loading_started)
+      #   req(!data_state$loading_complete)
 
-        # Show waiter
-        waiter::waiter_show(
-          html = shiny::tagList(
-            waiter::spin_fading_circles(),
-            shiny::h1("Loading datasets", style = "margin-top: 20px;"),
-            shiny::p("Please be patient...", style = "")
-          ),
-          color = waiter::transparent(0.5)
-        )
+      #   # Show waiter
+      #   waiter::waiter_show(
+      #     html = shiny::tagList(
+      #       waiter::spin_fading_circles(),
+      #       shiny::h1("Loading datasets", style = "margin-top: 20px;"),
+      #       shiny::p("Please be patient...", style = "")
+      #     ),
+      #     color = waiter::transparent(0.5)
+      #   )
 
-        # Load datasets
-        tryCatch({
-          datasets <- load_big_datasets()
+      #   # Load datasets
+      #   tryCatch({
+      #     datasets <- load_big_datasets()
 
-          # Process techmap (add "All" category and normalize names)
-          # processed_techmap <- process_techmap(datasets$techmap, datasets$countrymap)
+      #     # Process techmap (add "All" category and normalize names)
+      #     # processed_techmap <- process_techmap(datasets$techmap, datasets$countrymap)
 
-          # Update reactive values
-          loaded_data$techmap <- datasets$techmap
-          loaded_data$countrymap <- datasets$countrymap
-          loaded_data$regionmap <- datasets$regionmap
+      #     # Update reactive values
+      #     loaded_data$techmap <- datasets$techmap
+      #     loaded_data$countrymap <- datasets$countrymap
+      #     loaded_data$regionmap <- datasets$regionmap
 
-          # Update global variables for backward compatibility with plot functions
-          techmap <<- processed_techmap
-          countrymap <<- datasets$countrymap
-          regionmap <<- datasets$regionmap
-          regionmap_available <<- !is.null(datasets$regionmap) && nrow(datasets$regionmap) > 0
+      #     # Update global variables for backward compatibility with plot functions
+      #     techmap <<- processed_techmap
+      #     countrymap <<- datasets$countrymap
+      #     regionmap <<- datasets$regionmap
+      #     regionmap_available <<- !is.null(datasets$regionmap) && nrow(datasets$regionmap) > 0
 
-          # Mark as loaded
-          data_state$loading_complete
-          data_state$techmap_loaded <- TRUE
-          data_state$countrymap_loaded <- TRUE
-          data_state$regionmap_loaded <- TRUE
-          data_state$loading_complete <- TRUE
+      #     # Mark as loaded
+      #     data_state$loading_complete
+      #     data_state$techmap_loaded <- TRUE
+      #     data_state$countrymap_loaded <- TRUE
+      #     data_state$regionmap_loaded <- TRUE
+      #     data_state$loading_complete <- TRUE
 
-          message("Deferred loading complete. Big datasets are now available.")
-          waiter::waiter_hide()
-        }, error = function(e) {
-          message("Error during deferred loading: ", e$message)
-          waiter::waiter_hide()
-        })
-      }) |> bindEvent(data_state$loading_started, once = TRUE)
+      #     message("Deferred loading complete. Big datasets are now available.")
+      #     waiter::waiter_hide()
+      #   }, error = function(e) {
+      #     message("Error during deferred loading: ", e$message)
+      #     waiter::waiter_hide()
+      #   })
+      # }) |> bindEvent(data_state$loading_started, once = TRUE)
 
       # Helper to get current techmap (prefers loaded data, falls back to global)
       get_techmap <- reactive({
@@ -342,29 +342,37 @@ country_module_server <- function(id, parent_session) {
 
       patchar_countrymap <- reactive({
         req(input$toflow)
-        # Require countrymap to be loaded for on-the-fly computation
-        req(data_state$countrymap_loaded)
-
-        # Get the current countrymap (from reactive helper)
-        current_countrymap <- get_countrymap()
-        req(nrow(current_countrymap) > 0)
-
-        path <- paste0("/istraxes/", input$toflow,".fst")
-
-        pp=localpath_fname(path)
-        if(file.exists(pp)){
-          ddd <- read_fst(pp)
-        }
-
-        # Replace missing values with 0 in the value column
-        # Some files (avstrax, ev) contain NAs that need to be treated as 0
-        value_col <- input$toflow
-        if (value_col %in% names(ddd)) {
-          ddd[[value_col]][is.na(ddd[[value_col]])] <- 0
-        }
-
-        patchar_countrymap <- current_countrymap %>% left_join(ddd, by = c("docdb_family_id", "ctry_code"))
+        
+        # Don't load full countrymap - just join the specific flow file
+        path <- paste0("/istraxes/", input$toflow, ".fst")
+        read_fst(localpath_fname(path))
       })
+
+      # patchar_countrymap <- reactive({
+      #   req(input$toflow)
+      #   # Require countrymap to be loaded for on-the-fly computation
+      #   req(data_state$countrymap_loaded)
+
+      #   # Get the current countrymap (from reactive helper)
+      #   current_countrymap <- get_countrymap()
+      #   req(nrow(current_countrymap) > 0)
+
+      #   path <- paste0("/istraxes/", input$toflow,".fst")
+
+      #   pp=localpath_fname(path)
+      #   if(file.exists(pp)){
+      #     ddd <- read_fst(pp)
+      #   }
+
+      #   # Replace missing values with 0 in the value column
+      #   # Some files (avstrax, ev) contain NAs that need to be treated as 0
+      #   value_col <- input$toflow
+      #   if (value_col %in% names(ddd)) {
+      #     ddd[[value_col]][is.na(ddd[[value_col]])] <- 0
+      #   }
+
+      #   patchar_countrymap <- current_countrymap %>% left_join(ddd, by = c("docdb_family_id", "ctry_code"))
+      # })
       
       # Chart 1: Main avstrax plot
       output$avstrax_plot1 <- ggiraph::renderGirafe({
