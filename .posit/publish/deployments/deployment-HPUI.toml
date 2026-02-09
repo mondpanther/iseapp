@@ -11,7 +11,8 @@ id = '019c34f8-ebab-0595-53bd-06ea9b9a8c56'
 dashboard_url = 'https://connect.posit.cloud/zevross-spatial/content/019c34f8-ebab-0595-53bd-06ea9b9a8c56'
 direct_url = 'https://019c34f8-ebab-0595-53bd-06ea9b9a8c56.share.connect.posit.cloud'
 logs_url = 'https://connect.posit.cloud/zevross-spatial/content/019c34f8-ebab-0595-53bd-06ea9b9a8c56/history'
-deployed_at = '2026-02-09T13:08:23-05:00'
+deployed_at = '2026-02-09T13:16:58-05:00'
+bundle_id = '019c439e-157e-1abc-e345-618bf812a9b1'
 files = [
   '.posit/publish/Innovation Strategy Explorer-SDHC.toml',
   '.posit/publish/deployments/deployment-HPUI.toml',
@@ -32,18 +33,7 @@ files = [
   'R/ui.R',
   'R/utils_url_restore.R',
   'app.R',
-  'inst/extdata/citenet.fst',
-  'inst/extdata/countrymap.fst',
-  'inst/extdata/countrymap_with_uk_regions.fst',
-  'inst/extdata/dfnew.parquet',
-  'inst/extdata/docdb_nuts1.fst',
-  'inst/extdata/docdb_nuts2_v3.fst',
-  'inst/extdata/gadm41_GBR_1.json',
-  'inst/extdata/grouped_country_choices.rds',
-  'inst/extdata/grouped_tech_choices.rds',
-  'inst/extdata/long_final.fst',
   'inst/extdata/long_final.parquet',
-  'inst/extdata/longlats.fst',
   'inst/extdata/prepdata/by_country_avstrax_AT_AI.fst',
   'inst/extdata/prepdata/by_country_avstrax_AT_All.fst',
   'inst/extdata/prepdata/by_country_avstrax_AT_Battery_Technology.fst',
@@ -656,11 +646,6 @@ files = [
   'inst/extdata/prepdata/by_tech_istrax_nationalkey_2009_2018_High_income_countries.fst',
   'inst/extdata/prepdata/by_tech_istrax_nationalkey_2009_2018_LMICs.fst',
   'inst/extdata/prepdata/by_tech_istrax_nationalkey_2009_2018_LMICs_excl_China.fst',
-  'inst/extdata/regionmap.fst',
-  'inst/extdata/tech_choices.rds',
-  'inst/extdata/techmap.fst',
-  'inst/extdata/techmap_processed.fst',
-  'inst/extdata/uk_nuts1_boundaries.geojson',
   'inst/www/css/custom-styles.min.css',
   'inst/www/img/ifc_logo.svg',
   'inst/www/img/prinz_logo.png',
@@ -699,11 +684,6 @@ files = [
 
 [connect_cloud]
 account_name = 'zevross-spatial'
-
-[deployment_error]
-code = 'unknown'
-message = 'Bundle upload failed: error uploading bundle: Post "https://intake.connect.posit.cloud/?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJidW5kbGVfaWQiOiIwMTljNDM5Mi04ZDQxLWE3NjgtM2UwYy0yYTNlYWEyYmM0N2QiLCJjb250ZW50X2lkIjoiMDE5YzM0ZjgtZWJhYi0wNTk1LTUzYmQtMDZlYTliOWE4YzU2IiwiZXhwIjoxNzcwNjYwNTAzLCJpc3MiOiJ2aXZpZC1pbnRha2UiLCJtYXhfYnl0ZXMiOjUzNjg3MDkxMjB9.maEIbH9ay1TC2S9xznrCwovu_Y9m47tdD3VYM98jq60": context deadline exceeded (Client.Timeout exceeded while awaiting headers)'
-operation = 'publish/uploadBundle'
 
 [configuration]
 product_type = 'connect_cloud'
