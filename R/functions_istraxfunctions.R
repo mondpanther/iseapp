@@ -424,7 +424,7 @@ plot_avstrax_by_country <- function(
                    width_svg = width_svg,
                    height_svg = height_svg,
                    options = list(
-                     opts_sizing(rescale = TRUE, width = 1),
+                     opts_sizing(rescale = TRUE),
                      opts_hover(css = "cursor:pointer;fill:yellow;"),
                      opts_selection(type = "none"),
                      opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
