@@ -24,30 +24,6 @@ server <- function(input, output, session) {
     updateQueryString(url)
   })
 
-  # # Parse URL on app load
-  # shiny::observe({
-  #   query <- shiny::parseQueryString(session$clientData$url_search)
-    
-  #   if (!is.null(query$tab)) {
-  #     bslib::nav_select(id = "navbar_page", selected = query$tab, session = session)
-  #   }
-  # })
-
-  # # Handle URL parameter restoration
-  # shiny::observeEvent(input$url_params_restore, {
-  #   browser()
-  #   params <- input$url_params_restore
-    
-  #   # Restore main tab first
-  #   if (!is.null(params$navbar_page)) {
-  #     tab_name <- gsub('^"|"$', '', params$navbar_page)
-  #     bslib::nav_select(id = "navbar_page", selected = tab_name, session = session)
-  #   }
-    
-  #   # Send restoration signal to modules with all params
-  #   session$userData$restore_params <- params
-  # }, ignoreNULL = FALSE, ignoreInit = FALSE)
-
   shiny::observe({
     query <- shiny::parseQueryString(session$clientData$url_search)
     

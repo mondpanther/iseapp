@@ -172,16 +172,6 @@ country_module_server <- function(id, parent_session) {
     function(input, output, session) {
       ns <- session$ns
 
-      # Restore subtab from URL on load
-      # shiny::observe({
-      #   query <- parseQueryString(parent_session$clientData$url_search)
-        
-      #   # Only restore if we're on the correct main tab
-      #   if (!is.null(query$tab) &&!is.null(query$subtab) && query$tab == "Country Explorer") {
-      #     bslib::nav_select(id = "inner_tabs", selected = query$subtab, session = session)
-      #   }
-      # })
-
       # Get prepdata path
       prepdata_path <- system.file("extdata", "prepdata", package = "shinyTemplate")
       if (prepdata_path == "" || !dir.exists(prepdata_path)) {
@@ -591,27 +581,6 @@ country_module_server <- function(id, parent_session) {
         )
       })
 
-      # Restore inputs from URL parameters
-      # shiny::observe({
-      #   restore_module_inputs(
-      #     params = parent_session$userData$restore_params,
-      #     module_prefix = "country-",
-      #     tab_name = "Country Explorer",
-      #     input_configs = list(
-      #       inner_tabs = "nav",
-      #       country = "selectize",
-      #       toflow = "selectize",
-      #       tech_categories_plot1 = "selectize",
-      #       techs = "selectize",
-      #       bwidthscale = "radio",
-      #       display_mode = "radio",
-      #       show_top3_ids = "checkbox",
-      #       topn = "numeric",
-      #       mininno = "numeric"
-      #     ),
-      #     session = session
-      #   )
-      # })
     }
   )
 }

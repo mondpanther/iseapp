@@ -157,16 +157,6 @@ region_module_server <- function(id, parent_session) {
     id,
     function(input, output, session) {
       ns <- session$ns
-
-      # Restore subtab from URL on load
-      # shiny::observe({
-      #   query <- parseQueryString(parent_session$clientData$url_search)
-        
-      #   # Only restore if we're on the correct main tab
-      #   if (!is.null(query$tab) &&!is.null(query$subtab) && query$tab == "Region Explorer") {
-      #     bslib::nav_select(id = "inner_tabs", selected = query$subtab, session = session)
-      #   }
-      # })
       
       # Update URL when subtab changes
       shiny::observeEvent(input$inner_tabs, {
