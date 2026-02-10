@@ -15,7 +15,7 @@ plot_avstrax_rta(
   bottomn = 0,
   mininno = 5,
   minallinnos = 0,
-  bwidthscale = "log",
+  widthscale = "log",
   show_top3_ids = FALSE,
   width_svg = 10,
   height_svg = 6,
@@ -43,7 +43,7 @@ plot_avstrax_rta(
 
 \item{minallinnos}{Minimum all innovation count threshold (for Allinnos)}
 
-\item{bwidthscale}{"log" or "proportional" for bar width scaling}
+\item{widthscale}{"log" or "proportional" for bar width scaling}
 
 \item{show_top3_ids}{Whether to show interactive top patent IDs}
 

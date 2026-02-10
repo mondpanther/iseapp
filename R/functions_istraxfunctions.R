@@ -261,6 +261,266 @@ compute_avstrax <- function(data, istrax_var, classes, colorings=NULL) {
   return(result)
 }
 
+#' Plot avstrax by country using Highcharter
+#' @description Creates an interactive horizontal bar chart showing returns by technology
+#' @param pdata Patent data (or NULL if using precomputed_data)
+#' @param classes Technology classifications (or NULL if using precomputed_data)
+#' @param country_code Selected country codes
+#' @param toflow Return flow variable name
+#' @param custom_colors Named vector of colors for technology categories
+#' @param colorings Named list mapping technology types to categories
+#' @param widthscale Bar width scale: "log" or "proportional"
+#' @param display_mode Display mode: "confidence" or "quartiles"
+#' @param show_top3_ids Whether to show top patent IDs in tooltips
+#' @param plot_title Chart title
+#' @param precomputed_data Optional pre-computed aggregated data
+#' @return A highchart object
+plot_avstrax_by_country_hc <- function(
+  pdata,
+  classes,
+  country_code,
+  toflow,
+  custom_colors,
+  colorings = NULL,
+  widthscale = "log",
+  display_mode = "confidence",
+  show_top3_ids = FALSE,
+  plot_title = "Spillover returns",
+  precomputed_data = NULL
+) {
+  
+  # start_time <- Sys.time()
+  # cat("\n=== plot_avstrax_by_country TIMING ===\n")
+  
+  # Use precomputed data if available, otherwise compute
+  if (!is.null(precomputed_data) && nrow(precomputed_data) > 0) {
+    avstrax <- precomputed_data
+    classlist <- unique(avstrax$technology)
+    # message("Using precomputed data with ", nrow(avstrax), " rows")
+    # cat("Time after loading precomputed data:", round(difftime(Sys.time(), start_time, units = "secs"), 2), "secs\n")
+  } else {
+    if (is.null(pdata) || is.null(classes)) {
+      stop("Either precomputed_data or both pdata and classes must be provided")
+    }
+    
+    classlist <- (classes %>% distinct(technology))$technology
+    
+    # filter_start <- Sys.time()
+    # if ("All" %in% country_code) {
+    #   filtered <- pdata |> dplyr::distinct()
+    # } else {
+    #   filtered <- pdata |>
+    #     dplyr::filter(ctry_code %in% country_code) |>
+    #     dplyr::distinct()
+    # }
+    # cat("Time for country filtering:", round(difftime(Sys.time(), filter_start, units = "secs"), 2), "secs\n")
+    
+    # compute_start <- Sys.time()
+    # avstrax <- compute_avstrax(filtered, toflow, classes, colorings)
+    # cat("Time for compute_avstrax:", round(difftime(Sys.time(), compute_start, units = "secs"), 2), "secs\n")
+  }
+  
+  # Prepare axis labels and data
+  ylab <- ifelse(grepl("strax", toflow), "Return in %", "Millions of $")
+  is_return <- grepl("strax", toflow)
+  
+  allmean <- avstrax |>
+    dplyr::pull(mean) |>
+    mean(x = _, na.rm = TRUE)
+  
+  total_innos <- avstrax |>
+    dplyr::pull(innos) |>
+    sum()
+  
+  if(!"All" %in% classlist) avstrax <- avstrax |> dplyr::filter(technology != "All")
+  
+  # Data transformations
+  # transform_start <- Sys.time()
+  avstrax <- avstrax |>
+    dplyr::arrange(technology) |>
+    dplyr::mutate(
+      linnos1 = innos,
+      linnos2 = log(1 + innos),
+      widthscale = widthscale
+    ) |>
+    dplyr::filter(innos > 1) |>
+    dplyr::mutate(
+      linnos = ifelse(widthscale == "log", linnos2, linnos1),
+      width = linnos / max(linnos),
+      x_pos = as.numeric(factor(technology)),
+      value_label = if (is_return) {
+        paste0(round(mean, 1), "%")
+      } else {
+        paste0("$", round(mean, 1), " million")
+      }
+    ) |>
+    dplyr::arrange(-x_pos)  # Reverse order for horizontal display
+  
+  # cat("Time for data transformations:", round(difftime(Sys.time(), transform_start, units = "secs"), 2), "secs\n")
+  
+  # Create the chart
+  # plot_start <- Sys.time()
+  
+  # Prepare data for bar series with variable widths
+  # Highcharter doesn't natively support variable bar widths, so we use pointWidth
+  avstrax <- avstrax |>
+    dplyr::mutate(
+      color = custom_colors[greenclass],
+      tooltip_text = if (show_top3_ids) {
+        paste0(
+          "<b>", technology, "</b><br/>",
+          value_label, "<br/>",
+          "Innovations: ", scales::comma(innos), "<br/>",
+          "Top IDs: ", top3_ids
+        )
+      } else {
+        paste0(
+          "<b>", technology, "</b><br/>",
+          value_label, "<br/>",
+          "Innovations: ", scales::comma(innos)
+        )
+      }
+    )
+  
+  # Create base chart
+  hc <- highcharter::highchart() |>
+    highcharter::hc_chart(type = "bar") |>
+    highcharter::hc_title(text = plot_title) |>
+    highcharter::hc_subtitle(text = paste0(scales::comma(total_innos), " Innovations")) |>
+    highcharter::hc_xAxis(
+      categories = avstrax$technology,
+      title = list(text = "Technology")
+    ) |>
+    highcharter::hc_yAxis(
+      title = list(text = ylab)
+    ) |>
+    highcharter::hc_legend(enabled = TRUE) |>
+    highcharter::hc_plotOptions(
+      bar = list(
+        grouping = FALSE,
+        dataLabels = list(enabled = FALSE)
+      )
+    ) |>
+    highcharter::hc_tooltip(
+      useHTML = TRUE,
+      formatter = JS("function() { return this.point.tooltip_text; }")
+    )
+
+  # Add all bars as a single series with individual colors
+  hc <- hc |>
+    highcharter::hc_add_series(
+      name = "Technologies",
+      data = lapply(1:nrow(avstrax), function(i) {
+        row <- avstrax[i, ]
+        list(
+          y = row$mean,
+          color = unname(custom_colors[row$greenclass]),
+          tooltip_text = row$tooltip_text
+        )
+      }),
+      showInLegend = FALSE
+    )
+
+  # Add error bars after adding the main series
+  if (display_mode == "confidence") {
+    error_data <- avstrax |>
+      dplyr::mutate(
+        low = ifelse(mean - 1.96 * sem > 0, mean - 1.96 * sem, 0),
+        high = mean + 1.96 * sem
+      )
+    
+    hc <- hc |>
+      highcharter::hc_add_series(
+        type = "errorbar",
+        name = "95% CI",
+        data = lapply(1:nrow(error_data), function(i) {
+          list(x = i - 1, low = error_data$low[i], high = error_data$high[i])
+        }),
+        color = "black",
+        stemWidth = 2,
+        whiskerLength = "20%",
+        showInLegend = FALSE,
+        enableMouseTracking = FALSE,
+        tooltip = list(enabled = FALSE)
+      )
+  } else if (display_mode == "quartiles") {
+    quartile_data <- avstrax
+    
+    hc <- hc |>
+      highcharter::hc_add_series(
+        type = "errorbar",
+        name = "Quartiles",
+        data = lapply(1:nrow(quartile_data), function(i) {
+          list(
+            x = i - 1,
+            low = quartile_data$top50_bin_mean[i],
+            high = quartile_data$top25_bin_mean[i],
+            color = unname(custom_colors[quartile_data$greenclass[i]])
+          )
+        }),
+        stemWidth = 3,
+        whiskerLength = "30%",
+        showInLegend = FALSE,
+        enableMouseTracking = FALSE,
+        tooltip = list(enabled = FALSE)
+      )
+  }
+
+  hc <- hc |>
+  highcharter::hc_yAxis(
+    plotLines = list(
+      list(
+        value = allmean,
+        color = "black",
+        width = 2,
+        dashStyle = "Dash",
+        label = list(
+          text = "Average",
+          align = "right",
+          style = list(color = "black")
+        )
+      )
+    )
+  )
+
+  # Add a legend series for each greenclass (invisible points, just for legend)
+  for (green_type in unique(avstrax$greenclass)) {
+    hc <- hc |>
+      highcharter::hc_add_series(
+        name = green_type,
+        color = unname(custom_colors[green_type]),
+        data = list(),  # Empty data
+        showInLegend = TRUE
+      )
+  }
+  
+  # Add click events for patent IDs if enabled
+  if (show_top3_ids) {
+    hc <- hc |>
+      highcharter::hc_plotOptions(
+        series = list(
+          cursor = "pointer",
+          point = list(
+            events = list(
+              click = JS("function() {
+                if (this.url) {
+                  eval(this.url);
+                }
+              }")
+            )
+          )
+        )
+      )
+  }
+  
+  # cat("Time for highcharter construction:", round(difftime(Sys.time(), plot_start, units = "secs"), 2), "secs\n")
+  
+  # total_time <- difftime(Sys.time(), start_time, units = "secs")
+  # cat("TOTAL plot_avstrax_by_country time:", round(total_time, 2), "secs\n")
+  # cat("======================================\n\n")
+  
+  return(hc)
+}
 
 
 #### Draw the plots
@@ -271,7 +531,7 @@ plot_avstrax_by_country <- function(
   toflow,
   custom_colors,
   colorings=NULL,
-  bwidthscale="log",
+  widthscale="log",
   display_mode="confidence",
   show_top3_ids=FALSE,
   width_svg=10,
@@ -281,70 +541,77 @@ plot_avstrax_by_country <- function(
 ){
 
   # Start timing
-  start_time <- Sys.time()
-  cat("\n=== plot_avstrax_by_country TIMING ===\n")
+  # start_time <- Sys.time()
+  # cat("\n=== plot_avstrax_by_country TIMING ===\n")
   
-  library(dplyr)
-  library(ggplot2)
-  library(patchwork)
+  # library(dplyr)
+  # library(ggplot2)
+  # library(patchwork)
 
   # Use precomputed data if available, otherwise compute
   if (!is.null(precomputed_data) && nrow(precomputed_data) > 0) {
     avstrax <- precomputed_data
     classlist <- unique(avstrax$technology)
-    message("Using precomputed data with ", nrow(avstrax), " rows")
-    cat("Time after loading precomputed data:", round(difftime(Sys.time(), start_time, units = "secs"), 2), "secs\n")
+    # message("Using precomputed data with ", nrow(avstrax), " rows")
+    # cat("Time after loading precomputed data:", round(difftime(Sys.time(), start_time, units = "secs"), 2), "secs\n")
   } else {
     if (is.null(pdata) || is.null(classes)) {
       stop("Either precomputed_data or both pdata and classes must be provided")
     }
 
-    classlist <- (classes %>% distinct(technology))$technology
+    # classlist <- classes |>
+    #   dplyr::distinct(technology) |>
+    #   dplyr::pull(technology)
 
     # Filter by country and year
-    filter_start <- Sys.time()
-    if ("All" %in% country_code) {
-      filtered <- pdata %>% distinct()
-    } else {
-      filtered <- pdata %>%
-        filter(ctry_code %in% country_code) %>%
-        distinct()
-    }
-    cat("Time for country filtering:", round(difftime(Sys.time(), filter_start, units = "secs"), 2), "secs\n")
+    # filter_start <- Sys.time()
+    # if ("All" %in% country_code) {
+    #   filtered <- pdata |> distinct()
+    # } else {
+    #   filtered <- pdata |>
+    #     filter(ctry_code %in% country_code) |>
+    #     distinct()
+    # }
+    # cat("Time for country filtering:", round(difftime(Sys.time(), filter_start, units = "secs"), 2), "secs\n")
 
     # Compute avstrax
-    compute_start <- Sys.time()
-    avstrax <- compute_avstrax(filtered, toflow, classes, colorings)
-    cat("Time for compute_avstrax:", round(difftime(Sys.time(), compute_start, units = "secs"), 2), "secs\n")
-    cat("Total time after data preparation:", round(difftime(Sys.time(), start_time, units = "secs"), 2), "secs\n")
+    # compute_start <- Sys.time()
+    # avstrax <- compute_avstrax(filtered, toflow, classes, colorings)
+    # cat("Time for compute_avstrax:", round(difftime(Sys.time(), compute_start, units = "secs"), 2), "secs\n")
+    # cat("Total time after data preparation:", round(difftime(Sys.time(), start_time, units = "secs"), 2), "secs\n")
   }
 
   ylab <- ifelse(grepl("strax", toflow), "Return in %", "Millions of $")
   
-  allmean <- avstrax %>%
-    filter(technology == "All") %>%
-    pull(mean)
+  allmean <- avstrax |>
+    # filter(technology == "All") |>
+    dplyr::pull(mean) |>
+    mean(x = _, na.rm = TRUE)
   
-  total_innos <- avstrax %>%
-    filter(technology == "All") %>%
-    pull(innos)
+  total_innos <- avstrax |>
+    # filter(technology == "All") |>
+    dplyr::pull(innos) |>
+    sum()
 
-  if(!"All" %in% classlist) avstrax <- avstrax %>% filter(technology != "All")
+  if(!"All" %in% classlist) {
+    avstrax <- avstrax |>
+      dplyr::filter(technology != "All")
+  }
 
   is_return <- grepl("strax", toflow)
 
   # Data transformations
-  transform_start <- Sys.time()
-  avstrax <- avstrax %>%
-    arrange(technology) %>%
-    mutate(
+  # transform_start <- Sys.time()
+  avstrax <- avstrax |>
+    dplyr::arrange(technology) |>
+    dplyr::mutate(
       linnos1 = innos,
       linnos2 = log(1+innos),
-      bwidthscale = bwidthscale
-    ) %>%
-    filter(innos>1) %>%
-    mutate(
-      linnos=ifelse(bwidthscale=="log",linnos2,linnos1),
+      widthscale = widthscale
+    ) |>
+    dplyr::filter(innos>1) |>
+    dplyr::mutate(
+      linnos=ifelse(widthscale=="log",linnos2,linnos1),
       width = linnos / max(linnos),
       x_pos = as.numeric(factor(technology)),
       xmin = x_pos - width / 2,
@@ -358,90 +625,133 @@ plot_avstrax_by_country <- function(
   } else {
     avstrax$value_label <- paste0("$", round(avstrax$mean, 1), " million")
   }
-  cat("Time for data transformations:", round(difftime(Sys.time(), transform_start, units = "secs"), 2), "secs\n")
+  # cat("Time for data transformations:", round(difftime(Sys.time(), transform_start, units = "secs"), 2), "secs\n")
 
   # Create the plot
-  plot_start <- Sys.time()
+  # plot_start <- Sys.time()
   if (show_top3_ids) {
-    p <- ggplot(avstrax) +
-      geom_rect_interactive(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = greenclass,
-                                 data_id = technology,
-                                 tooltip = paste0(technology, ": ", value_label,
-                                                  "\nInnovations: ", scales::comma(innos),
-                                                  "\nTop IDs: ", top3_ids),
-                                 onclick = top3_ids_url))
+    p <- ggplot2::ggplot(avstrax) +
+      ggiraph::geom_rect_interactive(
+        ggplot2::aes(
+          xmin = xmin,
+          xmax = xmax,
+          ymin = ymin,
+          ymax = ymax,
+          fill = greenclass,
+          data_id = technology,
+          tooltip = paste0(technology, ": ", value_label,
+          "\nInnovations: ", scales::comma(innos),
+          "\nTop IDs: ", top3_ids),
+          onclick = top3_ids_url
+        )
+      )
   } else {
-    p <- ggplot(avstrax) +
-      geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = greenclass))
+    p <- ggplot2::ggplot(avstrax) +
+      ggplot2::geom_rect(
+        ggplot2::aes(
+          xmin = xmin,
+          xmax = xmax,
+          ymin = ymin,
+          ymax = ymax,
+          fill = greenclass
+        )
+      )
   }
 
   if (display_mode == "confidence") {
-    p <- p + geom_errorbar(aes(x = x_pos, ymin = ifelse(mean- 1.96 * sem>0,mean- 1.96 * sem,0),
-                                ymax = mean + 1.96 * sem),
-                           width = 0.2, color = "black", linewidth = .4, alpha = .4)
+    p <- p + 
+      ggplot2::geom_errorbar(
+        ggplot2::aes(
+          x = x_pos,
+          ymin = ifelse(mean- 1.96 * sem>0,mean- 1.96 * sem,0),
+          ymax = mean + 1.96 * sem
+        ),
+        width = 0.2,
+        color = "black",
+        linewidth = .4,
+        alpha = .4
+      )
   } else if (display_mode == "quartiles") {
-    p <- p + geom_errorbar(aes(color=greenclass, x = x_pos, ymin = top50_bin_mean, ymax = top25_bin_mean, width=width*1.05),
-                           linewidth = 1, alpha = .5)
+    p <- p + 
+      ggplot2::geom_errorbar(
+        ggplot2::aes(
+          color=greenclass,
+          x = x_pos,
+          ymin = top50_bin_mean,
+          ymax = top25_bin_mean,
+          width=width*1.05
+        ),
+        linewidth = 1,
+        alpha = .5
+      )
   }
 
   p <- p +
-    scale_x_continuous(breaks = avstrax$x_pos, labels = avstrax$technology) +
-    scale_color_manual(values = custom_colors) +
-    scale_fill_manual(values = custom_colors) +
-    labs(
+    ggplot2::scale_x_continuous(breaks = avstrax$x_pos, labels = avstrax$technology) +
+    ggplot2::scale_color_manual(values = custom_colors) +
+    ggplot2::scale_fill_manual(values = custom_colors) +
+    ggplot2::labs(
       title = plot_title,
       x = "Technology",
       y = ylab,
       fill = "Technology"
     ) +
-    guides(color = "none") +
-    theme_minimal(base_family = "Open Sans") +
-    theme(
-      axis.title.x = element_text(size = 16),
-      axis.title.y = element_text(size = 16),
-      axis.text.x = element_text(size = 14),
-      axis.text.y = element_text(size = 14),
-      text = element_text(family = "Open Sans"),
-      axis.text = element_text(family = "Open Sans"),
-      axis.title = element_text(family = "Open Sans")
+    ggplot2::guides(color = "none") +
+    ggplot2::theme_minimal(base_family = "Open Sans") +
+    ggplot2::theme(
+      axis.title.x = ggplot2::element_text(size = 16),
+      axis.title.y = ggplot2::element_text(size = 16),
+      axis.text.x = ggplot2::element_text(size = 14),
+      axis.text.y = ggplot2::element_text(size = 14),
+      text = ggplot2::element_text(family = "Open Sans"),
+      axis.text = ggplot2::element_text(family = "Open Sans"),
+      axis.title = ggplot2::element_text(family = "Open Sans")
     ) +
-    geom_hline(yintercept = allmean, linetype = "dashed", color = "black", linewidth = 1) +
-    annotate("text", y = allmean, x = max(avstrax$x_pos) + 0.4,
+    ggplot2::geom_hline(yintercept = allmean, linetype = "dashed", color = "black", linewidth = 1) +
+    ggplot2::annotate("text", y = allmean, x = max(avstrax$x_pos) + 0.4,
              label = "Average", angle = -90, vjust = 1.5, size = 4,
              family = "Open Sans", color = "black") +
-    coord_flip()
+    ggplot2::coord_flip()
 
-  p <- p + labs(subtitle = paste0(as.character(total_innos), " Innovations"),
-                caption = "© 2025 Innovation Strategy Explorer") +
-    theme(plot.subtitle = element_text(size = 14, hjust = 0.5),
-          plot.caption = element_text(hjust = 1, size = 10, color = "gray"))
+  p <- p + 
+    ggplot2::labs(
+      subtitle = paste0(as.character(total_innos), " Innovations"),
+      caption = "© 2026 Innovation Strategy Explorer"
+    ) +
+    ggplot2::theme(
+      plot.subtitle = ggplot2::element_text(size = 14, hjust = 0.5),
+      plot.caption = ggplot2::element_text(hjust = 1, size = 10, color = "gray")
+    )
   
-  cat("Time for ggplot construction:", round(difftime(Sys.time(), plot_start, units = "secs"), 2), "secs\n")
+  # cat("Time for ggplot construction:", round(difftime(Sys.time(), plot_start, units = "secs"), 2), "secs\n")
 
   # Create girafe object
-  girafe_start <- Sys.time()
-  result <- girafe(ggobj = p,
-                   width_svg = width_svg,
-                   height_svg = height_svg,
-                   options = list(
-                     opts_sizing(rescale = TRUE),
-                     opts_hover(css = "cursor:pointer;fill:yellow;"),
-                     opts_selection(type = "none"),
-                     opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
-                   ))
-  cat("Time for girafe rendering:", round(difftime(Sys.time(), girafe_start, units = "secs"), 2), "secs\n")
+  # girafe_start <- Sys.time()
+  result <- ggiraph::girafe(
+    ggobj = p,
+    width_svg = width_svg,
+    height_svg = height_svg,
+    options = list(
+        opts_sizing(rescale = TRUE),
+        opts_hover(css = "cursor:pointer;fill:yellow;"),
+        opts_selection(type = "none"),
+        opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
+      )
+    )
+  # cat("Time for girafe rendering:", round(difftime(Sys.time(), girafe_start, units = "secs"), 2), "secs\n")
   
-  total_time <- difftime(Sys.time(), start_time, units = "secs")
-  cat("TOTAL plot_avstrax_by_country time:", round(total_time, 2), "secs\n")
-  cat("======================================\n\n")
+  # total_time <- difftime(Sys.time(), start_time, units = "secs")
+  # cat("TOTAL plot_avstrax_by_country time:", round(total_time, 2), "secs\n")
+  # cat("======================================\n\n")
   
   return(result)
 }
+
 # plot_avstrax_by_country <- function(pdata, classes, #green_classes,
 #                                     country_code, toflow,
 #                                     custom_colors,
 #                                     colorings=NULL,
-#                                     bwidthscale="log",
+#                                     widthscale="log",
 #                                     display_mode="confidence",
 #                                     show_top3_ids=FALSE,
 #                                     width_svg=10,
@@ -460,7 +770,7 @@ plot_avstrax_by_country <- function(
 
 #   #path <- paste0("/istraxes/istrax_global.fst"); ddd=dropbox_read_fst(path);
 #   #patchar_countrymap <- countrymap %>% left_join(ddd)
-#   #classes=techmap %>% filter(technology=="Green Technology"); toflow="istrax_global"; pdata=patchar_countrymap; country_code="VN";bwidthscale=100;show_top3_ids=TRUE
+#   #classes=techmap %>% filter(technology=="Green Technology"); toflow="istrax_global"; pdata=patchar_countrymap; country_code="VN";widthscale=100;show_top3_ids=TRUE
 #   #display_mode="confidence"
 
 #   # Use precomputed data if available, otherwise compute
@@ -506,7 +816,7 @@ plot_avstrax_by_country <- function(
 #     pull(innos)
 
 #   # Prepare data for plotting
-#   #display_mode="quartiles";bwidthscale="log"
+#   #display_mode="quartiles";widthscale="log"
 #   if(!"All" %in% classlist) avstrax=avstrax %>% filter(technology != "All")
 
 #   # Determine if this is a return (%) or spillover ($) variable
@@ -519,11 +829,11 @@ plot_avstrax_by_country <- function(
 #     mutate(
 #       linnos1 = innos,  # Now correctly uses the innos column, not the scalar
 #       linnos2 = log(1+innos),
-#       bwidthscale = bwidthscale
+#       widthscale = widthscale
 #     ) %>%
 #     filter(innos>1) %>%
 #     mutate(
-#       linnos=ifelse(bwidthscale=="log",linnos2,linnos1),
+#       linnos=ifelse(widthscale=="log",linnos2,linnos1),
 
 #       width = linnos / max(linnos),
 #       #width =ifelse( innos / max(innos)>win_thres,innos / max(innos),win_thres),
@@ -806,7 +1116,7 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
 
 
 plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
-                                       technologies, toflow, custom_colors,topn=20,mininno=5,bwidthscale="log",
+                                       technologies, toflow, custom_colors,topn=20,mininno=5,widthscale="log",
                                        display_mode="confidence",
                                        show_top3_ids=FALSE,
                                        width_svg=10,
@@ -936,7 +1246,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
 
   # Compute bar widths for main data
   # Width is proportional to share of innovations (or log of share if log scale)
-  if (bwidthscale == "log") {
+  if (widthscale == "log") {
     avstrax$width_raw <- log(1 + avstrax$innos)
   } else {
     avstrax$width_raw <- avstrax$innos
@@ -958,7 +1268,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
       avstrax_comp$x_pos <- as.numeric(avstrax_comp$country_name)
 
       # Compute bar widths for comparison data (separately)
-      if (bwidthscale == "log") {
+      if (widthscale == "log") {
         avstrax_comp$width_raw <- log(1 + avstrax_comp$innos)
       } else {
         avstrax_comp$width_raw <- avstrax_comp$innos
@@ -1193,7 +1503,7 @@ build_espacenet_search <- function(id_strings) {
 #' @param bottomn Number of bottom countries to show (lowest RTA)
 #' @param mininno Minimum innovation count threshold (for innos)
 #' @param minallinnos Minimum all innovation count threshold (for Allinnos)
-#' @param bwidthscale "log" or "proportional" for bar width scaling
+#' @param widthscale "log" or "proportional" for bar width scaling
 #' @param show_top3_ids Whether to show interactive top patent IDs
 #' @param width_svg SVG width in inches
 #' @param height_svg SVG height in inches
@@ -1202,7 +1512,7 @@ build_espacenet_search <- function(id_strings) {
 #' @param precomputed_avstrax Pre-computed avstrax data (optional)
 #' @return A girafe object
 plot_avstrax_rta <- function(pdata, classes,
-                             technologies, toflow, custom_colors, topn = 20, bottomn = 0, mininno = 5, minallinnos = 0, bwidthscale = "log",
+                             technologies, toflow, custom_colors, topn = 20, bottomn = 0, mininno = 5, minallinnos = 0, widthscale = "log",
                              show_top3_ids = FALSE,
                              width_svg = 10,
                              height_svg = 6,
@@ -1329,7 +1639,7 @@ plot_avstrax_rta <- function(pdata, classes,
   avstrax$x_pos <- as.numeric(avstrax$country_name)
 
   # Compute bar widths (proportional to innovations)
-  if (bwidthscale == "log") {
+  if (widthscale == "log") {
     avstrax$width_raw <- log(1 + avstrax$innos)
   } else {
     avstrax$width_raw <- avstrax$innos
@@ -1422,7 +1732,7 @@ plot_avstrax_rta <- function(pdata, classes,
 #' @param avstrax_data Data frame with ctry_code, RTA, mean, and innos columns
 #' @param mininno Minimum innovation count threshold (for innos)
 #' @param minallinnos Minimum all innovation count threshold (for Allinnos)
-#' @param bwidthscale "log" or "proportional" for dot size scaling
+#' @param widthscale "log" or "proportional" for dot size scaling
 #' @param width_svg SVG width in inches
 #' @param height_svg SVG height in inches
 #' @param plot_title Title for the plot
@@ -1432,7 +1742,7 @@ plot_avstrax_rta <- function(pdata, classes,
 plot_rta_returns_scatter <- function(avstrax_data,
                                       mininno = 5,
                                       minallinnos = 0,
-                                      bwidthscale = "log",
+                                      widthscale = "log",
                                       width_svg = 8,
                                       height_svg = 6,
                                       plot_title = "RTA vs Returns",
@@ -1511,7 +1821,7 @@ plot_rta_returns_scatter <- function(avstrax_data,
   }
 
   # Calculate dot sizes based on innovation count
-  if (bwidthscale == "log") {
+  if (widthscale == "log") {
     scatter_data$size_raw <- log(1 + scatter_data$innos)
   } else {
     scatter_data$size_raw <- scatter_data$innos
@@ -1661,7 +1971,7 @@ gdp_per_capita_2015 <- data.frame(
 #' @param avstrax_data Data frame with ctry_code, RTA, and innos columns
 #' @param mininno Minimum number of innovations to include a country
 #' @param minallinnos Minimum total innovations filter
-#' @param bwidthscale Scale for bubble width ("log" or "linear")
+#' @param widthscale Scale for bubble width ("log" or "linear")
 #' @param width_svg SVG width in inches
 #' @param height_svg SVG height in inches
 #' @param plot_title Title for the plot
@@ -1669,7 +1979,7 @@ gdp_per_capita_2015 <- data.frame(
 plot_rta_gdp_scatter <- function(avstrax_data,
                                  mininno = 5,
                                  minallinnos = 0,
-                                 bwidthscale = "log",
+                                 widthscale = "log",
                                  width_svg = 8,
                                  height_svg = 6,
                                  plot_title = "RTA vs GDP per Capita") {
@@ -1732,7 +2042,7 @@ plot_rta_gdp_scatter <- function(avstrax_data,
   scatter_data$log_gdp_pc <- log(scatter_data$gdp_pc_2015)
 
   # Calculate dot sizes based on innovation count
-  if (bwidthscale == "log") {
+  if (widthscale == "log") {
     scatter_data$size_raw <- log(1 + scatter_data$innos)
   } else {
     scatter_data$size_raw <- scatter_data$innos

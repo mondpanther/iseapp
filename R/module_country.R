@@ -53,7 +53,7 @@ country_module_sidebar <- function(id) {
       shiny::div(
         class = "side_input",
         shiny::radioButtons(
-          inputId = ns("bwidthscale"),
+          inputId = ns("widthscale"),
           label = "Bar width scale",
           choices = c("log", "proportional"),
           selected = "log"
@@ -138,6 +138,7 @@ country_module_ui <- function(id) {
         "Returns by Technology",
         shiny::div(
           ggiraph::girafeOutput(ns("avstrax_plot1"), height = "100%")
+          # highcharter::highchartOutput(ns("avstrax_plot1"), height = "600px")
         )
       ),
 
@@ -325,13 +326,13 @@ country_module_server <- function(id, parent_session) {
         !is.null(rm) && nrow(rm) > 0
       })
 
-      patchar_countrymap <- reactive({
-        req(input$toflow)
+      # patchar_countrymap <- reactive({
+      #   req(input$toflow)
         
-        # Don't load full countrymap - just join the specific flow file
-        path <- paste0("/istraxes/", input$toflow, ".fst")
-        read_fst(localpath_fname(path))
-      })
+      #   # Don't load full countrymap - just join the specific flow file
+      #   path <- paste0("/istraxes/", input$toflow, ".fst")
+      #   read_fst(localpath_fname(path))
+      # })
 
       # patchar_countrymap <- reactive({
       #   req(input$toflow)
@@ -374,8 +375,9 @@ country_module_server <- function(id, parent_session) {
       })
       
       # Chart 1: Main avstrax plot
-      output$avstrax_plot1 <- ggiraph::renderGirafe({
-        req(input$country, input$toflow, input$tech_categories_plot1, input$bwidthscale, input$display_mode, !is.null(input$show_top3_ids))
+      # output$avstrax_plot1 <- ggiraph::renderGirafe({
+      output$avstrax_plot1 <- highcharter::renderHighchart({
+        req(input$country, input$toflow, input$tech_categories_plot1, input$widthscale, input$display_mode, !is.null(input$show_top3_ids))
         # req(window_dims$initialized)  # Wait for valid dimensions (important for bookmark restoration)
 
         selected_countries <- expand_country_selection(input$country)
@@ -412,18 +414,19 @@ country_module_server <- function(id, parent_session) {
         aspect_ratio <- ifelse(plot_width > 1200, 0.5, ifelse(plot_width > 800, 0.6, 0.7))
         height_inches <- width_inches * aspect_ratio
 
+        # p <- plot_avstrax_by_country_hc(
         p <- plot_avstrax_by_country(
-          pdata = patchar_countrymap(),
+          pdata = NULL, # patchar_countrymap(),
           classes = filtered_techmap,
           country_code = selected_countries,
           toflow = input$toflow,
           custom_colors = custom_colors,
           colorings=colorings,
-          bwidthscale=input$bwidthscale,
+          widthscale=input$widthscale,
           display_mode=input$display_mode,
           show_top3_ids=input$show_top3_ids,
-          width_svg = width_inches,
-          height_svg = height_inches,
+          # width_svg = width_inches,
+          # height_svg = height_inches,
           plot_title =  sub("^[^.]*\\.", "", flow_label),
           precomputed_data = precomputed_avstrax()
         )
@@ -438,7 +441,7 @@ country_module_server <- function(id, parent_session) {
             input$techs,
             input$topn,
             input$mininno,
-            input$bwidthscale,
+            input$widthscale,
             input$display_mode,
             !is.null(input$show_top3_ids))
         # req(window_dims$initialized)  # Wait for valid dimensions (important for bookmark restoration)
@@ -499,7 +502,7 @@ country_module_server <- function(id, parent_session) {
           custom_colors = custom_colors,
           topn = input$topn,
           mininno = input$mininno,
-          bwidthscale = input$bwidthscale,
+          widthscale = input$widthscale,
           display_mode = input$display_mode,
           show_top3_ids = input$show_top3_ids,
           width_svg = width_inches,
@@ -542,28 +545,28 @@ country_module_server <- function(id, parent_session) {
         }
 
         # If no pre-computed data, compute on the fly
-        if (is.null(avstrax_data)) {
-          # Require big datasets for on-the-fly computation
-          req(data_state$countrymap_loaded)
-          req(data_state$techmap_loaded)
+        # if (is.null(avstrax_data)) {
+        #   # Require big datasets for on-the-fly computation
+        #   req(data_state$countrymap_loaded)
+        #   req(data_state$techmap_loaded)
 
-          # Get current techmap
-          current_techmap <- get_techmap()
+        #   # Get current techmap
+        #   current_techmap <- get_techmap()
 
-          # Filter by technology class
-          filtered_classes <- current_techmap %>%
-            filter(technology %in% input$techs) %>%
-            distinct()
+        #   # Filter by technology class
+        #   filtered_classes <- current_techmap %>%
+        #     filter(technology %in% input$techs) %>%
+        #     distinct()
 
-          if("All Innovations" %in% input$techs) filtered_classes <- data.frame()
+        #   if("All Innovations" %in% input$techs) filtered_classes <- data.frame()
 
-          # Filter data by selected countries
-          filtered <- patchar_countrymap() %>%
-            filter(ctry_code %in% selected_countries)
+        #   # Filter data by selected countries
+        #   filtered <- patchar_countrymap() %>%
+        #     filter(ctry_code %in% selected_countries)
 
-          # Compute aggregated data for all countries
-          avstrax_data <- compute_avstrax_for_techs(filtered, input$toflow, filtered_classes)
-        }
+        #   # Compute aggregated data for all countries
+        #   avstrax_data <- compute_avstrax_for_techs(filtered, input$toflow, filtered_classes)
+        # }
 
         # Filter by minimum innovations
         avstrax_data <- avstrax_data %>%

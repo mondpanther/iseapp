@@ -8,7 +8,7 @@ plot_rta_gdp_scatter(
   avstrax_data,
   mininno = 5,
   minallinnos = 0,
-  bwidthscale = "log",
+  widthscale = "log",
   width_svg = 8,
   height_svg = 6,
   plot_title = "RTA vs GDP per Capita"
@@ -21,7 +21,7 @@ plot_rta_gdp_scatter(
 
 \item{minallinnos}{Minimum total innovations filter}
 
-\item{bwidthscale}{Scale for bubble width ("log" or "linear")}
+\item{widthscale}{Scale for bubble width ("log" or "linear")}
 
 \item{width_svg}{SVG width in inches}
 

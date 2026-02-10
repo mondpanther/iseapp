@@ -8,7 +8,7 @@ plot_rta_returns_scatter(
   avstrax_data,
   mininno = 5,
   minallinnos = 0,
-  bwidthscale = "log",
+  widthscale = "log",
   width_svg = 8,
   height_svg = 6,
   plot_title = "RTA vs Returns",
@@ -23,7 +23,7 @@ plot_rta_returns_scatter(
 
 \item{minallinnos}{Minimum all innovation count threshold (for Allinnos)}
 
-\item{bwidthscale}{"log" or "proportional" for dot size scaling}
+\item{widthscale}{"log" or "proportional" for dot size scaling}
 
 \item{width_svg}{SVG width in inches}
 
