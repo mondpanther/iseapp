@@ -18,6 +18,7 @@ library(gdtools)
 library(gfonts)
 library(leaflet)
 library(sf)
+library(svglite)
 source("dropbox_auth.R")
 source("istraxfunctions.R")
 
