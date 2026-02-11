@@ -67,8 +67,10 @@ head(avstrax_global)
 
 ## Investigation Notes
 
-Add your investigation code and notes below.
+Global and National
 
 ```{r}
+
+countrymap=
 # Add your investigation code here
 ```
