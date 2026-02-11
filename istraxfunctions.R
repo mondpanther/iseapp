@@ -446,9 +446,15 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
     theme(plot.subtitle = element_text(size = 14, hjust = 0.5),
           plot.caption = element_text(hjust = 1, size = 10, color = "gray"))
 
+  # Prepare export data
+  export_cols <- c("technology", "mean", "innos", "sem", "greenclass", "value_label")
+  if ("top50_bin_mean" %in% names(avstrax)) export_cols <- c(export_cols, "top50_bin_mean", "top25_bin_mean")
+  plot_data <- avstrax[, intersect(export_cols, names(avstrax)), drop = FALSE]
+
   # Return girafe object for Shiny girafeOutput compatibility
   # Use responsive sizing with dynamic width/height based on browser window
-  return(girafe(ggobj = p,
+  return(list(
+    girafe = girafe(ggobj = p,
                 width_svg = width_svg,
                 height_svg = height_svg,
                 options = list(
@@ -456,7 +462,10 @@ plot_avstrax_by_country <- function(pdata, classes, #green_classes,
                   opts_hover(css = "cursor:pointer;fill:yellow;"),
                   opts_selection(type = "none"),
                   opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
-                )))
+                )),
+    ggplot = p,
+    plot_data = plot_data
+  ))
 }
 
 
@@ -740,10 +749,11 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
     p <- ggplot() +
       annotate("text", x = 0.5, y = 0.5, label = "No data available for selected filters", size = 6) +
       theme_void()
-    return(girafe(ggobj = p,
-                  width_svg = width_svg,
-                  height_svg = height_svg,
-                  options = list(opts_sizing(rescale = TRUE, width = 1))))
+    return(list(
+      girafe = girafe(ggobj = p, width_svg = width_svg, height_svg = height_svg,
+                      options = list(opts_sizing(rescale = TRUE, width = 1))),
+      ggplot = NULL, plot_data = NULL
+    ))
   }
 
   # Set factor levels based on main data ordering
@@ -975,8 +985,18 @@ Main: ", paste(technologies, collapse = ", "),
     theme(plot.subtitle = element_text(size = 11, hjust = 0.5),
           plot.caption = element_text(hjust = 1, size = 10, color = "gray"))
 
+  # Prepare export data
+  export_cols <- c("ctry_code", "country_name", "mean", "innos", "sem", "group", "value_label")
+  if ("top50_bin_mean" %in% names(avstrax)) export_cols <- c(export_cols, "top50_bin_mean", "top25_bin_mean")
+  plot_data <- avstrax[, intersect(export_cols, names(avstrax)), drop = FALSE]
+  if (has_comp_data && exists("avstrax_comp") && nrow(avstrax_comp) > 0) {
+    comp_export <- avstrax_comp[, intersect(export_cols, names(avstrax_comp)), drop = FALSE]
+    plot_data <- rbind(plot_data, comp_export)
+  }
+
   # Return girafe object for Shiny girafeOutput compatibility
-  return(girafe(ggobj = p,
+  return(list(
+    girafe = girafe(ggobj = p,
                 width_svg = width_svg,
                 height_svg = height_svg,
                 options = list(
@@ -984,7 +1004,10 @@ Main: ", paste(technologies, collapse = ", "),
                   opts_hover(css = "cursor:pointer;fill:yellow;"),
                   opts_selection(type = "none"),
                   opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
-                )))
+                )),
+    ggplot = p,
+    plot_data = plot_data
+  ))
 }
 
 
@@ -1053,10 +1076,11 @@ plot_avstrax_rta <- function(pdata, classes,
     p <- ggplot() +
       annotate("text", x = 0.5, y = 0.5, label = "RTA data not available", size = 6) +
       theme_void()
-    return(girafe(ggobj = p,
-                  width_svg = width_svg,
-                  height_svg = height_svg,
-                  options = list(opts_sizing(rescale = TRUE, width = 1))))
+    return(list(
+      girafe = girafe(ggobj = p, width_svg = width_svg, height_svg = height_svg,
+                      options = list(opts_sizing(rescale = TRUE, width = 1))),
+      ggplot = NULL, plot_data = NULL
+    ))
   }
 
   # Extract global average RTA (should be around 1.0 for balanced data)
@@ -1134,10 +1158,11 @@ plot_avstrax_rta <- function(pdata, classes,
     p <- ggplot() +
       annotate("text", x = 0.5, y = 0.5, label = "No data available for selected filters", size = 6) +
       theme_void()
-    return(girafe(ggobj = p,
-                  width_svg = width_svg,
-                  height_svg = height_svg,
-                  options = list(opts_sizing(rescale = TRUE, width = 1))))
+    return(list(
+      girafe = girafe(ggobj = p, width_svg = width_svg, height_svg = height_svg,
+                      options = list(opts_sizing(rescale = TRUE, width = 1))),
+      ggplot = NULL, plot_data = NULL
+    ))
   }
 
   # Set factor levels based on RTA ordering
@@ -1222,8 +1247,14 @@ plot_avstrax_rta <- function(pdata, classes,
     theme(plot.subtitle = element_text(size = 11, hjust = 0.5),
           plot.caption = element_text(hjust = 1, size = 9, color = "gray"))
 
+  # Prepare export data
+  export_cols <- c("ctry_code", "country_name", "RTA", "innos")
+  if ("Allinnos" %in% names(avstrax)) export_cols <- c(export_cols, "Allinnos")
+  plot_data <- avstrax[, intersect(export_cols, names(avstrax)), drop = FALSE]
+
   # Return girafe object
-  return(girafe(ggobj = p,
+  return(list(
+    girafe = girafe(ggobj = p,
                 width_svg = width_svg,
                 height_svg = height_svg,
                 options = list(
@@ -1231,7 +1262,10 @@ plot_avstrax_rta <- function(pdata, classes,
                   opts_hover(css = "cursor:pointer;fill:yellow;"),
                   opts_selection(type = "none"),
                   opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
-                )))
+                )),
+    ggplot = p,
+    plot_data = plot_data
+  ))
 }
 
 
@@ -1266,10 +1300,11 @@ plot_rta_returns_scatter <- function(avstrax_data,
     p <- ggplot() +
       annotate("text", x = 0.5, y = 0.5, label = "RTA or Returns data not available", size = 6) +
       theme_void()
-    return(girafe(ggobj = p,
-                  width_svg = width_svg,
-                  height_svg = height_svg,
-                  options = list(opts_sizing(rescale = TRUE, width = 1))))
+    return(list(
+      girafe = girafe(ggobj = p, width_svg = width_svg, height_svg = height_svg,
+                      options = list(opts_sizing(rescale = TRUE, width = 1))),
+      ggplot = NULL, plot_data = NULL
+    ))
   }
 
   # UK NUTS1 region names mapping (for UK region explorer)
@@ -1321,10 +1356,11 @@ plot_rta_returns_scatter <- function(avstrax_data,
     p <- ggplot() +
       annotate("text", x = 0.5, y = 0.5, label = "No data available for selected filters", size = 6) +
       theme_void()
-    return(girafe(ggobj = p,
-                  width_svg = width_svg,
-                  height_svg = height_svg,
-                  options = list(opts_sizing(rescale = TRUE, width = 1))))
+    return(list(
+      girafe = girafe(ggobj = p, width_svg = width_svg, height_svg = height_svg,
+                      options = list(opts_sizing(rescale = TRUE, width = 1))),
+      ggplot = NULL, plot_data = NULL
+    ))
   }
 
   # Calculate dot sizes based on innovation count
@@ -1410,8 +1446,14 @@ plot_rta_returns_scatter <- function(avstrax_data,
   p <- p + labs(caption = "© 2025 Innovation Strategy Explorer") +
     theme(plot.caption = element_text(hjust = 1, size = 9, color = "gray"))
 
+  # Prepare export data
+  export_cols <- c("ctry_code", "country_name", "RTA", "mean", "innos")
+  if ("Allinnos" %in% names(scatter_data)) export_cols <- c(export_cols, "Allinnos")
+  plot_data <- scatter_data[, intersect(export_cols, names(scatter_data)), drop = FALSE]
+
   # Return girafe object
-  return(girafe(ggobj = p,
+  return(list(
+    girafe = girafe(ggobj = p,
                 width_svg = width_svg,
                 height_svg = height_svg,
                 options = list(
@@ -1419,7 +1461,10 @@ plot_rta_returns_scatter <- function(avstrax_data,
                   opts_hover(css = "cursor:pointer;opacity:1;"),
                   opts_selection(type = "none"),
                   opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;font-size:12px;")
-                )))
+                )),
+    ggplot = p,
+    plot_data = plot_data
+  ))
 }
 
 
@@ -1501,10 +1546,11 @@ plot_rta_gdp_scatter <- function(avstrax_data,
     p <- ggplot() +
       annotate("text", x = 0.5, y = 0.5, label = "RTA data not available", size = 6) +
       theme_void()
-    return(girafe(ggobj = p,
-                  width_svg = width_svg,
-                  height_svg = height_svg,
-                  options = list(opts_sizing(rescale = TRUE, width = 1))))
+    return(list(
+      girafe = girafe(ggobj = p, width_svg = width_svg, height_svg = height_svg,
+                      options = list(opts_sizing(rescale = TRUE, width = 1))),
+      ggplot = NULL, plot_data = NULL
+    ))
   }
 
   # UK NUTS1 region names mapping (for filtering out regions)
@@ -1539,10 +1585,11 @@ plot_rta_gdp_scatter <- function(avstrax_data,
     p <- ggplot() +
       annotate("text", x = 0.5, y = 0.5, label = "No data available for selected filters", size = 6) +
       theme_void()
-    return(girafe(ggobj = p,
-                  width_svg = width_svg,
-                  height_svg = height_svg,
-                  options = list(opts_sizing(rescale = TRUE, width = 1))))
+    return(list(
+      girafe = girafe(ggobj = p, width_svg = width_svg, height_svg = height_svg,
+                      options = list(opts_sizing(rescale = TRUE, width = 1))),
+      ggplot = NULL, plot_data = NULL
+    ))
   }
 
   # Calculate log GDP per capita
@@ -1622,8 +1669,13 @@ plot_rta_gdp_scatter <- function(avstrax_data,
   p <- p + labs(caption = "GDP PPP data: World Bank (2015, constant 2017 intl $) | © 2025 Innovation Strategy Explorer") +
     theme(plot.caption = element_text(hjust = 1, size = 9, color = "gray"))
 
+  # Prepare export data
+  export_cols <- c("ctry_code", "country_name", "RTA", "gdp_pc_2015", "log_gdp_pc", "innos")
+  plot_data <- scatter_data[, intersect(export_cols, names(scatter_data)), drop = FALSE]
+
   # Return girafe object
-  return(girafe(ggobj = p,
+  return(list(
+    girafe = girafe(ggobj = p,
                 width_svg = width_svg,
                 height_svg = height_svg,
                 options = list(
@@ -1631,7 +1683,10 @@ plot_rta_gdp_scatter <- function(avstrax_data,
                   opts_hover(css = "cursor:pointer;opacity:1;"),
                   opts_selection(type = "none"),
                   opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;font-size:12px;")
-                )))
+                )),
+    ggplot = p,
+    plot_data = plot_data
+  ))
 }
 
 

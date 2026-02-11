@@ -508,6 +508,15 @@ get_region_name <- function(code) {
   return(code)
 }
 
+# Helper to create download button pair for a plot
+plot_download_buttons <- function(plot_id) {
+  tags$div(
+    class = "plot-download-buttons",
+    downloadButton(paste0("dl_svg_", plot_id), "SVG", class = "btn-sm btn-outline-secondary"),
+    downloadButton(paste0("dl_csv_", plot_id), "Data (CSV)", class = "btn-sm btn-outline-secondary")
+  )
+}
+
 # Define UI
 ui <- function(request){fluidPage(
   # Add Google Font
@@ -622,6 +631,16 @@ ui <- function(request){fluidPage(
     .plot-container {
       overflow: hidden;
       transition: max-height 0.3s ease;
+    }
+    .plot-download-buttons {
+      display: flex;
+      gap: 6px;
+      margin: 4px 0 8px 0;
+      justify-content: flex-end;
+    }
+    .plot-download-buttons .btn {
+      font-size: 12px;
+      padding: 2px 10px;
     }
   ")),
 
@@ -862,7 +881,8 @@ ui <- function(request){fluidPage(
       tags$button("▲ less", id = "togglePlot1", class = "plot-toggle"),
       tags$div(
         id = "plot1Container",
-        withSpinner(girafeOutput("avstrax_plot1", width = "100%", height = "auto"), type = 4, color = "#3498db")
+        withSpinner(girafeOutput("avstrax_plot1", width = "100%", height = "auto"), type = 4, color = "#3498db"),
+        plot_download_buttons("avstrax_plot1")
       ),
       inputPanel(
         selectizeInput(
@@ -904,6 +924,7 @@ ui <- function(request){fluidPage(
       tags$div(
         id = "returnsBarContainer",
         withSpinner(girafeOutput("avstrax_plot2", width = "100%", height = "auto"), type = 4, color = "#3498db"),
+        plot_download_buttons("avstrax_plot2"),
         tags$button("▲ less", id = "toggleReturns", class = "plot-toggle"),
         tags$div(
           id = "returnsContainer",
@@ -953,13 +974,16 @@ ui <- function(request){fluidPage(
       fluidRow(
         column(6,
           tags$h4("RTA by Country"),
-          withSpinner(girafeOutput("avstrax_plot2_rta", width = "100%", height = "auto"), type = 4, color = "#e74c3c")
+          withSpinner(girafeOutput("avstrax_plot2_rta", width = "100%", height = "auto"), type = 4, color = "#e74c3c"),
+          plot_download_buttons("avstrax_plot2_rta")
         ),
         column(6,
           tags$h4("RTA vs Returns"),
           withSpinner(girafeOutput("rta_returns_scatter", width = "100%", height = "auto"), type = 4, color = "#e74c3c"),
+          plot_download_buttons("rta_returns_scatter"),
           tags$h4("RTA vs GDP per Capita"),
-          withSpinner(girafeOutput("rta_gdp_scatter", width = "100%", height = "auto"), type = 4, color = "#e74c3c")
+          withSpinner(girafeOutput("rta_gdp_scatter", width = "100%", height = "auto"), type = 4, color = "#e74c3c"),
+          plot_download_buttons("rta_gdp_scatter")
         )
       ),
       tags$br(),
@@ -1019,7 +1043,8 @@ ui <- function(request){fluidPage(
       tags$button("▲ less", id = "togglePlot1_region", class = "plot-toggle"),
       tags$div(
         id = "plot1Container_region",
-        withSpinner(girafeOutput("avstrax_plot1_region", width = "100%", height = "auto"), type = 4, color = "#3498db")
+        withSpinner(girafeOutput("avstrax_plot1_region", width = "100%", height = "auto"), type = 4, color = "#3498db"),
+        plot_download_buttons("avstrax_plot1_region")
       ),
       inputPanel(
         selectizeInput(
@@ -1061,6 +1086,7 @@ ui <- function(request){fluidPage(
       tags$div(
         id = "returnsBarContainer_region",
         withSpinner(girafeOutput("avstrax_plot2_region", width = "100%", height = "auto"), type = 4, color = "#3498db"),
+        plot_download_buttons("avstrax_plot2_region"),
         tags$button("▲ less", id = "toggleReturns_region", class = "plot-toggle"),
         tags$div(
           id = "returnsContainer_region",
@@ -1110,11 +1136,13 @@ ui <- function(request){fluidPage(
       fluidRow(
         column(6,
           tags$h4("RTA by Region"),
-          withSpinner(girafeOutput("avstrax_plot2_region_rta", width = "100%", height = "auto"), type = 4, color = "#e74c3c")
+          withSpinner(girafeOutput("avstrax_plot2_region_rta", width = "100%", height = "auto"), type = 4, color = "#e74c3c"),
+          plot_download_buttons("avstrax_plot2_region_rta")
         ),
         column(6,
           tags$h4("RTA vs Returns"),
-          withSpinner(girafeOutput("rta_returns_scatter_region", width = "100%", height = "auto"), type = 4, color = "#e74c3c")
+          withSpinner(girafeOutput("rta_returns_scatter_region", width = "100%", height = "auto"), type = 4, color = "#e74c3c"),
+          plot_download_buttons("rta_returns_scatter_region")
         )
       ),
       tags$br(),
@@ -1132,6 +1160,9 @@ server <- function(input, output, session) {
 
   # Reactive values for window dimensions
   window_dims <- reactiveValues(width = 800, height = 600, initialized = FALSE)
+
+  # Store ggplot objects and plot data for downloads
+  plot_store <- reactiveValues()
 
   # ============================================================================
   # DEFERRED DATA LOADING
@@ -1343,7 +1374,7 @@ server <- function(input, output, session) {
     aspect_ratio <- ifelse(plot_width > 1200, 0.5, ifelse(plot_width > 800, 0.6, 0.7))
     height_inches <- width_inches * aspect_ratio
 
-    p <- plot_avstrax_by_country(
+    result <- plot_avstrax_by_country(
       pdata = patchar_countrymap(),
       classes = filtered_techmap,
       #green_classes = green_classes,
@@ -1361,7 +1392,9 @@ server <- function(input, output, session) {
       #hard_to_abate_classes = hard_to_abate_classes
     )
 
-    p
+    plot_store$avstrax_plot1_gg <- result$ggplot
+    plot_store$avstrax_plot1_data <- result$plot_data
+    result$girafe
   })
 
 
@@ -1434,7 +1467,7 @@ server <- function(input, output, session) {
     # Get current techmap (may be placeholder if still loading)
     current_techmap <- get_techmap()
 
-    p <- plot_avstrax_by_technology(
+    result <- plot_avstrax_by_technology(
       pdata = if(is.null(precomputed_data)) filtered else data.frame(),
       classes = current_techmap,
       technologies = input$techs,
@@ -1452,7 +1485,9 @@ server <- function(input, output, session) {
       precomputed_avstrax = precomputed_data
     )
 
-    p
+    plot_store$avstrax_plot2_gg <- result$ggplot
+    plot_store$avstrax_plot2_data <- result$plot_data
+    result$girafe
   })
 
   # World Map for Country Explorer
@@ -1589,7 +1624,7 @@ server <- function(input, output, session) {
     tech_label <- paste(input$techs, collapse = ", ")
     rta_title <- paste0("RTA in ", tech_label, " by Country")
 
-    p <- plot_avstrax_rta(
+    result <- plot_avstrax_rta(
       pdata = if(is.null(precomputed_data)) filtered else data.frame(),
       classes = current_techmap,
       technologies = input$techs,
@@ -1607,7 +1642,9 @@ server <- function(input, output, session) {
       precomputed_avstrax = precomputed_data
     )
 
-    p
+    plot_store$avstrax_plot2_rta_gg <- result$ggplot
+    plot_store$avstrax_plot2_rta_data <- result$plot_data
+    result$girafe
   })
 
   # RTA World Map for Country Explorer
@@ -1733,7 +1770,7 @@ server <- function(input, output, session) {
     tech_label <- paste(input$techs, collapse = ", ")
     scatter_title <- paste0("RTA vs Returns: ", tech_label)
 
-    p <- plot_rta_returns_scatter(
+    result <- plot_rta_returns_scatter(
       avstrax_data = avstrax_data,
       mininno = input$mininno_rta,
       minallinnos = input$minallinnos_rta,
@@ -1745,7 +1782,9 @@ server <- function(input, output, session) {
       y_label = "Return (%)"
     )
 
-    p
+    plot_store$rta_returns_scatter_gg <- result$ggplot
+    plot_store$rta_returns_scatter_data <- result$plot_data
+    result$girafe
   })
 
   # RTA vs GDP per Capita Scatter Plot for Country Explorer
@@ -1806,7 +1845,7 @@ server <- function(input, output, session) {
     tech_label <- paste(input$techs, collapse = ", ")
     scatter_title <- paste0("RTA vs GDP per Capita: ", tech_label)
 
-    p <- plot_rta_gdp_scatter(
+    result <- plot_rta_gdp_scatter(
       avstrax_data = avstrax_data,
       mininno = input$mininno_rta,
       minallinnos = input$minallinnos_rta,
@@ -1816,7 +1855,9 @@ server <- function(input, output, session) {
       plot_title = scatter_title
     )
 
-    p
+    plot_store$rta_gdp_scatter_gg <- result$ggplot
+    plot_store$rta_gdp_scatter_data <- result$plot_data
+    result$girafe
   })
 
   # ============================================
@@ -1908,7 +1949,7 @@ server <- function(input, output, session) {
     aspect_ratio <- ifelse(plot_width > 1200, 0.5, ifelse(plot_width > 800, 0.6, 0.7))
     height_inches <- width_inches * aspect_ratio
 
-    p <- plot_avstrax_by_country(
+    result <- plot_avstrax_by_country(
       pdata = patchar_regionmap(),
       classes = filtered_techmap,
       country_code = selected_regions,
@@ -1923,7 +1964,9 @@ server <- function(input, output, session) {
       plot_title = sub("^[^.]*\\.", "", flow_label)
     )
 
-    p
+    plot_store$avstrax_plot1_region_gg <- result$ggplot
+    plot_store$avstrax_plot1_region_data <- result$plot_data
+    result$girafe
   })
 
   # Region Plot 2 - Returns by region for selected technologies
@@ -1993,7 +2036,7 @@ server <- function(input, output, session) {
     # Get current techmap
     current_techmap <- get_techmap()
 
-    p <- plot_avstrax_by_technology(
+    result <- plot_avstrax_by_technology(
       pdata = if(is.null(precomputed_data)) filtered else data.frame(),
       classes = current_techmap,
       technologies = input$techs_region,
@@ -2012,7 +2055,9 @@ server <- function(input, output, session) {
       precomputed_avstrax = precomputed_data
     )
 
-    p
+    plot_store$avstrax_plot2_region_gg <- result$ggplot
+    plot_store$avstrax_plot2_region_data <- result$plot_data
+    result$girafe
   })
 
   # UK Regions Map for Region Explorer
@@ -2162,7 +2207,7 @@ server <- function(input, output, session) {
     tech_label <- paste(input$techs_region, collapse = ", ")
     rta_title <- paste0("RTA in ", tech_label, " by Region")
 
-    p <- plot_avstrax_rta(
+    result <- plot_avstrax_rta(
       pdata = if(is.null(precomputed_data)) filtered else data.frame(),
       classes = current_techmap,
       technologies = input$techs_region,
@@ -2181,7 +2226,9 @@ server <- function(input, output, session) {
       precomputed_avstrax = precomputed_data
     )
 
-    p
+    plot_store$avstrax_plot2_region_rta_gg <- result$ggplot
+    plot_store$avstrax_plot2_region_rta_data <- result$plot_data
+    result$girafe
   })
 
   # RTA vs Returns Scatter Plot for Region Explorer
@@ -2248,7 +2295,7 @@ server <- function(input, output, session) {
     tech_label <- paste(input$techs_region, collapse = ", ")
     scatter_title <- paste0("RTA vs Returns: ", tech_label)
 
-    p <- plot_rta_returns_scatter(
+    result <- plot_rta_returns_scatter(
       avstrax_data = avstrax_data,
       mininno = input$mininno_rta_region,
       minallinnos = input$minallinnos_rta_region,
@@ -2260,7 +2307,9 @@ server <- function(input, output, session) {
       y_label = "Return (%)"
     )
 
-    p
+    plot_store$rta_returns_scatter_region_gg <- result$ggplot
+    plot_store$rta_returns_scatter_region_data <- result$plot_data
+    result$girafe
   })
 
   # RTA UK Regions Map for Region Explorer
@@ -2334,6 +2383,81 @@ server <- function(input, output, session) {
       is_return = FALSE  # RTA is an index, not a percentage
     )
   })
+
+  # ============================================
+  # Download Handlers (SVG + CSV) for all plots
+  # ============================================
+
+  make_svg_handler <- function(plot_reactive, filename_prefix) {
+    downloadHandler(
+      filename = function() paste0(filename_prefix, "_", Sys.Date(), ".svg"),
+      content = function(file) {
+        p <- plot_reactive()
+        if (!is.null(p)) {
+          ggplot2::ggsave(file, plot = p, device = "svg", width = 10, height = 6)
+        }
+      }
+    )
+  }
+
+  make_csv_handler <- function(data_reactive, filename_prefix) {
+    downloadHandler(
+      filename = function() paste0(filename_prefix, "_", Sys.Date(), ".csv"),
+      content = function(file) {
+        d <- data_reactive()
+        if (!is.null(d)) {
+          write.csv(d, file, row.names = FALSE)
+        }
+      }
+    )
+  }
+
+  # Country Explorer downloads
+  output$dl_svg_avstrax_plot1 <- make_svg_handler(
+    reactive(plot_store$avstrax_plot1_gg), "returns_by_technology")
+  output$dl_csv_avstrax_plot1 <- make_csv_handler(
+    reactive(plot_store$avstrax_plot1_data), "returns_by_technology_data")
+
+  output$dl_svg_avstrax_plot2 <- make_svg_handler(
+    reactive(plot_store$avstrax_plot2_gg), "returns_by_country")
+  output$dl_csv_avstrax_plot2 <- make_csv_handler(
+    reactive(plot_store$avstrax_plot2_data), "returns_by_country_data")
+
+  output$dl_svg_avstrax_plot2_rta <- make_svg_handler(
+    reactive(plot_store$avstrax_plot2_rta_gg), "rta_by_country")
+  output$dl_csv_avstrax_plot2_rta <- make_csv_handler(
+    reactive(plot_store$avstrax_plot2_rta_data), "rta_by_country_data")
+
+  output$dl_svg_rta_returns_scatter <- make_svg_handler(
+    reactive(plot_store$rta_returns_scatter_gg), "rta_vs_returns")
+  output$dl_csv_rta_returns_scatter <- make_csv_handler(
+    reactive(plot_store$rta_returns_scatter_data), "rta_vs_returns_data")
+
+  output$dl_svg_rta_gdp_scatter <- make_svg_handler(
+    reactive(plot_store$rta_gdp_scatter_gg), "rta_vs_gdp")
+  output$dl_csv_rta_gdp_scatter <- make_csv_handler(
+    reactive(plot_store$rta_gdp_scatter_data), "rta_vs_gdp_data")
+
+  # Region Explorer downloads
+  output$dl_svg_avstrax_plot1_region <- make_svg_handler(
+    reactive(plot_store$avstrax_plot1_region_gg), "returns_by_technology_region")
+  output$dl_csv_avstrax_plot1_region <- make_csv_handler(
+    reactive(plot_store$avstrax_plot1_region_data), "returns_by_technology_region_data")
+
+  output$dl_svg_avstrax_plot2_region <- make_svg_handler(
+    reactive(plot_store$avstrax_plot2_region_gg), "returns_by_region")
+  output$dl_csv_avstrax_plot2_region <- make_csv_handler(
+    reactive(plot_store$avstrax_plot2_region_data), "returns_by_region_data")
+
+  output$dl_svg_avstrax_plot2_region_rta <- make_svg_handler(
+    reactive(plot_store$avstrax_plot2_region_rta_gg), "rta_by_region")
+  output$dl_csv_avstrax_plot2_region_rta <- make_csv_handler(
+    reactive(plot_store$avstrax_plot2_region_rta_data), "rta_by_region_data")
+
+  output$dl_svg_rta_returns_scatter_region <- make_svg_handler(
+    reactive(plot_store$rta_returns_scatter_region_gg), "rta_vs_returns_region")
+  output$dl_csv_rta_returns_scatter_region <- make_csv_handler(
+    reactive(plot_store$rta_returns_scatter_region_data), "rta_vs_returns_region_data")
 
 }
 
