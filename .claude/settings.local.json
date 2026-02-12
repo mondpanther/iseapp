@@ -4,7 +4,9 @@
       "Bash(\"C:\\\\Program Files\\\\R\\\\R-4.4.2\\\\bin\\\\Rscript.exe\" -e \"library\\(readxl\\); sheets <- excel_sheets\\(''C:/Users/rmart/github/iseapp/Agriculture_Food_CPC_Patents_2026-01-22.xlsx''\\); cat\\(''Sheets:'', sheets, ''\\\\n''\\); df <- read_excel\\(''C:/Users/rmart/github/iseapp/Agriculture_Food_CPC_Patents_2026-01-22.xlsx'', sheet=1\\); cat\\(''\\\\nColumn names:\\\\n''\\); print\\(colnames\\(df\\)\\); cat\\(''\\\\nFirst 15 rows of columns 1 and 7:\\\\n''\\); print\\(df[1:15, c\\(1, 7\\)]\\)\")",
       "Bash(ls:*)",
       "Bash(Rscript:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(findstr:*)",
+      "Bash(dir:*)"
     ]
   }
 }
