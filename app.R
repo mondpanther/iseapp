@@ -555,7 +555,11 @@ ui <- function(request){fluidPage(
     "))
   ),
   
-  tags$h1("Welcome to ISE - The Innovation Strategy Explorer"),
+  tags$div(
+    style = "display: flex; align-items: center; gap: 20px;",
+    tags$img(src = "prinzlogo.svg", height = "70px"),
+    tags$h1("Welcome to ISE - The Innovation Strategy Explorer")
+  ),
   
   tags$style(HTML("
   details {
