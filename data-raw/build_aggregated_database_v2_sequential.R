@@ -50,7 +50,8 @@ cat("  countrymap:", nrow(countrymap), "rows\n")
 techmap <- fst::read_fst("data-raw/big_files/techmap.fst")
 cat("  techmap:", nrow(techmap), "rows\n")
 
-firmmap <- fst::read_fst("data-raw/big_files/firmmap.fst")
+firmmap <- fst::read_fst("data-raw/big_files/firmmap.fst") |>
+  dplyr::filter(firm == "Hitachi")
 cat("  firmmap:", nrow(firmmap), "rows\n\n")
 
 # ============================================================================

@@ -14,7 +14,8 @@ cat("=== BUILDING PARQUET DATABASE ===\n\n")
 cat("Loading base data...\n")
 countrymap <- read_fst("data-raw/big_files/countrymap.fst")
 techmap <- read_fst("data-raw/big_files/techmap.fst")
-firmmap <- read_fst("data-raw/big_files/firmmap.fst")
+firmmap <- read_fst("data-raw/big_files/firmmap.fst") |>
+  dplyr::filter(firm == "Hitachi")
 
 cat("  ✓ countrymap:", nrow(countrymap), "rows\n")
 cat("  ✓ techmap:", nrow(techmap), "rows\n")
