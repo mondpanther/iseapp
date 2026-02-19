@@ -106,7 +106,7 @@ cat("  Firms:", n_distinct(patent_data$firm, na.rm = TRUE), "\n\n")
 
 # 7. Save as parquet
 cat("Saving to parquet...\n")
-output_file <- "inst/extdata/patent_database.parquet"
+output_file <- "inst/extdata/full_patent_database.parquet"
 
 # Create directory if needed
 dir.create(dirname(output_file), recursive = TRUE, showWarnings = FALSE)
