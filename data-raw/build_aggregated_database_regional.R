@@ -22,7 +22,7 @@ cat("=== BUILDING AGGREGATED PATENT DATABASE - REGIONAL ===\n\n")
 # SOURCE EXISTING FUNCTIONS
 # ============================================================================
 
-source("R/functions_istraxfunctions.R")
+source("R/functions_istraxfunctions_processing.R")
 
 # ============================================================================
 # LOAD BASE DATA
@@ -43,7 +43,8 @@ cat("  regionmap:", nrow(regionmap), "rows\n")
 techmap <- fst::read_fst("data-raw/big_files/techmap.fst")
 cat("  techmap:", nrow(techmap), "rows\n")
 
-firmmap <- fst::read_fst("data-raw/big_files/firmmap.fst")
+firmmap <- fst::read_fst("data-raw/big_files/firmmap.fst") |>
+  dplyr::filter(firm == "Hitachi")
 cat("  firmmap:", nrow(firmmap), "rows\n\n")
 
 # ============================================================================
@@ -85,10 +86,52 @@ cat("  Found", length(toflows), "toflow measures\n")
 cat("  Examples:", paste(head(toflows, 5), collapse = ", "), "...\n\n")
 
 # ============================================================================
+# DEFINE COLORINGS (must match old script exactly)
+# ============================================================================
+
+green_classes <- c("Green Technology", "Green Energy", "Green Transport",
+                   "Circular Economy", "Green Manufacturing", "Adaptation",
+                   "Green Housing", "Green ICT", "Green Agriculture", "GHG Capture")
+
+battery_classes <- c("Battery Technology", "Lithium Extraction & Processing",
+                     "Graphite & Carbon Materials", "Cathode Materials", "Anode Materials",
+                     "Electrolytes & Additives", "Separators", "Battery Cell Design & Assembly",
+                     "Battery Management Systems (BMS)", "Electric Vehicles & Mobility",
+                     "Battery Recycling & Recovery")
+
+hard_to_abate_classes <- c("Hard to Abate Sector Decarbonization", "Aviation Decarbonisation",
+                           "Cement & Concrete Decarbonisation", "Chemicals & Plastics Decarbonisation",
+                           "Shipping Decarbonisation", "Steel & Iron Decarbonisation")
+
+ai_classes <- c("AI", "Machine Learning", "Deep Learning", "Natural Language Processing (NLP)",
+                "Computer Vision", "Speech Recognition & Synthesis", "Robotics & Autonomous Systems",
+                "Knowledge Representation & Reasoning", "Planning & Decision Making", "Generative AI",
+                "Semiconductors", "Cloud & Data Infrastructure", "Data Rettrieval & Processing System",
+                "Platform & Frameworks", "Deployment & Support")
+
+cpc_sections <- c("Human Necessities", "Performing Operations; Transporting ",
+                  "Chemistry; Metallurgy ", "Textiles; Paper", "Fixed Constructions",
+                  "Mechanical Engineering; Lighting; Heating; Weapons; Blasting",
+                  "Physics", "Electricity", "General tagging of new or cross-sectional technology")
+
+agrifood_classes <- c("Any Agriculture & Food technology", "Input supply",
+                      "Primary food and feed production", "Post-harvest handling & aggregation",
+                      "Processing", "Distribution/wholesale", "Retail/consumption", "Crosscutting")
+
+colorings <- list(
+  green = green_classes,
+  battery = battery_classes,
+  hard_to_abate = hard_to_abate_classes,
+  ai = ai_classes,
+  cpcsecs = cpc_sections,
+  agrifood = agrifood_classes
+)
+
+# ============================================================================
 # DEFINE ALL TECHNOLOGY SELECTIONS
 # ============================================================================
 
-# Start with the 6 broad categories
+# Start with the 6 broad categories from the old script
 tech_selections <- list(
   "All" = "All",
   "Green_Technology" = "Green Technology",
@@ -100,6 +143,7 @@ tech_selections <- list(
 
 # Add every individual technology as its own selection
 all_tech_names <- sort(unique(techmap$technology))
+# Skip "All" — already covered above as a broad category
 all_tech_names <- setdiff(all_tech_names, "All")
 
 for (tech_name in all_tech_names) {
@@ -112,10 +156,6 @@ for (tech_name in all_tech_names) {
 }
 
 cat("Technology selections:", length(tech_selections), "\n\n")
-
-# Pre-compute the "Other" exclusion set
-other_exclusions <- c("Green Technology", "Battery Technology",
-                      "Hard to Abate Sector Decarbonization", "AI")
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -155,7 +195,11 @@ run_with_firms <- function(data, toflow, aggregate_fn) {
   results <- list()
 
   # "No firm" = all patents (unfiltered)
-  res_all <- tryCatch(aggregate_fn(data, toflow), error = function(e) NULL)
+  res_all <- tryCatch(aggregate_fn(data, toflow), error = function(e) {
+    cat("  ERROR in aggregate_fn:", e$message, "\n")
+    NULL
+  })
+
   if (!is.null(res_all) && nrow(res_all) > 0) {
     res_all$firm <- "No firm"
     results[[length(results) + 1L]] <- res_all
@@ -225,9 +269,17 @@ flush_to_parquet <- function(batch_list, output_path) {
     existing <- arrow::read_parquet(output_path)
     combined <- dplyr::bind_rows(existing, combined)
     rm(existing)
+    gc(verbose = FALSE)  # Force garbage collection to release file handles
+  }
+
+  # Remove existing file before writing to avoid file lock
+  if (file.exists(output_path)) {
+    Sys.sleep(0.1)  # Brief pause to ensure file handle is released
+    unlink(output_path)
   }
 
   arrow::write_parquet(combined, output_path)
+  rm(combined)
   gc(verbose = FALSE)
   invisible(NULL)
 }
@@ -320,7 +372,7 @@ for (i in seq_along(toflows)) {
 if (length(batch_results_region) > 0) {
   cat(sprintf("  Final flush (%d accumulated results)...\n", length(batch_results_region)))
   flush_to_parquet(batch_results_region, output_by_region)
-  batch_results_region <- list()
+  # batch_results_region <- list()
 }
 
 elapsed_region <- difftime(Sys.time(), start_time, units = "mins")
@@ -329,10 +381,82 @@ cat(sprintf("\nRegional aggregation complete: %d total rows in %.1f minutes\n",
 cat("  Written to:", output_by_region, "\n\n")
 
 # ============================================================================
+# AGGREGATED BY TECH (for Plot 1 - returns by technology)
+# ============================================================================
+
+cat("=== AGGREGATED BY TECH (ACROSS REGIONS) ===\n\n")
+
+output_by_tech <- "inst/extdata/aggregated_by_tech_region.parquet"
+if (file.exists(output_by_tech)) file.remove(output_by_tech)
+
+cat("Processing", length(toflows), "toflows x",
+    length(tech_selections), "tech selections...\n\n")
+
+start_time_tech <- Sys.time()
+batch_results_tech <- list()
+total_rows_tech <- 0
+batch_counter_tech <- 0
+
+for (i in seq_along(toflows)) {
+  toflow <- toflows[i]
+  cat(sprintf("[%d/%d] toflow: %s\n", i, length(toflows), toflow))
+
+  # Load full regional data once per toflow (joined with regionmap, has appln_id)
+  data_full <- load_istrax_regional(toflow)
+  if (is.null(data_full) || nrow(data_full) == 0) next
+
+  # Deduplicate to one row per patent for tech aggregation
+  # (regionmap creates multiple rows per patent - one per region)
+  data_for_tech <- data_full |>
+    dplyr::select(docdb_family_id, appln_id, dplyr::all_of(toflow)) |>
+    dplyr::distinct(docdb_family_id, appln_id, .keep_all = TRUE)
+
+  # compute_avstrax returns one row per technology in techmap
+  agg_by_tech <- function(d, tf) {
+    compute_avstrax(d, tf, techmap, colorings = colorings)
+  }
+
+  result <- run_with_firms(data_for_tech, toflow, agg_by_tech)
+
+  if (!is.null(result) && nrow(result) > 0) {
+    result$toflow <- toflow
+    batch_results_tech[[length(batch_results_tech) + 1L]] <- result
+    total_rows_tech <- total_rows_tech + nrow(result)
+  }
+
+  batch_counter_tech <- batch_counter_tech + 1
+
+  # Write every 10 toflows
+  if (batch_counter_tech >= 10) {
+    cat(sprintf("  Flushing batch (%d accumulated results)...\n", length(batch_results_tech)))
+    flush_to_parquet(batch_results_tech, output_by_tech)
+    batch_results_tech <- list()
+    batch_counter_tech <- 0
+  }
+}
+
+# Final flush
+if (length(batch_results_tech) > 0) {
+  cat(sprintf("  Final flush (%d accumulated results)...\n", length(batch_results_tech)))
+  flush_to_parquet(batch_results_tech, output_by_tech)
+  batch_results_tech <- list()
+}
+
+elapsed_tech <- difftime(Sys.time(), start_time_tech, units = "mins")
+cat(sprintf("\nTech aggregation complete: %d total rows in %.1f minutes\n", 
+            total_rows_tech, elapsed_tech))
+cat("  Written to:", output_by_tech, "\n\n")
+
+# ============================================================================
 # SUMMARY
 # ============================================================================
 
 cat("=== BUILD COMPLETE ===\n\n")
+
+if (file.exists(output_by_tech)) {
+  info_tech <- file.info(output_by_tech)
+  cat(sprintf("  %s: %.1f MB\n", output_by_tech, info_tech$size / 1e6))
+}
 
 if (file.exists(output_by_region)) {
   info_region <- file.info(output_by_region)
