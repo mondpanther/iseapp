@@ -2,7 +2,7 @@
 '$schema' = 'https://cdn.posit.co/publisher/schemas/posit-publishing-record-schema-v3.json'
 server_type = 'connect_cloud'
 server_url = 'https://connect.posit.cloud'
-client_version = '1.31.0'
+client_version = '1.31.7'
 created_at = ''
 dismissed_at = ''
 type = 'r-shiny'
@@ -11,8 +11,8 @@ id = '019c34f8-ebab-0595-53bd-06ea9b9a8c56'
 dashboard_url = 'https://connect.posit.cloud/zevross-spatial/content/019c34f8-ebab-0595-53bd-06ea9b9a8c56'
 direct_url = 'https://019c34f8-ebab-0595-53bd-06ea9b9a8c56.share.connect.posit.cloud'
 logs_url = 'https://connect.posit.cloud/zevross-spatial/content/019c34f8-ebab-0595-53bd-06ea9b9a8c56/history'
-deployed_at = '2026-02-09T14:23:01-05:00'
-bundle_id = '019c43da-7682-1a4d-1d47-9d030e04a6dd'
+deployed_at = '2026-02-19T03:43:36-05:00'
+bundle_id = '019c7511-30ba-4c09-afa4-3df4914746d5'
 files = [
   '.posit/publish/Innovation Strategy Explorer-SDHC.toml',
   '.posit/publish/deployments/deployment-HPUI.toml',
@@ -23,6 +23,7 @@ files = [
   'R/functions_dropbox_auth.R',
   'R/functions_extrasectorshelper.R',
   'R/functions_istraxfunctions.R',
+  'R/functions_istraxfunctions_processing.R',
   'R/innovationStrategyExplorer-package.R',
   'R/module_country.R',
   'R/module_globe.R',
@@ -33,7 +34,12 @@ files = [
   'R/ui.R',
   'R/utils_url_restore.R',
   'app.R',
-  'inst/extdata/long_final.parquet',
+  'inst/extdata/aggregated_by_region.parquet',
+  'inst/extdata/aggregated_by_tech_region.parquet',
+  'inst/extdata/inglobe_metadata.rds',
+  'inst/extdata/inglobe_processed.parquet',
+  'inst/extdata/inglobe_tech_groups.rds',
+  'inst/extdata/inglobe_wave_range.rds',
   'inst/extdata/prepdata/by_country_avstrax_AT_AI.fst',
   'inst/extdata/prepdata/by_country_avstrax_AT_All.fst',
   'inst/extdata/prepdata/by_country_avstrax_AT_Battery_Technology.fst',
@@ -970,6 +976,26 @@ author = 'Object-Oriented Programming Working Group [cph], Davis Vaughan [aut], 
 'config/testthat/edition' = '3'
 'config/needs/website' = 'sloop'
 
+[renv.packages.TTR]
+package = 'TTR'
+version = '0.24.4'
+source = 'Repository'
+repository = 'CRAN'
+hash = ''
+type = 'Package'
+title = 'Technical Trading Rules'
+'authors@r' = 'c( person(given="Joshua", family="Ulrich", role=c("cre","aut"), email="josh.m.ulrich@gmail.com"), person(given=c("Ethan","B."), family="Smith", role="ctb") )'
+maintainer = 'Joshua Ulrich <josh.m.ulrich@gmail.com>'
+description = 'A collection of over 50 technical indicators for creating technical trading rules. The package also provides fast implementations of common rolling-window functions, and several volatility calculations.'
+url = 'https://github.com/joshuaulrich/TTR'
+bugreports = 'https://github.com/joshuaulrich/TTR/issues'
+license = 'GPL (>= 2)'
+imports = ['xts (>= 0.10-0)', 'zoo', 'curl']
+suggests = ['RUnit']
+linkingto = ['xts']
+needscompilation = 'yes'
+author = 'Joshua Ulrich [cre, aut], Ethan B. Smith [ctb]'
+
 [renv.packages.WDI]
 package = 'WDI'
 version = '2.7.9'
@@ -991,6 +1017,24 @@ roxygennote = '7.3.2'
 encoding = 'UTF-8'
 needscompilation = 'no'
 author = 'Vincent Arel-Bundock [aut, cre] (<https://orcid.org/0000-0003-2042-7063>), Etienne Bacher [ctb]'
+
+[renv.packages.XML]
+package = 'XML'
+version = '3.99-0.20'
+source = 'Repository'
+repository = 'CRAN'
+depends = ['R (>= 4.0.0)', 'methods', 'utils']
+hash = ''
+title = 'Tools for Parsing and Generating XML Within R and S-Plus'
+'authors@r' = "c(person(\"CRAN Team\", role = c('ctb', 'cre'), email = \"CRAN@r-project.org\", comment = \"de facto maintainer since 2013\"), person(\"Duncan\", \"Temple Lang\", role = c(\"aut\"), email = \"duncan@r-project.org\", comment = c(ORCID = \"0000-0003-0159-1546\")), person(\"Tomas\", \"Kalibera\", role = \"ctb\"), person(\"Ivan\", \"Krylov\", role = \"ctb\"))"
+maintainer = 'CRAN Team <CRAN@r-project.org>'
+description = "Many approaches for both reading and creating XML (and HTML) documents (including DTDs), both local and accessible via HTTP or FTP.  Also offers access to an 'XPath' \"interpreter\"."
+url = 'https://www.omegahat.net/RSXML/'
+license = 'BSD_3_clause + file LICENSE'
+suggests = ['bitops', 'RCurl']
+needscompilation = 'yes'
+author = 'CRAN Team [ctb, cre] (de facto maintainer since 2013), Duncan Temple Lang [aut] (ORCID: <https://orcid.org/0000-0003-0159-1546>), Tomas Kalibera [ctb], Ivan Krylov [ctb]'
+systemrequirements = 'libxml2 (>= 2.6.3)'
 
 [renv.packages.abind]
 package = 'abind'
@@ -2966,6 +3010,28 @@ author = 'Hadley Wickham [aut, cre], Evan Miller [aut, cph] (Author of included 
 'config/needs/website' = 'tidyverse/tidytemplate'
 systemrequirements = 'GNU make, zlib: zlib1g-dev (deb), zlib-devel (rpm)'
 
+[renv.packages.highcharter]
+package = 'highcharter'
+version = '0.9.4'
+source = 'Repository'
+repository = 'CRAN'
+depends = ['R (>= 2.10)']
+hash = ''
+type = 'Package'
+title = "A Wrapper for the 'Highcharts' Library"
+'authors@r' = 'c( person("Joshua", "Kunst", role = c("aut", "cre"), email = "jbkunst@gmail.com"), person("Nuno", "Agostinho", role = c("ctb"), comment  = "hchart.survfit, densities and hc_add_series_scatter"), person("Danton", "Noriega", role = c("ctb"), comment  = "hcaes_"), person("Martin John ", "Hadley", role = c("ctb"), comment  = "hc_add_event_point improvement"), person("Eduardo", "Flores", role = c("ctb"), comment  = "First version hc_add_series_df_tidy"), person("Dean", "Kilfoyle", role = c("ctb"), comment  = "First version hc_add_series_boxplot"), person("Adline", "Dsilva", role = c("ctb"), comment  = "First version Matrix heatmap"), person("Kamil", "Slowikowski", role = c("ctb"), comment = c(ORCID = "0000-0002-2843-6370")), person("Christian", "Minich", role = c("ctb"), comment  = "hcaes mutate_mapping improvement"), person("Jonathan", "Armond", role = c("ctb"), comment = "mutate_mapping bugfix"), person("David", "Breuer", role = c("ctb"), comment = "download_map_data quiet parameter"), person("Mauricio", "Vargas", role = c("ctb"), comment = "tests and gh-actions"), person("Michael", "Yan", role = c("ctb"), comment = "Motivational example for treemap/sunburst data helper"), person("Bart", "Oortwijn", role = c("ctb"), comment = "rjson option, hc_add_yAxis, and GH issues collaborator"), person("Paul", "Campbell", role = c("ctb"), comment = "additional proxy methods") )'
+maintainer = 'Joshua Kunst <jbkunst@gmail.com>'
+description = "A wrapper for the 'Highcharts' library including shortcut functions to plot R objects. 'Highcharts' <https://www.highcharts.com/> is a charting library offering numerous chart types with a simple configuration syntax."
+url = 'https://jkunst.com/highcharter/, https://github.com/jbkunst/highcharter'
+bugreports = 'https://github.com/jbkunst/highcharter/issues'
+license = 'MIT + file LICENSE'
+imports = ['htmlwidgets', 'magrittr', 'purrr', 'rlist', 'assertthat', 'zoo', 'dplyr (>= 1.0.0)', 'tibble (>= 1.1)', 'stringr (>= 1.3.0)', 'broom', 'xts', 'quantmod', 'tidyr', 'htmltools', 'jsonlite', 'igraph', 'lubridate', 'yaml', 'rlang (>= 0.1.1)', 'rjson']
+suggests = ['knitr', 'rmarkdown', 'survival', 'ggplot2', 'httr', 'viridisLite', 'shiny', 'MASS', 'gapminder', 'forecast', 'geojsonio', 'testthat', 'covr', 'spelling']
+roxygennote = '7.1.2'
+encoding = 'UTF-8'
+needscompilation = 'no'
+author = 'Joshua Kunst [aut, cre], Nuno Agostinho [ctb] (hchart.survfit, densities and hc_add_series_scatter), Danton Noriega [ctb] (hcaes_), Martin John Hadley [ctb] (hc_add_event_point improvement), Eduardo Flores [ctb] (First version hc_add_series_df_tidy), Dean Kilfoyle [ctb] (First version hc_add_series_boxplot), Adline Dsilva [ctb] (First version Matrix heatmap), Kamil Slowikowski [ctb] (<https://orcid.org/0000-0002-2843-6370>), Christian Minich [ctb] (hcaes mutate_mapping improvement), Jonathan Armond [ctb] (mutate_mapping bugfix), David Breuer [ctb] (download_map_data quiet parameter), Mauricio Vargas [ctb] (tests and gh-actions), Michael Yan [ctb] (Motivational example for treemap/sunburst data helper), Bart Oortwijn [ctb] (rjson option, hc_add_yAxis, and GH issues collaborator), Paul Campbell [ctb] (additional proxy methods)'
+
 [renv.packages.highr]
 package = 'highr'
 version = '0.11'
@@ -4403,6 +4469,26 @@ author = 'Hadley Wickham [aut, cre] (ORCID: <https://orcid.org/0000-0003-4757-11
 'config/testthat/edition' = '3'
 'config/needs/website' = 'tidyverse/tidytemplate, tidyr'
 
+[renv.packages.quantmod]
+package = 'quantmod'
+version = '0.4.28'
+source = 'Repository'
+repository = 'CRAN'
+depends = ['R (>= 3.2.0)', 'xts(>= 0.9-0)', 'zoo', 'TTR(>= 0.2)', 'methods']
+hash = ''
+type = 'Package'
+title = 'Quantitative Financial Modelling Framework'
+'authors@r' = 'c( person(given=c("Jeffrey","A."), family="Ryan", role=c("aut","cph")), person(given=c("Joshua","M."), family="Ulrich", role=c("cre","aut"), email="josh.m.ulrich@gmail.com"), person(given=c("Ethan","B."), family="Smith", role="ctb"), person(given="Wouter", family="Thielen", role="ctb"), person(given="Paul", family="Teetor", role="ctb"), person(given="Steve", family="Bronder", role="ctb") )'
+maintainer = 'Joshua M. Ulrich <josh.m.ulrich@gmail.com>'
+description = 'Specify, build, trade, and analyse quantitative financial trading strategies.'
+url = 'https://www.quantmod.com/, https://github.com/joshuaulrich/quantmod'
+bugreports = 'https://github.com/joshuaulrich/quantmod/issues'
+license = 'GPL-3'
+imports = ['curl', 'jsonlite(>= 1.1)']
+suggests = ['DBI', 'RMySQL', 'RSQLite', 'timeSeries', 'xml2', 'downloader', 'tinytest']
+needscompilation = 'no'
+author = 'Jeffrey A. Ryan [aut, cph], Joshua M. Ulrich [cre, aut], Ethan B. Smith [ctb], Wouter Thielen [ctb], Paul Teetor [ctb], Steve Bronder [ctb]'
+
 [renv.packages.ragg]
 package = 'ragg'
 version = '1.4.0'
@@ -4692,6 +4778,22 @@ encoding = 'UTF-8'
 needscompilation = 'no'
 author = 'Scott Chamberlain [aut] (0000-0003-1444-9135), Damiano Oldoni [aut] (0000-0003-3445-7562), Vijay Barve [ctb] (0000-0002-4852-2567), Peter Desmet [ctb] (0000-0002-8442-8025), Laurens Geffert [ctb], Dan Mcglinn [ctb] (0000-0003-2359-3526), Karthik Ram [ctb] (0000-0002-0233-1757), rOpenSci [fnd] (019jywm96), John Waller [aut, cre] (0000-0002-7302-5976)'
 
+[renv.packages.rjson]
+package = 'rjson'
+version = '0.2.23'
+source = 'Repository'
+repository = 'CRAN'
+depends = ['R (>= 4.0.0)']
+hash = ''
+title = 'JSON for R'
+'authors@r' = 'person(given = "Alex", family = "Couture-Beil", role = c("aut", "cre"), email = "rjson_pkg@mofo.ca")'
+maintainer = 'Alex Couture-Beil <rjson_pkg@mofo.ca>'
+description = 'Converts R object into JSON objects and vice-versa.'
+url = 'https://github.com/alexcb/rjson'
+license = 'GPL-2'
+needscompilation = 'yes'
+author = 'Alex Couture-Beil [aut, cre]'
+
 [renv.packages.rlang]
 package = 'rlang'
 version = '1.1.6'
@@ -4714,6 +4816,27 @@ needscompilation = 'yes'
 author = "Lionel Henry [aut, cre], Hadley Wickham [aut], mikefc [cph] (Hash implementation based on Mike's xxhashlite), Yann Collet [cph] (Author of the embedded xxHash library), Posit, PBC [cph, fnd]"
 'config/testthat/edition' = '3'
 'config/needs/website' = 'dplyr, tidyverse/tidytemplate'
+
+[renv.packages.rlist]
+package = 'rlist'
+version = '0.4.6.2'
+source = 'Repository'
+repository = 'CRAN'
+depends = ['R (>= 2.15)']
+hash = ''
+type = 'Package'
+title = 'A Toolbox for Non-Tabular Data Manipulation'
+maintainer = 'Kun Ren <ken@renkun.me>'
+description = 'Provides a set of functions for data manipulation with list objects, including mapping, filtering, grouping, sorting, updating, searching, and other useful functions. Most functions are designed to be pipeline friendly so that data processing with lists can be chained.'
+url = 'https://renkun-ken.github.io/rlist/, https://github.com/renkun-ken/rlist, https://renkun-ken.github.io/rlist-tutorial/'
+bugreports = 'https://github.com/renkun-ken/rlist/issues'
+license = 'MIT + file LICENSE'
+imports = ['yaml', 'jsonlite', 'XML', 'data.table']
+suggests = ['testthat', 'stringdist']
+roxygennote = '7.1.1'
+encoding = 'UTF-8'
+needscompilation = 'no'
+author = 'Kun Ren <ken@renkun.me>'
 
 [renv.packages.rmarkdown]
 package = 'rmarkdown'
@@ -6309,6 +6432,28 @@ suggests = ['knitr', 'plm', 'zoo', 'survival']
 vignettebuilder = 'knitr'
 needscompilation = 'no'
 author = 'David B. Dahl [aut], David Scott [aut, cre], Charles Roosen [aut], Arni Magnusson [aut], Jonathan Swinton [aut], Ajay Shah [ctb], Arne Henningsen [ctb], Benno Puetz [ctb], Bernhard Pfaff [ctb], Claudio Agostinelli [ctb], Claudius Loehnert [ctb], David Mitchell [ctb], David Whiting [ctb], Fernando da Rosa [ctb], Guido Gay [ctb], Guido Schulz [ctb], Ian Fellows [ctb], Jeff Laake [ctb], John Walker [ctb], Jun Yan [ctb], Liviu Andronic [ctb], Markus Loecher [ctb], Martin Gubri [ctb], Matthieu Stigler [ctb], Robert Castelo [ctb], Seth Falcon [ctb], Stefan Edwards [ctb], Sven Garbade [ctb], Uwe Ligges [ctb]'
+
+[renv.packages.xts]
+package = 'xts'
+version = '0.14.1'
+source = 'Repository'
+repository = 'CRAN'
+depends = ['R (>= 3.6.0)', 'zoo (>= 1.7-12)']
+hash = ''
+type = 'Package'
+title = 'eXtensible Time Series'
+'authors@r' = 'c( person(given=c("Jeffrey","A."), family="Ryan", role=c("aut","cph")), person(given=c("Joshua","M."), family="Ulrich", role=c("cre","aut"), email="josh.m.ulrich@gmail.com"), person(given="Ross", family="Bennett", role="ctb"), person(given="Corwin", family="Joy", role="ctb") )'
+maintainer = 'Joshua M. Ulrich <josh.m.ulrich@gmail.com>'
+description = "Provide for uniform handling of R's different time-based data classes by extending zoo, maximizing native format information preservation and allowing for user level customization and extension, while simplifying cross-class interoperability."
+url = 'https://joshuaulrich.github.io/xts/, https://github.com/joshuaulrich/xts'
+bugreports = 'https://github.com/joshuaulrich/xts/issues'
+license = 'GPL (>= 2)'
+imports = ['methods']
+suggests = ['timeSeries', 'timeDate', 'tseries', 'chron', 'tinytest']
+linkingto = ['zoo']
+encoding = 'UTF-8'
+needscompilation = 'yes'
+author = 'Jeffrey A. Ryan [aut, cph], Joshua M. Ulrich [cre, aut], Ross Bennett [ctb], Corwin Joy [ctb]'
 
 [renv.packages.yaml]
 package = 'yaml'
