@@ -174,7 +174,7 @@ country_module_server <- function(id, parent_session) {
       ns <- session$ns
 
       # Get prepdata path
-      prepdata_path <- system.file("extdata", "prepdata", package = "shinyTemplate")
+      prepdata_path <- system.file("extdata", "prepdata", package = "innovationStrategyExplorer")
       if (prepdata_path == "" || !dir.exists(prepdata_path)) {
         prepdata_path <- "inst/extdata/prepdata"
       }
