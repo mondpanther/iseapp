@@ -25,6 +25,16 @@ country_module_sidebar <- function(id) {
       shiny::div(
         class = "side_input",
         shiny::selectizeInput(
+          ns("firm"),
+          "Firm Filter:",
+          choices = c("All Firms", "Hitachi", "No Firm"),
+          selected = "All Firms",
+          multiple = FALSE
+        )
+      ),
+      shiny::div(
+        class = "side_input",
+        shiny::selectizeInput(
           inputId = ns("toflow"),
           label = "Return flow",
           choices = toflow_choices,
@@ -179,6 +189,25 @@ country_module_server <- function(id, parent_session) {
         prepdata_path <- "inst/extdata/prepdata"
       }
 
+      # ============================================================================
+      # DUCKDB CONNECTION TO FULL PARQUET DATABASE
+      # ============================================================================
+      full_db_path <- system.file("extdata", "full_patent_database.parquet", package = "innovationStrategyExplorer")
+      if (full_db_path == "" || !file.exists(full_db_path)) {
+        full_db_path <- "inst/extdata/full_patent_database.parquet"
+      }
+
+      con <- DBI::dbConnect(duckdb::duckdb())
+      DBI::dbExecute(con, paste0(
+        "CREATE VIEW full_db AS SELECT * FROM read_parquet('",
+        gsub("\\\\", "/", full_db_path),
+        "')"
+      ))
+
+      session$onSessionEnded(function() {
+        tryCatch(DBI::dbDisconnect(con, shutdown = TRUE), error = function(e) NULL)
+      })
+
       # Reactive: Load precomputed aggregations
       precomputed_avstrax <- shiny::reactive({
         shiny::req(input$toflow, input$country, input$tech_categories_plot1)
@@ -212,6 +241,472 @@ country_module_server <- function(id, parent_session) {
         data
       }) %>% shiny::bindCache(input$toflow, input$country, input$tech_categories_plot1)
 
+      # ============================================================================
+      # DETERMINE WHETHER TO USE PRECOMPUTED DATA
+      # ============================================================================
+      use_precomputed <- shiny::reactive({
+        shiny::req(input$firm, input$toflow, input$country)
+        
+        # If firm filter is not "All Firms", always use fallback
+        if (input$firm != "All Firms") {
+          return(FALSE)
+        }
+        
+        # Check if precomputed data exists for this selection
+        expanded_countries <- expand_country_selection(input$country)
+        group_name <- match_country_group(expanded_countries, group_definitions)
+        
+        if (is.null(group_name)) {
+          return(FALSE)
+        }
+        
+        # Check if the by_tech file exists
+        by_tech_file <- file.path(prepdata_path, paste0("by_tech_", input$toflow, "_", group_name, ".fst"))
+        file.exists(by_tech_file)
+      })
+
+      # ============================================================================
+      # FALLBACK: DuckDB query for Plot 1 (by-technology)
+      # ============================================================================
+      fallback_by_tech <- shiny::reactive({
+        shiny::req(input$toflow, input$country, input$tech_categories_plot1, input$firm)
+
+        selected_countries <- expand_country_selection(input$country)
+        toflow <- input$toflow
+        firm <- input$firm
+
+        # Build country filter
+        country_sql <- paste0("'", selected_countries, "'", collapse = ", ")
+
+        # Build firm filter
+        firm_clause <- ""
+        if (firm == "Hitachi") {
+          firm_clause <- "AND firm = 'Hitachi'"
+        } else if (firm == "No Firm") {
+          firm_clause <- "AND firm IS NULL"
+        }
+        # "All Firms" => no firm filter
+
+        # Query: aggregate by technology
+        sql <- glue::glue("
+          SELECT
+            technology,
+            AVG({toflow}) AS mean,
+            COUNT(*) AS innos,
+            CASE WHEN COUNT(*) > 1 THEN STDDEV({toflow}) / SQRT(COUNT(*)) ELSE 0 END AS sem,
+            QUANTILE_CONT({toflow}, 0.25) AS q1,
+            QUANTILE_CONT({toflow}, 0.50) AS q2,
+            QUANTILE_CONT({toflow}, 0.75) AS q3
+          FROM full_db
+          WHERE ctry_code IN ({country_sql})
+            AND technology IS NOT NULL
+            AND {toflow} IS NOT NULL
+            {firm_clause}
+          GROUP BY technology
+        ")
+
+        result <- DBI::dbGetQuery(con, sql)
+
+        if (nrow(result) == 0) return(NULL)
+
+        # Compute top25/top50 bin means per technology
+        bin_sql <- glue::glue("
+          SELECT
+            technology,
+            AVG(CASE WHEN rnk <= GREATEST(CEIL(cnt * 0.25), 1) THEN val END) AS top25_bin_mean,
+            AVG(CASE WHEN rnk <= GREATEST(CEIL(cnt * 0.50), 1) THEN val END) AS top50_bin_mean
+          FROM (
+            SELECT
+              technology,
+              {toflow} AS val,
+              ROW_NUMBER() OVER (PARTITION BY technology ORDER BY {toflow} DESC) AS rnk,
+              COUNT(*) OVER (PARTITION BY technology) AS cnt
+            FROM full_db
+            WHERE ctry_code IN ({country_sql})
+              AND technology IS NOT NULL
+              AND {toflow} IS NOT NULL
+              {firm_clause}
+          ) sub
+          GROUP BY technology
+        ")
+
+        bin_result <- DBI::dbGetQuery(con, bin_sql)
+
+        # Compute top 3 patent IDs per technology
+        top3_sql <- glue::glue("
+          SELECT technology, docdb_family_id, val
+          FROM (
+            SELECT
+              technology,
+              docdb_family_id,
+              {toflow} AS val,
+              ROW_NUMBER() OVER (PARTITION BY technology ORDER BY {toflow} DESC) AS rnk
+            FROM full_db
+            WHERE ctry_code IN ({country_sql})
+              AND technology IS NOT NULL
+              AND {toflow} IS NOT NULL
+              {firm_clause}
+          ) sub
+          WHERE rnk <= 3
+        ")
+
+        top3_raw <- DBI::dbGetQuery(con, top3_sql)
+
+        top3_agg <- top3_raw |>
+          dplyr::group_by(technology) |>
+          dplyr::summarise(
+            top3_ids = paste(docdb_family_id, collapse = ", "),
+            top3_ids_url = build_espacenet_search(paste(docdb_family_id, collapse = ", ")),
+            .groups = "drop"
+          )
+
+        # Join all pieces
+        out <- result |>
+          dplyr::left_join(bin_result, by = "technology") |>
+          dplyr::left_join(top3_agg, by = "technology")
+
+        # Expand umbrella categories for filtering
+        tech_expansion <- list(
+          "Green Technology" = green_classes,
+          "Battery Technology" = battery_classes,
+          "Hard to Abate Sector Decarbonization" = hard_to_abate_classes,
+          "AI" = ai_classes,
+          "Any Agriculture & Food technology" = agrifood_classes
+        )
+
+        # Build reverse mapping: sub-technology -> umbrella name
+        tech_reverse_map <- new.env(hash = TRUE, parent = emptyenv())
+        for (umbrella in names(tech_expansion)) {
+          for (sub_tech in tech_expansion[[umbrella]]) {
+            tech_reverse_map[[sub_tech]] <- umbrella
+          }
+        }
+
+        # Remap technology names to umbrella categories where applicable
+        out <- out |>
+          dplyr::mutate(
+            technology = sapply(technology, function(t) {
+              if (!is.null(tech_reverse_map[[t]])) tech_reverse_map[[t]] else t
+            })
+          )
+
+        # Add greenclass AFTER remapping (so umbrella names get consistent colors)
+        out <- out |>
+          dplyr::mutate(
+            greenclass = dplyr::case_when(
+              technology %in% c("Green Technology", colorings$green) ~ "green",
+              technology %in% c("Battery Technology", colorings$battery) ~ "battery",
+              technology %in% c("Hard to Abate Sector Decarbonization", colorings$hard_to_abate) ~ "hard to abate",
+              technology %in% c("AI", colorings$ai) ~ "AI",
+              technology %in% c("Any Agriculture & Food technology", colorings$agrifood) ~ "agrifood",
+              technology %in% colorings$cpcsecs ~ "cpcsecs",
+              TRUE ~ "other"
+            )
+          )
+
+        # Re-aggregate after remapping to umbrella names
+        out <- out |>
+          dplyr::group_by(technology, greenclass) |>
+          dplyr::summarise(
+            mean = sum(mean * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+            sem = sqrt(sum((sem * sqrt(innos))^2, na.rm = TRUE)) / sqrt(sum(innos, na.rm = TRUE)),
+            q1 = sum(q1 * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+            q2 = sum(q2 * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+            q3 = sum(q3 * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+            top25_bin_mean = sum(top25_bin_mean * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+            top50_bin_mean = sum(top50_bin_mean * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+            top3_ids = dplyr::first(top3_ids),
+            top3_ids_url = dplyr::first(top3_ids_url),
+            innos = sum(innos, na.rm = TRUE),
+            .groups = "drop"
+          )
+        
+        out <- out |>
+          dplyr::filter(innos > 0)
+
+        # Handle tech category filtering (same logic as precomputed path)
+        selected_categories <- input$tech_categories_plot1
+        include_other <- "Other" %in% selected_categories
+        explicit_categories <- setdiff(selected_categories, "Other")
+
+        if (include_other && length(explicit_categories) > 0) {
+          out <- out |>
+            dplyr::mutate(technology = ifelse(technology %in% explicit_categories, technology, "Other"))
+          # Re-aggregate again after collapsing to "Other"
+          out <- out |>
+            dplyr::group_by(technology, greenclass) |>
+            dplyr::summarise(
+              mean = sum(mean * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+              sem = sqrt(sum((sem * sqrt(innos))^2, na.rm = TRUE)) / sqrt(sum(innos, na.rm = TRUE)),
+              q1 = sum(q1 * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+              q2 = sum(q2 * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+              q3 = sum(q3 * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+              top25_bin_mean = sum(top25_bin_mean * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+              top50_bin_mean = sum(top50_bin_mean * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+              top3_ids = dplyr::first(top3_ids),
+              top3_ids_url = dplyr::first(top3_ids_url),
+              innos = sum(innos, na.rm = TRUE),
+              .groups = "drop"
+            )
+        } else if (include_other && length(explicit_categories) == 0) {
+          out <- out |>
+            dplyr::mutate(technology = "Other")
+          out <- out |>
+            dplyr::group_by(technology, greenclass) |>
+            dplyr::summarise(
+              mean = sum(mean * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+              sem = sqrt(sum((sem * sqrt(innos))^2, na.rm = TRUE)) / sqrt(sum(innos, na.rm = TRUE)),
+              q1 = sum(q1 * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+              q2 = sum(q2 * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+              q3 = sum(q3 * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+              top25_bin_mean = sum(top25_bin_mean * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+              top50_bin_mean = sum(top50_bin_mean * innos, na.rm = TRUE) / sum(innos, na.rm = TRUE),
+              top3_ids = dplyr::first(top3_ids),
+              top3_ids_url = dplyr::first(top3_ids_url),
+              innos = sum(innos, na.rm = TRUE),
+              .groups = "drop"
+            )
+        } else {
+          out <- out |>
+            dplyr::filter(technology %in% explicit_categories)
+        }
+
+        out
+      }) |> shiny::bindCache(input$toflow, input$country, input$tech_categories_plot1, input$firm)
+
+      # ============================================================================
+      # FALLBACK: DuckDB query for Plot 2 / World Map (by-country)
+      # ============================================================================
+      fallback_by_country <- shiny::reactive({
+        shiny::req(input$toflow, input$country, input$techs, input$firm)
+
+        selected_countries <- expand_country_selection(input$country)
+        toflow <- input$toflow
+        firm <- input$firm
+        techs <- input$techs
+
+        # Build SQL clauses
+        country_sql <- paste0("'", selected_countries, "'", collapse = ", ")
+
+        firm_clause <- ""
+        if (firm == "Hitachi") {
+          firm_clause <- "AND firm = 'Hitachi'"
+        } else if (firm == "No Firm") {
+          firm_clause <- "AND firm IS NULL"
+        }
+
+        # Expand umbrella technology categories into sub-technologies
+        tech_expansion <- list(
+          "Green Technology" = green_classes,
+          "Battery Technology" = battery_classes,
+          "Hard to Abate Sector Decarbonization" = hard_to_abate_classes,
+          "AI" = ai_classes,
+          "Any Agriculture & Food technology" = agrifood_classes
+        )
+
+        expanded_techs <- unique(unlist(lapply(techs, function(t) {
+          if (t %in% names(tech_expansion)) {
+            return(tech_expansion[[t]])
+          } else {
+            return(t)
+          }
+        })))
+
+        tech_sql <- paste0("'", expanded_techs, "'", collapse = ", ")
+
+        # Tech filter — "All Innovations" means no tech filter
+        tech_clause <- ""
+        if (!("All Innovations" %in% techs)) {
+          tech_clause <- glue::glue("AND technology IN ({tech_sql})")
+        }
+
+        # ---- Per-country aggregation ----
+        country_agg_sql <- glue::glue("
+          SELECT
+            ctry_code,
+            AVG({toflow}) AS mean,
+            COUNT(*) AS innos,
+            CASE WHEN COUNT(*) > 1 THEN STDDEV({toflow}) / SQRT(COUNT(*)) ELSE 0 END AS sem,
+            QUANTILE_CONT({toflow}, 0.25) AS q1,
+            QUANTILE_CONT({toflow}, 0.50) AS q2,
+            QUANTILE_CONT({toflow}, 0.75) AS q3
+          FROM full_db
+          WHERE ctry_code IN ({country_sql})
+            AND {toflow} IS NOT NULL
+            {tech_clause}
+            {firm_clause}
+          GROUP BY ctry_code
+        ")
+
+        by_country <- DBI::dbGetQuery(con, country_agg_sql)
+        if (nrow(by_country) == 0) return(NULL)
+
+        # ---- "All" row (global average across selected countries) ----
+        all_agg_sql <- glue::glue("
+          SELECT
+            'All' AS ctry_code,
+            AVG({toflow}) AS mean,
+            COUNT(*) AS innos,
+            CASE WHEN COUNT(*) > 1 THEN STDDEV({toflow}) / SQRT(COUNT(*)) ELSE 0 END AS sem,
+            QUANTILE_CONT({toflow}, 0.25) AS q1,
+            QUANTILE_CONT({toflow}, 0.50) AS q2,
+            QUANTILE_CONT({toflow}, 0.75) AS q3
+          FROM full_db
+          WHERE ctry_code IN ({country_sql})
+            AND {toflow} IS NOT NULL
+            {tech_clause}
+            {firm_clause}
+        ")
+
+        all_row <- DBI::dbGetQuery(con, all_agg_sql)
+
+        # ---- Top25/Top50 bin means per country ----
+        bin_sql <- glue::glue("
+          SELECT
+            ctry_code,
+            AVG(CASE WHEN rnk <= GREATEST(CEIL(cnt * 0.25), 1) THEN val END) AS top25_bin_mean,
+            AVG(CASE WHEN rnk <= GREATEST(CEIL(cnt * 0.50), 1) THEN val END) AS top50_bin_mean
+          FROM (
+            SELECT
+              ctry_code,
+              {toflow} AS val,
+              ROW_NUMBER() OVER (PARTITION BY ctry_code ORDER BY {toflow} DESC) AS rnk,
+              COUNT(*) OVER (PARTITION BY ctry_code) AS cnt
+            FROM full_db
+            WHERE ctry_code IN ({country_sql})
+              AND {toflow} IS NOT NULL
+              {tech_clause}
+              {firm_clause}
+          ) sub
+          GROUP BY ctry_code
+        ")
+
+        bin_result <- DBI::dbGetQuery(con, bin_sql)
+
+        # ---- Top25/Top50 for "All" row ----
+        bin_all_sql <- glue::glue("
+          SELECT
+            'All' AS ctry_code,
+            AVG(CASE WHEN rnk <= GREATEST(CEIL(cnt * 0.25), 1) THEN val END) AS top25_bin_mean,
+            AVG(CASE WHEN rnk <= GREATEST(CEIL(cnt * 0.50), 1) THEN val END) AS top50_bin_mean
+          FROM (
+            SELECT
+              {toflow} AS val,
+              ROW_NUMBER() OVER (ORDER BY {toflow} DESC) AS rnk,
+              COUNT(*) OVER () AS cnt
+            FROM full_db
+            WHERE ctry_code IN ({country_sql})
+              AND {toflow} IS NOT NULL
+              {tech_clause}
+              {firm_clause}
+          ) sub
+        ")
+
+        bin_all <- DBI::dbGetQuery(con, bin_all_sql)
+
+        # ---- Top 3 patent IDs per country ----
+        top3_sql <- glue::glue("
+          SELECT ctry_code, docdb_family_id
+          FROM (
+            SELECT
+              ctry_code,
+              docdb_family_id,
+              {toflow} AS val,
+              ROW_NUMBER() OVER (PARTITION BY ctry_code ORDER BY {toflow} DESC) AS rnk
+            FROM full_db
+            WHERE ctry_code IN ({country_sql})
+              AND {toflow} IS NOT NULL
+              {tech_clause}
+              {firm_clause}
+          ) sub
+          WHERE rnk <= 3
+        ")
+
+        top3_raw <- DBI::dbGetQuery(con, top3_sql)
+
+        top3_agg <- top3_raw |>
+          dplyr::group_by(ctry_code) |>
+          dplyr::summarise(
+            top3_ids = paste(docdb_family_id, collapse = ", "),
+            top3_ids_url = build_espacenet_search(paste(docdb_family_id, collapse = ", ")),
+            .groups = "drop"
+          )
+
+        # ---- Top 3 for "All" row ----
+        top3_all_sql <- glue::glue("
+          SELECT docdb_family_id
+          FROM (
+            SELECT
+              docdb_family_id,
+              {toflow} AS val,
+              ROW_NUMBER() OVER (ORDER BY {toflow} DESC) AS rnk
+            FROM full_db
+            WHERE ctry_code IN ({country_sql})
+              AND {toflow} IS NOT NULL
+              {tech_clause}
+              {firm_clause}
+          ) sub
+          WHERE rnk <= 3
+        ")
+
+        top3_all_raw <- DBI::dbGetQuery(con, top3_all_sql)
+        top3_all_ids <- paste(top3_all_raw$docdb_family_id, collapse = ", ")
+
+        # ---- RTA: Allinnos and SumAllinnos ----
+        # Allinnos = total distinct patents per country (all techs, no tech filter)
+        allinnos_sql <- glue::glue("
+          SELECT ctry_code, COUNT(DISTINCT docdb_family_id) AS Allinnos
+          FROM full_db
+          WHERE ctry_code IN ({country_sql})
+            {firm_clause}
+          GROUP BY ctry_code
+        ")
+
+        allinnos <- DBI::dbGetQuery(con, allinnos_sql)
+
+        # SumAllinnos = total distinct patents globally (all techs)
+        sum_allinnos_sql <- glue::glue("
+          SELECT COUNT(DISTINCT docdb_family_id) AS SumAllinnos
+          FROM full_db
+          WHERE ctry_code IN ({country_sql})
+            {firm_clause}
+        ")
+
+        sum_allinnos <- DBI::dbGetQuery(con, sum_allinnos_sql)$SumAllinnos
+
+        # ---- Assemble per-country rows ----
+        out <- by_country |>
+          dplyr::left_join(bin_result, by = "ctry_code") |>
+          dplyr::left_join(top3_agg, by = "ctry_code") |>
+          dplyr::left_join(allinnos, by = "ctry_code") |>
+          dplyr::mutate(
+            top25 = 0.25,
+            top50 = 0.5,
+            SumAllinnos = sum_allinnos,
+            share_c = innos / Allinnos,
+            share = sum(innos) / SumAllinnos,
+            RTA = 2 * share_c / (share_c + share)
+          )
+
+        # ---- Assemble "All" row ----
+        all_assembled <- all_row |>
+          dplyr::bind_cols(bin_all |> dplyr::select(-ctry_code)) |>
+          dplyr::mutate(
+            top3_ids = top3_all_ids,
+            top3_ids_url = build_espacenet_search(top3_all_ids),
+            top25 = 0.25,
+            top50 = 0.5,
+            Allinnos = sum_allinnos,
+            SumAllinnos = sum_allinnos,
+            share_c = 1,
+            share = 1,
+            RTA = 1
+          )
+
+        # Combine
+        dplyr::bind_rows(out, all_assembled)
+      }) |> shiny::bindCache(input$toflow, input$country, input$techs, input$firm)
+
       # Reactive values for window dimensions
       window_dims <- reactiveValues(width = 800, height = 600, initialized = TRUE)
 
@@ -243,55 +738,6 @@ country_module_server <- function(id, parent_session) {
           invalidateLater(100)
         }
       }) |> bindEvent(TRUE, once = TRUE)
-
-      # Deferred loading observer - loads big datasets in background
-      # observe({
-      #   req(has_precomputed_data)
-      #   req(data_state$loading_started)
-      #   req(!data_state$loading_complete)
-
-      #   # Show waiter
-      #   waiter::waiter_show(
-      #     html = shiny::tagList(
-      #       waiter::spin_fading_circles(),
-      #       shiny::h1("Loading datasets", style = "margin-top: 20px;"),
-      #       shiny::p("Please be patient...", style = "")
-      #     ),
-      #     color = waiter::transparent(0.5)
-      #   )
-
-      #   # Load datasets
-      #   tryCatch({
-      #     datasets <- load_big_datasets()
-
-      #     # Process techmap (add "All" category and normalize names)
-      #     # processed_techmap <- process_techmap(datasets$techmap, datasets$countrymap)
-
-      #     # Update reactive values
-      #     loaded_data$techmap <- datasets$techmap
-      #     loaded_data$countrymap <- datasets$countrymap
-      #     loaded_data$regionmap <- datasets$regionmap
-
-      #     # Update global variables for backward compatibility with plot functions
-      #     techmap <<- processed_techmap
-      #     countrymap <<- datasets$countrymap
-      #     regionmap <<- datasets$regionmap
-      #     regionmap_available <<- !is.null(datasets$regionmap) && nrow(datasets$regionmap) > 0
-
-      #     # Mark as loaded
-      #     data_state$loading_complete
-      #     data_state$techmap_loaded <- TRUE
-      #     data_state$countrymap_loaded <- TRUE
-      #     data_state$regionmap_loaded <- TRUE
-      #     data_state$loading_complete <- TRUE
-
-      #     message("Deferred loading complete. Big datasets are now available.")
-      #     waiter::waiter_hide()
-      #   }, error = function(e) {
-      #     message("Error during deferred loading: ", e$message)
-      #     waiter::waiter_hide()
-      #   })
-      # }) |> bindEvent(data_state$loading_started, once = TRUE)
 
       # Helper to get current techmap (prefers loaded data, falls back to global)
       get_techmap <- reactive({
@@ -325,40 +771,6 @@ country_module_server <- function(id, parent_session) {
         rm <- get_regionmap()
         !is.null(rm) && nrow(rm) > 0
       })
-
-      # patchar_countrymap <- reactive({
-      #   req(input$toflow)
-        
-      #   # Don't load full countrymap - just join the specific flow file
-      #   path <- paste0("/istraxes/", input$toflow, ".fst")
-      #   read_fst(localpath_fname(path))
-      # })
-
-      # patchar_countrymap <- reactive({
-      #   req(input$toflow)
-      #   # Require countrymap to be loaded for on-the-fly computation
-      #   req(data_state$countrymap_loaded)
-
-      #   # Get the current countrymap (from reactive helper)
-      #   current_countrymap <- get_countrymap()
-      #   req(nrow(current_countrymap) > 0)
-
-      #   path <- paste0("/istraxes/", input$toflow,".fst")
-
-      #   pp=localpath_fname(path)
-      #   if(file.exists(pp)){
-      #     ddd <- read_fst(pp)
-      #   }
-
-      #   # Replace missing values with 0 in the value column
-      #   # Some files (avstrax, ev) contain NAs that need to be treated as 0
-      #   value_col <- input$toflow
-      #   if (value_col %in% names(ddd)) {
-      #     ddd[[value_col]][is.na(ddd[[value_col]])] <- 0
-      #   }
-
-      #   patchar_countrymap <- current_countrymap %>% left_join(ddd, by = c("docdb_family_id", "ctry_code"))
-      # })
 
       observe({
         width <- session$clientData[[paste0("output_", ns("avstrax_plot1"), "_width")]]
@@ -428,7 +840,7 @@ country_module_server <- function(id, parent_session) {
           # width_svg = width_inches,
           # height_svg = height_inches,
           plot_title =  sub("^[^.]*\\.", "", flow_label),
-          precomputed_data = precomputed_avstrax()
+          precomputed_data = if (use_precomputed()) precomputed_avstrax() else fallback_by_tech()
         )
 
         p
@@ -453,29 +865,54 @@ country_module_server <- function(id, parent_session) {
         # Try to load pre-computed data if available
         precomputed_data <- NULL
 
-        # Check if we can use pre-computed data:
-        # 1. No comparison technologies (pre-computation doesn't cover comparisons)
-        # 2. Technology selection matches a known category
-        # Note: by_country files aggregate BY country for a specific technology category
-        if (is.null(input$techs_comparison) || length(input$techs_comparison) == 0) {
+        if (use_precomputed()) {
           # Try to match tech selection to a pre-computed category
-          tech_category <- match_tech_category(input$techs)
-
-          if (!is.null(tech_category)) {
-            # Try to load pre-computed data - by_country files are keyed by tech_category only
-            precomputed_data <- load_precomputed_by_country(prepdata_path, input$toflow, tech_category)
-            if (!is.null(precomputed_data)) {
-              message("Using pre-computed data for tech category: ", tech_category)
-              # Filter precomputed data to selected countries if needed
-              # BUT keep the "All" row which is needed for computing the average line
-              selected_countries <- expand_country_selection(input$country)
-              if (!is.null(precomputed_data$ctry_code)) {
+          if (is.null(input$techs_comparison) || length(input$techs_comparison) == 0) {
+            tech_category <- match_tech_category(input$techs)
+            if (!is.null(tech_category)) {
+              precomputed_data <- load_precomputed_by_country(prepdata_path, input$toflow, tech_category)
+              if (!is.null(precomputed_data)) {
+                selected_countries <- expand_country_selection(input$country)
                 precomputed_data <- precomputed_data %>%
                   filter(ctry_code %in% selected_countries | ctry_code == "All")
               }
             }
           }
         }
+
+        # If no precomputed data available, use DuckDB fallback
+        if (is.null(precomputed_data)) {
+          precomputed_data <- fallback_by_country()
+        }
+
+        # Guard: if still no data, return NULL early
+        if (is.null(precomputed_data) || nrow(precomputed_data) == 0) {
+          return(NULL)
+        }
+
+        # # Check if we can use pre-computed data:
+        # # 1. No comparison technologies (pre-computation doesn't cover comparisons)
+        # # 2. Technology selection matches a known category
+        # # Note: by_country files aggregate BY country for a specific technology category
+        # if (is.null(input$techs_comparison) || length(input$techs_comparison) == 0) {
+        #   # Try to match tech selection to a pre-computed category
+        #   tech_category <- match_tech_category(input$techs)
+
+        #   if (!is.null(tech_category)) {
+        #     # Try to load pre-computed data - by_country files are keyed by tech_category only
+        #     precomputed_data <- load_precomputed_by_country(prepdata_path, input$toflow, tech_category)
+        #     if (!is.null(precomputed_data)) {
+        #       message("Using pre-computed data for tech category: ", tech_category)
+        #       # Filter precomputed data to selected countries if needed
+        #       # BUT keep the "All" row which is needed for computing the average line
+        #       selected_countries <- expand_country_selection(input$country)
+        #       if (!is.null(precomputed_data$ctry_code)) {
+        #         precomputed_data <- precomputed_data %>%
+        #           filter(ctry_code %in% selected_countries | ctry_code == "All")
+        #       }
+        #     }
+        #   }
+        # }
 
         # When using pre-computed data, we still need a minimal filtered for any fallback
         filtered <- NULL
@@ -528,44 +965,45 @@ country_module_server <- function(id, parent_session) {
         # Try to load pre-computed data if available
         avstrax_data <- NULL
 
-        # Try to match tech selection to pre-computed data
-        # World map shows data BY country for a specific technology, so uses by_country files
-        tech_category <- match_tech_category(input$techs)
-
-        if (!is.null(tech_category)) {
-          avstrax_data <- load_precomputed_by_country(prepdata_path, input$toflow, tech_category)
-          if (!is.null(avstrax_data)) {
-            message("World map using pre-computed data for tech: ", tech_category)
-            # Filter to selected countries
-            if (!is.null(avstrax_data$ctry_code)) {
+        if (use_precomputed()) {
+          tech_category <- match_tech_category(input$techs)
+          if (!is.null(tech_category)) {
+            avstrax_data <- load_precomputed_by_country(prepdata_path, input$toflow, tech_category)
+            if (!is.null(avstrax_data)) {
               avstrax_data <- avstrax_data %>%
                 filter(ctry_code %in% selected_countries)
             }
           }
         }
 
-        # If no pre-computed data, compute on the fly
-        # if (is.null(avstrax_data)) {
-        #   # Require big datasets for on-the-fly computation
-        #   req(data_state$countrymap_loaded)
-        #   req(data_state$techmap_loaded)
+        # If no precomputed data available, use DuckDB fallback
+        if (is.null(avstrax_data)) {
+          avstrax_data <- fallback_by_country()
+          if (!is.null(avstrax_data)) {
+            avstrax_data <- avstrax_data %>%
+              filter(ctry_code != "All")
+          }
+        }
 
-        #   # Get current techmap
-        #   current_techmap <- get_techmap()
+        # Guard: if still no data, return NULL early
+        if (is.null(avstrax_data) || nrow(avstrax_data) == 0) {
+          return(NULL)
+        }
 
-        #   # Filter by technology class
-        #   filtered_classes <- current_techmap %>%
-        #     filter(technology %in% input$techs) %>%
-        #     distinct()
+        # Try to match tech selection to pre-computed data
+        # World map shows data BY country for a specific technology, so uses by_country files
+        # tech_category <- match_tech_category(input$techs)
 
-        #   if("All Innovations" %in% input$techs) filtered_classes <- data.frame()
-
-        #   # Filter data by selected countries
-        #   filtered <- patchar_countrymap() %>%
-        #     filter(ctry_code %in% selected_countries)
-
-        #   # Compute aggregated data for all countries
-        #   avstrax_data <- compute_avstrax_for_techs(filtered, input$toflow, filtered_classes)
+        # if (!is.null(tech_category)) {
+        #   avstrax_data <- load_precomputed_by_country(prepdata_path, input$toflow, tech_category)
+        #   if (!is.null(avstrax_data)) {
+        #     message("World map using pre-computed data for tech: ", tech_category)
+        #     # Filter to selected countries
+        #     if (!is.null(avstrax_data$ctry_code)) {
+        #       avstrax_data <- avstrax_data %>%
+        #         filter(ctry_code %in% selected_countries)
+        #     }
+        #   }
         # }
 
         # Filter by minimum innovations
