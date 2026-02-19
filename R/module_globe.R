@@ -104,29 +104,19 @@ globe_module_server <- function(id, parent_session) {
       # LOAD DATA
       ###############################################################
       
-      data_path <- system.file("extdata", "long_final.parquet", package = "innovationStrategyExplorer")
+      data_path <- system.file("extdata", "inglobe_processed.parquet", package = "innovationStrategyExplorer")
       con <- DBI::dbConnect(duckdb::duckdb())
-      duckdb::duckdb_register(con, "df", arrow::read_parquet(data_path, as_data_frame = FALSE))
+      DBI::dbExecute(con, sprintf("CREATE VIEW df AS SELECT * FROM read_parquet('%s')", data_path))
 
       # Clean up connection on session end
       shiny::onSessionEnded(function() {
         DBI::dbDisconnect(con, shutdown = TRUE)
       })
-      
-      metadata <- DBI::dbGetQuery(con, "
-        SELECT DISTINCT 
-          sce_country,
-          sce_tech_display,
-          tech_group,
-          sample_size
-        FROM df
-      ")
 
-      # Get min/max wave separately (simpler)
-      wave_range <- DBI::dbGetQuery(con, "
-        SELECT MIN(wave) as min_wave, MAX(wave) as max_wave
-        FROM df
-      ")
+      # Load precomputed metadata (no queries!)
+      metadata <- readRDS(system.file("extdata", "inglobe_metadata.rds", package = "innovationStrategyExplorer"))
+      wave_range <- readRDS(system.file("extdata", "inglobe_wave_range.rds", package = "innovationStrategyExplorer"))
+      tech_group_definitions <- readRDS(system.file("extdata", "inglobe_tech_groups.rds", package = "innovationStrategyExplorer"))
       
       ###############################################################
       # COUNTRY GROUP DEFINITIONS
@@ -319,59 +309,11 @@ globe_module_server <- function(id, parent_session) {
       }
       
       ###############################################################
-      # REACTIVE DATA FILTERING
-      ###############################################################
-      
-      # edges_filtered <- shiny::reactive({
-      #   selected_countries <- expand_country_selection(input$sce_country)
-      #   selected_techs <- expand_tech_selection(input$sce_tech_display)
-        
-      #   df |>
-      #     dplyr::filter(
-      #       sce_country %in% selected_countries,
-      #       sce_tech_display %in% selected_techs,
-      #       wave <= input$max_wave,
-      #       sample_size == input$sample_size
-      #     )
-      # })
-
-      edges_filtered <- shiny::reactive({
-        selected_countries <- expand_country_selection(input$sce_country)
-        selected_techs <- expand_tech_selection(input$sce_tech_display)
-        
-        # Build query with glue_sql for proper vector expansion
-        query <- glue::glue_sql(
-          "SELECT *,
-            sce_country || '_' || tech_group || '_' || 
-            COALESCE(tech_subgroup, 'ALL') || '_' || 
-            sample_size || '_' || source_id as chain_id
-          FROM df
-          WHERE sce_country IN ({selected_countries*})
-            AND sce_tech_display IN ({selected_techs*})
-            AND wave <= {input$max_wave}
-            AND sample_size = {input$sample_size}
-          ORDER BY sce_country, tech_group, tech_subgroup, source_id, wave",
-          .con = con
-        )
-        
-        DBI::dbGetQuery(con, query)
-      })
-      
-      nodes_filtered <- shiny::reactive({
-        edges <- edges_filtered()
-        
-        dplyr::bind_rows(
-          edges |> dplyr::select(lon = source_lon, lat = source_lat),
-          edges |> dplyr::select(lon = target_lon, lat = target_lat)
-        ) |> dplyr::distinct()
-      })
-      
-      ###############################################################
       # MAP OUTPUT
       ###############################################################
       
       output$map <- leaflet::renderLeaflet({
-        leaflet::leaflet() |>
+        leaflet::leaflet(options = leaflet::leafletOptions(preferCanvas = TRUE)) |>
           leaflet::addTiles() |>
           leaflet::setView(10, 20, zoom = 3)
       })
@@ -380,12 +322,33 @@ globe_module_server <- function(id, parent_session) {
       # RENDER TRIGGER & MAP RENDERING
       ###############################################################
 
-      shiny::observe({
+      shiny::observeEvent(c(input$render_map), {
         # Don't run until initialization is complete
         shiny::req(initialization_complete())
+
+        selected_countries <- expand_country_selection(input$sce_country)
+        selected_techs <- expand_tech_selection(input$sce_tech_display)
         
-        edges <- edges_filtered()
-        nodes <- nodes_filtered()
+        # Build query with glue_sql for proper vector expansion
+        query <- glue::glue_sql(
+          "SELECT *
+          FROM df
+          WHERE sce_country IN ({selected_countries*})
+            AND sce_tech_display IN ({selected_techs*})
+            AND wave <= {input$max_wave}
+            AND sample_size = {input$sample_size}",
+          .con = con
+        )
+
+        # edges <- edges_filtered()
+        # nodes <- nodes_filtered()
+        
+        edges <- DBI::dbGetQuery(con, query)
+        
+        nodes <- dplyr::bind_rows(
+          edges |> dplyr::select(lon = source_lon, lat = source_lat),
+          edges |> dplyr::select(lon = target_lon, lat = target_lat)
+        ) |> dplyr::distinct()
         
         if (nrow(edges) == 0) return()
         
@@ -428,7 +391,7 @@ globe_module_server <- function(id, parent_session) {
               opacity = 0.4
             )
         }
-      }) |> shiny::bindEvent(input$render_map, ignoreNULL = FALSE, ignoreInit = FALSE)
+      })
 
     }
   )
