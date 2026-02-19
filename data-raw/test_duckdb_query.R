@@ -1,4 +1,4 @@
-# Test DuckDB Queries on Patent Database
+# Test DuckDB Queries on Full Patent Database
 # Run this to verify query speed before updating the app
 
 library(duckdb)
@@ -21,7 +21,7 @@ result1 <- dbGetQuery(con, "
     MEDIAN(avstrax_global) as median_avstrax,
     QUANTILE_CONT(avstrax_global, 0.25) as q25,
     QUANTILE_CONT(avstrax_global, 0.75) as q75
-  FROM read_parquet('inst/extdata/patent_database.parquet')
+  FROM read_parquet('inst/extdata/full_patent_database.parquet')
   WHERE ctry_code = 'US' 
     AND technology = 'AI'
     AND avstrax_global IS NOT NULL
@@ -39,7 +39,7 @@ result2 <- dbGetQuery(con, "
     ctry_code,
     COUNT(*) as n_patents,
     AVG(avstrax_global) as mean_avstrax
-  FROM read_parquet('inst/extdata/patent_database.parquet')
+  FROM read_parquet('inst/extdata/full_patent_database.parquet')
   WHERE ctry_code IN ('US', 'CN', 'DE')
     AND technology = 'Green Energy'
     AND avstrax_global IS NOT NULL
@@ -59,7 +59,7 @@ result3 <- dbGetQuery(con, "
     technology,
     COUNT(*) as n_patents,
     AVG(avstrax_global) as mean_avstrax
-  FROM read_parquet('inst/extdata/patent_database.parquet')
+  FROM read_parquet('inst/extdata/full_patent_database.parquet')
   WHERE firm = 'Hitachi'
     AND technology = 'AI'
     AND avstrax_global IS NOT NULL
@@ -81,7 +81,7 @@ result4 <- dbGetQuery(con, "
     QUANTILE_CONT(avstrax_global, 0.25) as q1,
     QUANTILE_CONT(avstrax_global, 0.50) as q2,
     QUANTILE_CONT(avstrax_global, 0.75) as q3
-  FROM read_parquet('inst/extdata/patent_database.parquet')
+  FROM read_parquet('inst/extdata/full_patent_database.parquet')
   WHERE ctry_code = 'US'
     AND avstrax_global IS NOT NULL
     AND technology IS NOT NULL
@@ -102,7 +102,7 @@ result5 <- dbGetQuery(con, "
     ctry_code,
     technology,
     avstrax_global
-  FROM read_parquet('inst/extdata/patent_database.parquet')
+  FROM read_parquet('inst/extdata/full_patent_database.parquet')
   WHERE ctry_code = 'US'
     AND technology = 'AI'
     AND avstrax_global IS NOT NULL
