@@ -7040,7 +7040,7 @@
   },
   "files": {
     ".claude/settings.local.json": {
-      "checksum": "95bfaed31b10d31bf9b0a16b258480c9"
+      "checksum": "6f30cfdc31c217005b4e6012c93f3c8a"
     },
     ".gitattributes": {
       "checksum": "05bdb783ee6514c8c072e47680af8ff7"
@@ -7058,7 +7058,7 @@
       "checksum": "48a7623e2c9b8866c7bb871fc3db7b9d"
     },
     "app.R": {
-      "checksum": "2d43c2214f3cfde010e046f50e6dedd0"
+      "checksum": "f940505eb9b0ba98f8208faca8db8606"
     },
     "checking.nb.html": {
       "checksum": "c67daf34470f24725484e70049954250"
@@ -7076,7 +7076,7 @@
       "checksum": "a8504eed4696eae7a2a9a1e85fba9266"
     },
     "dropbox_auth.R": {
-      "checksum": "c2428af42682167227219ad11a970041"
+      "checksum": "c399e7629b32fcbcbe6693113428085e"
     },
     "dropbox_token.rds": {
       "checksum": "a0f882dc13b500cc4d80ce4ba8600995"
@@ -7150,6 +7150,12 @@
     "prepareISTRAXtool_MVP.Rmd": {
       "checksum": "a3b597e9aab9daf8bc04876080d4365d"
     },
+    "prinzlogo.png": {
+      "checksum": "e7fd7d37317d7062d80b95e71e0a5c54"
+    },
+    "prinzlogo.svg": {
+      "checksum": "94b7f01b340eb2cdbf8314fb40e3ed65"
+    },
     "README.md": {
       "checksum": "920dbeaeaaf05f867581cea6f0ee7809"
     },
@@ -7167,6 +7173,9 @@
     },
     "world_connections_map.png": {
       "checksum": "cff195232e63390f5668792b57543e4f"
+    },
+    "www/prinzlogo.svg": {
+      "checksum": "94b7f01b340eb2cdbf8314fb40e3ed65"
     }
   },
   "users": null
