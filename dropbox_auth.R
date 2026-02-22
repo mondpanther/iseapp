@@ -164,6 +164,15 @@ dropbox_read_fst <- function(dropbox_path, ...) {
   fst::read_fst(local_file, ...)
 }
 
+# Read a Parquet file from Dropbox (requires arrow)
+dropbox_read_parquet <- function(dropbox_path, ...) {
+  if (!requireNamespace("arrow", quietly = TRUE)) {
+    stop("Package 'arrow' required for Parquet files")
+  }
+  local_file <- dropbox_download(dropbox_path)
+  on.exit(unlink(local_file))
+  arrow::read_parquet(local_file, ...)
+}
 
 
 # Read an Excel file from Dropbox (requires readxl)

@@ -114,6 +114,8 @@ techmap <- NULL
 countrymap <- NULL
 regionmap <- NULL
 regionmap_available <- FALSE
+firmmap <- NULL
+firmsectormap <- NULL
 
 # Function to load big datasets (called asynchronously in server)
 load_big_datasets <- function() {
@@ -154,6 +156,36 @@ load_big_datasets <- function() {
     })
   }
 
+  # Load firmmap
+  pp_firm <- localpath_fname("/firmmap.parquet")
+  if (file.exists(pp_firm)) {
+    result$firmmap <- arrow::read_parquet(pp_firm)
+    message("Firmmap loaded locally with ", nrow(result$firmmap), " rows")
+  } else {
+    tryCatch({
+      result$firmmap <- dropbox_read_parquet("/firmmap.parquet")
+      message("Firmmap loaded from Dropbox with ", nrow(result$firmmap), " rows")
+    }, error = function(e) {
+      message("Could not load firmmap: ", e$message)
+      result$firmmap <- NULL
+    })
+  }
+
+  # Load firmsectormap
+  pp_firmsector <- localpath_fname("/firmsectormap.parquet")
+  if (file.exists(pp_firmsector)) {
+    result$firmsectormap <- arrow::read_parquet(pp_firmsector)
+    message("Firmsectormap loaded locally with ", nrow(result$firmsectormap), " rows")
+  } else {
+    tryCatch({
+      result$firmsectormap <- dropbox_read_parquet("/firmsectormap.parquet")
+      message("Firmsectormap loaded from Dropbox with ", nrow(result$firmsectormap), " rows")
+    }, error = function(e) {
+      message("Could not load firmsectormap: ", e$message)
+      result$firmsectormap <- NULL
+    })
+  }
+
   result
 }
 
@@ -183,6 +215,8 @@ if (has_precomputed_data) {
   countrymap <- datasets$countrymap
   regionmap <- datasets$regionmap
   regionmap_available <- !is.null(regionmap) && nrow(regionmap) > 0
+  firmmap <- datasets$firmmap
+  firmsectormap <- datasets$firmsectormap
 }
 
 #rsconnect::writeManifest()
@@ -322,6 +356,35 @@ grouped_techs <- list(
   "CPC Sections"                                        = as.list(setNames(cpc_sections, cpc_sections))
 
 )
+
+
+# Build grouped firm choices organized by sector
+# firmsectormap has: company_raw, sector, RnD
+# firmmap has: company_raw, docdb_family_id
+build_grouped_firm_choices <- function(firmsectormap_data) {
+  if (is.null(firmsectormap_data) || nrow(firmsectormap_data) == 0) {
+    return(list("All" = list("All" = "All")))
+  }
+  sectors <- sort(unique(firmsectormap_data$sector))
+  # First group: Sectors (selecting a sector filters to all firms in that sector)
+  sector_choices <- as.list(setNames(paste0("sector:", sectors), sectors))
+  grouped <- list("All" = list("All" = "All"), "Sectors" = sector_choices)
+  # Then for each sector, a sub-group listing individual firms sorted by RnD (descending)
+  for (s in sectors) {
+    firms_in_sector <- firmsectormap_data %>%
+      filter(sector == s) %>%
+      arrange(desc(RnD)) %>%
+      pull(company_raw)
+    grouped[[s]] <- as.list(setNames(firms_in_sector, firms_in_sector))
+  }
+  grouped
+}
+
+if (!is.null(firmsectormap)) {
+  grouped_firms <- build_grouped_firm_choices(firmsectormap)
+} else {
+  grouped_firms <- list("All" = list("All" = "All"))
+}
 
 
 marginal  = list(
@@ -764,6 +827,9 @@ ui <- function(request){fluidPage(
         var mininno = getShinyInputValue('mininno');
         if (mininno) params.push('mininno=' + encodeURIComponent(mininno));
 
+        var firmFilter = getShinyInputValue('firm_filter');
+        if (firmFilter) params.push('firm_filter=' + encodeURIComponent(JSON.stringify(firmFilter)));
+
         // Region Explorer inputs
         var region = getShinyInputValue('region');
         if (region) params.push('region=' + encodeURIComponent(JSON.stringify(region)));
@@ -794,6 +860,9 @@ ui <- function(request){fluidPage(
 
         var mininnoRegion = getShinyInputValue('mininno_region');
         if (mininnoRegion) params.push('mininno_region=' + encodeURIComponent(mininnoRegion));
+
+        var firmFilterRegion = getShinyInputValue('firm_filter_region');
+        if (firmFilterRegion) params.push('firm_filter_region=' + encodeURIComponent(JSON.stringify(firmFilterRegion)));
 
         return '?' + params.join('&');
       }
@@ -864,6 +933,15 @@ ui <- function(request){fluidPage(
           multiple = TRUE,
           width = "200%",
           options = list(placeholder = 'Choose one or more technology categories...')
+        ),
+        selectizeInput(
+          inputId = "firm_filter",
+          label = "Filter by firms",
+          choices = grouped_firms,
+          selected = "All",
+          multiple = TRUE,
+          width = "200%",
+          options = list(placeholder = 'Choose firms or sectors to filter...')
         ),
         radioButtons(
           inputId = "bwidthscale",
@@ -1027,6 +1105,15 @@ ui <- function(request){fluidPage(
           width = "200%",
           options = list(placeholder = 'Choose one or more technology categories...')
         ),
+        selectizeInput(
+          inputId = "firm_filter_region",
+          label = "Filter by firms",
+          choices = grouped_firms,
+          selected = "All",
+          multiple = TRUE,
+          width = "200%",
+          options = list(placeholder = 'Choose firms or sectors to filter...')
+        ),
         radioButtons(
           inputId = "bwidthscale_region",
           label = "Bar width scale",
@@ -1185,7 +1272,9 @@ server <- function(input, output, session) {
   loaded_data <- reactiveValues(
     techmap = if (!has_precomputed_data) techmap else NULL,
     countrymap = if (!has_precomputed_data) countrymap else NULL,
-    regionmap = if (!has_precomputed_data) regionmap else NULL
+    regionmap = if (!has_precomputed_data) regionmap else NULL,
+    firmmap = if (!has_precomputed_data) firmmap else NULL,
+    firmsectormap = if (!has_precomputed_data) firmsectormap else NULL
   )
 
   # Start deferred loading after a short delay (allows UI to render first)
@@ -1217,12 +1306,23 @@ server <- function(input, output, session) {
       loaded_data$techmap <- processed_techmap
       loaded_data$countrymap <- datasets$countrymap
       loaded_data$regionmap <- datasets$regionmap
+      loaded_data$firmmap <- datasets$firmmap
+      loaded_data$firmsectormap <- datasets$firmsectormap
 
       # Update global variables for backward compatibility with plot functions
       techmap <<- processed_techmap
       countrymap <<- datasets$countrymap
       regionmap <<- datasets$regionmap
       regionmap_available <<- !is.null(datasets$regionmap) && nrow(datasets$regionmap) > 0
+      firmmap <<- datasets$firmmap
+      firmsectormap <<- datasets$firmsectormap
+
+      # Update firm filter choices if firm data loaded
+      if (!is.null(datasets$firmsectormap) && nrow(datasets$firmsectormap) > 0) {
+        new_firm_choices <- build_grouped_firm_choices(datasets$firmsectormap)
+        updateSelectizeInput(session, "firm_filter", choices = new_firm_choices, selected = "All")
+        updateSelectizeInput(session, "firm_filter_region", choices = new_firm_choices, selected = "All")
+      }
 
       # Mark as loaded
       data_state$techmap_loaded <- TRUE
@@ -1268,6 +1368,68 @@ server <- function(input, output, session) {
     rm <- get_regionmap()
     !is.null(rm) && nrow(rm) > 0
   })
+
+  # Helper to get current firmmap
+  get_firmmap <- reactive({
+    lf <- loaded_data$firmmap
+    if (!is.null(lf) && is.data.frame(lf) && nrow(lf) > 0) {
+      lf
+    } else {
+      firmmap
+    }
+  })
+
+  # Helper to get current firmsectormap
+  get_firmsectormap <- reactive({
+    lf <- loaded_data$firmsectormap
+    if (!is.null(lf) && is.data.frame(lf) && nrow(lf) > 0) {
+      lf
+    } else {
+      firmsectormap
+    }
+  })
+
+  # Resolve firm filter selection to a set of docdb_family_ids
+  # Returns NULL if "All" is selected (meaning no filtering)
+  get_firm_filtered_ids <- function(firm_selection) {
+    if (is.null(firm_selection) || "All" %in% firm_selection) {
+      return(NULL)  # No filtering
+    }
+    current_firmmap <- get_firmmap()
+    current_firmsectormap <- get_firmsectormap()
+    if (is.null(current_firmmap) || is.null(current_firmsectormap)) {
+      return(NULL)
+    }
+
+    # Separate sector selections (prefixed with "sector:") from individual firm selections
+    sector_selections <- grep("^sector:", firm_selection, value = TRUE)
+    sector_names <- sub("^sector:", "", sector_selections)
+    firm_selections <- setdiff(firm_selection, sector_selections)
+
+    # Get firms from selected sectors
+    firms_from_sectors <- character(0)
+    if (length(sector_names) > 0) {
+      firms_from_sectors <- current_firmsectormap %>%
+        filter(sector %in% sector_names) %>%
+        pull(company_raw) %>%
+        unique()
+    }
+
+    # Combine with individually selected firms
+    all_firms <- unique(c(firms_from_sectors, firm_selections))
+
+    if (length(all_firms) == 0) {
+      return(NULL)
+    }
+
+    # Get docdb_family_ids for these firms
+    filtered_ids <- current_firmmap %>%
+      filter(company_raw %in% all_firms) %>%
+      pull(docdb_family_id) %>%
+      unique()
+
+    filtered_ids
+  }
 
   # Track window resize events
   observe({
@@ -1379,8 +1541,15 @@ server <- function(input, output, session) {
     aspect_ratio <- ifelse(plot_width > 1200, 0.5, ifelse(plot_width > 800, 0.6, 0.7))
     height_inches <- width_inches * aspect_ratio
 
+    # Apply firm filter
+    pdata_plot1 <- patchar_countrymap()
+    firm_ids <- get_firm_filtered_ids(input$firm_filter)
+    if (!is.null(firm_ids)) {
+      pdata_plot1 <- pdata_plot1 %>% filter(docdb_family_id %in% firm_ids)
+    }
+
     result <- plot_avstrax_by_country(
-      pdata = patchar_countrymap(),
+      pdata = pdata_plot1,
       classes = filtered_techmap,
       #green_classes = green_classes,
       country_code = selected_countries,
@@ -1445,6 +1614,12 @@ server <- function(input, output, session) {
       }
     }
 
+    # Check if firm filter is active - if so, skip precomputed data (can't filter pre-aggregated)
+    firm_ids <- get_firm_filtered_ids(input$firm_filter)
+    if (!is.null(firm_ids)) {
+      precomputed_data <- NULL
+    }
+
     # Only load and merge full data if pre-computed data is not available
     if (is.null(precomputed_data)) {
       # Require big datasets for on-the-fly computation
@@ -1453,6 +1628,10 @@ server <- function(input, output, session) {
       # We first implement the filter from the previous diagram; i.e. we restrict to the countries selected there...
       filtered <- patchar_countrymap() %>%
         filter(ctry_code %in% selected_countries )
+      # Apply firm filter
+      if (!is.null(firm_ids)) {
+        filtered <- filtered %>% filter(docdb_family_id %in% firm_ids)
+      }
     } else {
       # When using pre-computed data, we still need a minimal filtered for any fallback
       filtered <- NULL
@@ -1508,11 +1687,14 @@ server <- function(input, output, session) {
     # Try to load pre-computed data if available
     avstrax_data <- NULL
 
+    # Check if firm filter is active
+    firm_ids <- get_firm_filtered_ids(input$firm_filter)
+
     # Try to match tech selection to pre-computed data
     # World map shows data BY country for a specific technology, so uses by_country files
     tech_category <- match_tech_category(input$techs)
 
-    if (!is.null(tech_category)) {
+    if (!is.null(tech_category) && is.null(firm_ids)) {
       avstrax_data <- load_precomputed_by_country(prepdata_path, input$toflow, tech_category)
       if (!is.null(avstrax_data)) {
         message("World map using pre-computed data for tech: ", tech_category)
@@ -1543,6 +1725,11 @@ server <- function(input, output, session) {
       # Filter data by selected countries
       filtered <- patchar_countrymap() %>%
         filter(ctry_code %in% selected_countries)
+
+      # Apply firm filter
+      if (!is.null(firm_ids)) {
+        filtered <- filtered %>% filter(docdb_family_id %in% firm_ids)
+      }
 
       # Compute aggregated data for all countries
       avstrax_data <- compute_avstrax_for_techs(filtered, input$toflow, filtered_classes)
@@ -1954,8 +2141,15 @@ server <- function(input, output, session) {
     aspect_ratio <- ifelse(plot_width > 1200, 0.5, ifelse(plot_width > 800, 0.6, 0.7))
     height_inches <- width_inches * aspect_ratio
 
+    # Apply firm filter
+    pdata_region_plot1 <- patchar_regionmap()
+    firm_ids <- get_firm_filtered_ids(input$firm_filter_region)
+    if (!is.null(firm_ids)) {
+      pdata_region_plot1 <- pdata_region_plot1 %>% filter(docdb_family_id %in% firm_ids)
+    }
+
     result <- plot_avstrax_by_country(
-      pdata = patchar_regionmap(),
+      pdata = pdata_region_plot1,
       classes = filtered_techmap,
       country_code = selected_regions,
       toflow = input$toflow_region,
@@ -2016,6 +2210,12 @@ server <- function(input, output, session) {
       }
     }
 
+    # Check if firm filter is active - if so, skip precomputed data
+    firm_ids <- get_firm_filtered_ids(input$firm_filter_region)
+    if (!is.null(firm_ids)) {
+      precomputed_data <- NULL
+    }
+
     # Only load and merge full data if pre-computed data is not available
     if (is.null(precomputed_data)) {
       # Get region data and validate it has required columns
@@ -2026,6 +2226,10 @@ server <- function(input, output, session) {
       # Filter by selected regions
       filtered <- region_data %>%
         filter(ctry_code %in% selected_regions)
+      # Apply firm filter
+      if (!is.null(firm_ids)) {
+        filtered <- filtered %>% filter(docdb_family_id %in% firm_ids)
+      }
     } else {
       filtered <- NULL
     }
@@ -2082,11 +2286,14 @@ server <- function(input, output, session) {
     # Try to load pre-computed data if available
     avstrax_data <- NULL
 
+    # Check if firm filter is active
+    firm_ids <- get_firm_filtered_ids(input$firm_filter_region)
+
     # Try to match tech selection to pre-computed data
     # UK regions map shows data BY region for a specific technology, so uses by_region files
     tech_category <- match_tech_category(input$techs_region)
 
-    if (!is.null(tech_category)) {
+    if (!is.null(tech_category) && is.null(firm_ids)) {
       avstrax_data <- load_precomputed_by_region(prepdata_path, input$toflow_region, tech_category)
       if (!is.null(avstrax_data)) {
         message("UK regions map using pre-computed data for tech: ", tech_category)
@@ -2120,6 +2327,11 @@ server <- function(input, output, session) {
 
       filtered <- region_data %>%
         filter(ctry_code %in% selected_regions)
+
+      # Apply firm filter
+      if (!is.null(firm_ids)) {
+        filtered <- filtered %>% filter(docdb_family_id %in% firm_ids)
+      }
 
       # Compute aggregated data for all regions
       avstrax_data <- compute_avstrax_for_techs(filtered, input$toflow_region, filtered_classes)
