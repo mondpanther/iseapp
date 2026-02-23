@@ -2,7 +2,7 @@
 '$schema' = 'https://cdn.posit.co/publisher/schemas/posit-publishing-record-schema-v3.json'
 server_type = 'connect_cloud'
 server_url = 'https://connect.posit.cloud'
-client_version = '1.31.8'
+client_version = '1.35.0'
 created_at = ''
 dismissed_at = ''
 type = 'r-shiny'
@@ -11,8 +11,8 @@ id = '019c34f8-ebab-0595-53bd-06ea9b9a8c56'
 dashboard_url = 'https://connect.posit.cloud/zevross-spatial/content/019c34f8-ebab-0595-53bd-06ea9b9a8c56'
 direct_url = 'https://019c34f8-ebab-0595-53bd-06ea9b9a8c56.share.connect.posit.cloud'
 logs_url = 'https://connect.posit.cloud/zevross-spatial/content/019c34f8-ebab-0595-53bd-06ea9b9a8c56/history'
-deployed_at = '2026-02-19T10:19:07-05:00'
-bundle_id = '019c7677-9d1f-0744-8c47-59a50b736e0d'
+deployed_at = '2026-02-23T16:08:02-05:00'
+bundle_id = '019c8c51-4a24-b721-6905-eb349d1d5865'
 files = [
   '.posit/publish/Innovation Strategy Explorer-SDHC.toml',
   '.posit/publish/deployments/deployment-HPUI.toml',
