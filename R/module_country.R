@@ -787,8 +787,8 @@ country_module_server <- function(id, parent_session) {
       })
       
       # Chart 1: Main avstrax plot
-      # output$avstrax_plot1 <- ggiraph::renderGirafe({
-      output$avstrax_plot1 <- highcharter::renderHighchart({
+      output$avstrax_plot1 <- ggiraph::renderGirafe({
+      # output$avstrax_plot1 <- highcharter::renderHighchart({
         req(input$country, input$toflow, input$tech_categories_plot1, input$widthscale, input$display_mode, !is.null(input$show_top3_ids))
         # req(window_dims$initialized)  # Wait for valid dimensions (important for bookmark restoration)
 
@@ -890,30 +890,6 @@ country_module_server <- function(id, parent_session) {
           return(NULL)
         }
 
-        # # Check if we can use pre-computed data:
-        # # 1. No comparison technologies (pre-computation doesn't cover comparisons)
-        # # 2. Technology selection matches a known category
-        # # Note: by_country files aggregate BY country for a specific technology category
-        # if (is.null(input$techs_comparison) || length(input$techs_comparison) == 0) {
-        #   # Try to match tech selection to a pre-computed category
-        #   tech_category <- match_tech_category(input$techs)
-
-        #   if (!is.null(tech_category)) {
-        #     # Try to load pre-computed data - by_country files are keyed by tech_category only
-        #     precomputed_data <- load_precomputed_by_country(prepdata_path, input$toflow, tech_category)
-        #     if (!is.null(precomputed_data)) {
-        #       message("Using pre-computed data for tech category: ", tech_category)
-        #       # Filter precomputed data to selected countries if needed
-        #       # BUT keep the "All" row which is needed for computing the average line
-        #       selected_countries <- expand_country_selection(input$country)
-        #       if (!is.null(precomputed_data$ctry_code)) {
-        #         precomputed_data <- precomputed_data %>%
-        #           filter(ctry_code %in% selected_countries | ctry_code == "All")
-        #       }
-        #     }
-        #   }
-        # }
-
         # When using pre-computed data, we still need a minimal filtered for any fallback
         filtered <- NULL
 
@@ -989,22 +965,6 @@ country_module_server <- function(id, parent_session) {
         if (is.null(avstrax_data) || nrow(avstrax_data) == 0) {
           return(NULL)
         }
-
-        # Try to match tech selection to pre-computed data
-        # World map shows data BY country for a specific technology, so uses by_country files
-        # tech_category <- match_tech_category(input$techs)
-
-        # if (!is.null(tech_category)) {
-        #   avstrax_data <- load_precomputed_by_country(prepdata_path, input$toflow, tech_category)
-        #   if (!is.null(avstrax_data)) {
-        #     message("World map using pre-computed data for tech: ", tech_category)
-        #     # Filter to selected countries
-        #     if (!is.null(avstrax_data$ctry_code)) {
-        #       avstrax_data <- avstrax_data %>%
-        #         filter(ctry_code %in% selected_countries)
-        #     }
-        #   }
-        # }
 
         # Filter by minimum innovations
         avstrax_data <- avstrax_data %>%
