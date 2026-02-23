@@ -195,15 +195,13 @@ region_module_ui <- function(id) {
       bslib::nav_panel(
         "Returns by Technology",
         shiny::div(
-          style = "padding: 20px;",
-          ggiraph::girafeOutput(ns("avstrax_plot1_region"), width = "100%", height = "auto")
+          ggiraph::girafeOutput(ns("avstrax_plot1_region"), width = "100%")
         )
       ),
       
       bslib::nav_panel(
         "Returns by Region",
         shiny::div(
-          style = "padding: 20px;",
           ggiraph::girafeOutput(ns("avstrax_plot2_region"), width = "100%", height = "auto")
         )
       ),
@@ -211,7 +209,6 @@ region_module_ui <- function(id) {
       bslib::nav_panel(
         "UK Map",
         shiny::div(
-          style = "padding: 20px;",
           shiny::h3("UK Regions Map: Returns"),
           leaflet::leafletOutput(ns("uk_regions_map"), width = "100%", height = "500px")
         )
@@ -220,7 +217,6 @@ region_module_ui <- function(id) {
       bslib::nav_panel(
         "RTA",
         shiny::div(
-          style = "padding: 20px;",
           shiny::h3("RTA by Region"),
           ggiraph::girafeOutput(ns("avstrax_plot2_region_rta"), width = "100%", height = "auto"),
           shiny::tags$br(),
@@ -405,8 +401,8 @@ region_module_server <- function(id, parent_session) {
           widthscale = input$widthscale_region,
           display_mode = input$display_mode_region,
           show_top3_ids = input$show_top3_ids_region,
-          width_svg = width_inches,
-          height_svg = height_inches,
+          # width_svg = width_inches,
+          # height_svg = height_inches,
           plot_title = sub("^[^.]*\\.", "", flow_label),
           precomputed_data = precomputed_avstrax_region()
         )
