@@ -27,7 +27,9 @@ country_module_sidebar <- function(id) {
         shiny::selectizeInput(
           ns("firm"),
           "Firm Filter:",
-          choices = c("All Firms", "Hitachi", "No Firm"),
+          choices = c("All Firms" = "All Firms", 
+              "Firm A" = "Hitachi", 
+              "No Firm" = "No Firm"),
           selected = "All Firms",
           multiple = FALSE
         )
@@ -147,7 +149,7 @@ country_module_ui <- function(id) {
       bslib::nav_panel(
         "Returns by Technology",
         shiny::div(
-          ggiraph::girafeOutput(ns("avstrax_plot1"), height = "100%")
+          ggiraph::girafeOutput(ns("avstrax_plot1"), width = "100%", height = "auto")
           # highcharter::highchartOutput(ns("avstrax_plot1"), height = "600px")
         )
       ),
@@ -155,15 +157,14 @@ country_module_ui <- function(id) {
       bslib::nav_panel(
         "Returns by Country",
         shiny::div(
-          ggiraph::girafeOutput(ns("avstrax_plot2"), height = "auto")
+          ggiraph::girafeOutput(ns("avstrax_plot2"), width = "100%", height = "auto")
         )
       ),
       
       bslib::nav_panel(
         "World Map",
         shiny::div(
-          shiny::h3("World Map: Returns"),
-          plotly::plotlyOutput(ns("world_map"), height = "500px")
+          plotly::plotlyOutput(ns("world_map"), width = "100%", height = "auto")
         )
       )
     )
@@ -918,8 +919,8 @@ country_module_server <- function(id, parent_session) {
           widthscale = input$widthscale,
           display_mode = input$display_mode,
           show_top3_ids = input$show_top3_ids,
-          width_svg = width_inches,
-          height_svg = height_inches,
+          # width_svg = width_inches,
+          # height_svg = height_inches,
           plot_title = sub("^[^.]*\\.", "", flow_label),
           comparison_technologies = input$techs_comparison,
           precomputed_avstrax = precomputed_data
@@ -977,7 +978,7 @@ country_module_server <- function(id, parent_session) {
           avstrax_data = avstrax_data,
           value_col = "mean",
           color_scale = "Viridis",
-          plot_title = paste0("World Map: ", sub("^[^.]*\\.", "", flow_label)),
+          plot_title = paste0(sub("^[^.]*\\.", "", flow_label)),
           is_return = is_return
         )
       })

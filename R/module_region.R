@@ -195,7 +195,7 @@ region_module_ui <- function(id) {
       bslib::nav_panel(
         "Returns by Technology",
         shiny::div(
-          ggiraph::girafeOutput(ns("avstrax_plot1_region"), width = "100%")
+          ggiraph::girafeOutput(ns("avstrax_plot1_region"), width = "100%", height = "auto")
         )
       ),
       
@@ -209,7 +209,7 @@ region_module_ui <- function(id) {
       bslib::nav_panel(
         "UK Map",
         shiny::div(
-          shiny::h3("UK Regions Map: Returns"),
+          # shiny::h3("UK Regions Map: Returns"),
           leaflet::leafletOutput(ns("uk_regions_map"), width = "100%", height = "500px")
         )
       ),
@@ -223,7 +223,7 @@ region_module_ui <- function(id) {
           shiny::h3("RTA vs Returns"),
           ggiraph::girafeOutput(ns("rta_returns_scatter_region"), width = "100%", height = "auto"),
           shiny::tags$br(),
-          shiny::h3("UK Regions Map: RTA"),
+          shiny::h3("RTA by Region Map"),
           leaflet::leafletOutput(ns("uk_regions_map_rta"), width = "100%", height = "500px")
         )
       )
