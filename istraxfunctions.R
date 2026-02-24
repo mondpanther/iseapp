@@ -2216,6 +2216,225 @@ plot_uk_regions_map <- function(avstrax_data,
 }
 
 
+#' Create a static ggplot2 world choropleth map (for PDF/vector export)
+#' Uses ggplot2::map_data("world") with geom_polygon (no sf dependency for rendering)
+#' @param avstrax_data Data frame with ctry_code (ISO2) and value columns
+#' @param value_col Column name for values to display (default: "mean")
+#' @param plot_title Title for the map
+#' @param is_return Logical, TRUE if values are percentages (returns)
+#' @return A ggplot2 object
+plot_world_map_gg <- function(avstrax_data,
+                              value_col = "mean",
+                              plot_title = "Returns by Country",
+                              is_return = TRUE) {
+  library(ggplot2)
+  library(countrycode)
+
+  tryCatch({
+    map_data <- avstrax_data %>%
+      filter(ctry_code != "All") %>%
+      mutate(
+        country_name = countrycode(ctry_code, origin = "iso2c", destination = "country.name.en"),
+        map_value = as.numeric(!!sym(value_col))
+      ) %>%
+      filter(!is.na(country_name), !is.na(map_value))
+
+    if (nrow(map_data) == 0) {
+      return(ggplot() + annotate("text", x = 0, y = 0, label = "No data available") + theme_void())
+    }
+
+    is_rta <- value_col == "RTA"
+
+    # Use ggplot2::map_data which returns a plain data frame (no sf needed)
+    world_poly <- ggplot2::map_data("world")
+
+    # Map ISO2 codes to maps::world region names (which differ for some countries)
+    map_data <- map_data %>%
+      mutate(region = countrycode(ctry_code, origin = "iso2c", destination = "country.name",
+                                  custom_match = c(
+                                    "US" = "USA", "GB" = "UK", "RU" = "Russia",
+                                    "KR" = "South Korea", "KP" = "North Korea",
+                                    "CZ" = "Czech Republic", "SK" = "Slovakia",
+                                    "TW" = "Taiwan", "CD" = "Democratic Republic of the Congo",
+                                    "CG" = "Republic of Congo", "CI" = "Ivory Coast",
+                                    "TT" = "Trinidad", "VN" = "Vietnam",
+                                    "MM" = "Myanmar", "LA" = "Laos",
+                                    "SY" = "Syria", "IR" = "Iran",
+                                    "BO" = "Bolivia", "VE" = "Venezuela",
+                                    "TZ" = "Tanzania", "MK" = "North Macedonia",
+                                    "PS" = "Palestine", "BN" = "Brunei",
+                                    "SZ" = "Eswatini", "VA" = "Vatican"
+                                  )))
+
+    # Merge data with polygon coordinates
+    world_merged <- world_poly %>%
+      left_join(map_data %>% select(region, map_value), by = "region")
+
+    if (is_rta) {
+      max_dev <- max(abs(max(map_data$map_value, na.rm = TRUE) - 1),
+                     abs(1 - min(map_data$map_value, na.rm = TRUE)))
+      p <- ggplot(world_merged, aes(x = long, y = lat, group = group)) +
+        geom_polygon(aes(fill = map_value), color = "white", linewidth = 0.15) +
+        scale_fill_gradient2(
+          low = "#08306B", mid = "#FFFFFF", high = "#B2182B",
+          midpoint = 1, na.value = "lightgray", name = "RTA",
+          limits = c(1 - max_dev, 1 + max_dev)
+        )
+    } else {
+      p <- ggplot(world_merged, aes(x = long, y = lat, group = group)) +
+        geom_polygon(aes(fill = map_value), color = "white", linewidth = 0.15) +
+        scale_fill_viridis_c(
+          na.value = "lightgray",
+          name = if (is_return) "Return (%)" else "Value ($M)"
+        )
+    }
+
+    p <- p +
+      coord_fixed(1.3) +
+      labs(title = plot_title) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+        legend.position = "right",
+        panel.grid.major = element_line(color = "grey90"),
+        axis.text = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank()
+      )
+
+    return(p)
+  }, error = function(e) {
+    message("plot_world_map_gg error: ", e$message)
+    return(NULL)
+  })
+}
+
+
+#' Create a static ggplot2 UK regions choropleth map (for PDF/vector export)
+#' Converts sf polygons to a plain data frame and uses geom_polygon
+#' @param avstrax_data Data frame with ctry_code (NUTS1 codes) and value columns
+#' @param value_col Column name for values to display (default: "mean")
+#' @param plot_title Title for the map
+#' @param is_return Logical, TRUE if values are percentages (returns)
+#' @return A ggplot2 object
+plot_uk_regions_map_gg <- function(avstrax_data,
+                                    value_col = "mean",
+                                    plot_title = "Returns by UK Region",
+                                    is_return = TRUE) {
+  library(ggplot2)
+  library(sf)
+
+  tryCatch({
+    uk_regions_names <- c(
+      "UKC" = "North East England", "UKD" = "North West England",
+      "UKE" = "Yorkshire and The Humber", "UKF" = "East Midlands",
+      "UKG" = "West Midlands", "UKH" = "East of England",
+      "UKI" = "London", "UKJ" = "South East England",
+      "UKK" = "South West England", "UKL" = "Wales",
+      "UKM" = "Scotland", "UKN" = "Northern Ireland"
+    )
+
+    if (!exists(".uk_nuts1_sf", envir = .GlobalEnv)) {
+      return(ggplot() + annotate("text", x = 0, y = 0, label = "Region boundaries not loaded") + theme_void())
+    }
+    uk_sf <- get(".uk_nuts1_sf", envir = .GlobalEnv)
+    if (is.null(uk_sf)) {
+      return(ggplot() + annotate("text", x = 0, y = 0, label = "Region boundaries not available") + theme_void())
+    }
+
+    if (!value_col %in% names(avstrax_data)) {
+      return(ggplot() + annotate("text", x = 0, y = 0, label = paste0("Column '", value_col, "' not found")) + theme_void())
+    }
+
+    map_data <- avstrax_data %>%
+      filter(ctry_code != "All", ctry_code %in% names(uk_regions_names)) %>%
+      mutate(region_name = uk_regions_names[ctry_code], map_value = as.numeric(!!sym(value_col))) %>%
+      filter(!is.na(map_value))
+
+    if (nrow(map_data) == 0) {
+      return(ggplot() + annotate("text", x = 0, y = 0, label = "No data available for UK regions") + theme_void())
+    }
+
+    is_rta <- value_col == "RTA"
+
+    nuts_col <- if ("NUTS121CD" %in% names(uk_sf)) "NUTS121CD" else
+                if ("NUTS1CD" %in% names(uk_sf)) "NUTS1CD" else
+                names(uk_sf)[grepl("NUTS.*CD", names(uk_sf), ignore.case = TRUE)][1]
+
+    if (is.null(nuts_col)) {
+      return(ggplot() + annotate("text", x = 0, y = 0, label = "Could not identify NUTS code column") + theme_void())
+    }
+
+    # Convert sf polygons to a plain data frame for geom_polygon
+    uk_sf$nuts_code <- uk_sf[[nuts_col]]
+    uk_sf$feature_id <- seq_len(nrow(uk_sf))
+
+    uk_coords <- do.call(rbind, lapply(seq_len(nrow(uk_sf)), function(i) {
+      geom <- sf::st_geometry(uk_sf[i, ])[[1]]
+      nuts <- uk_sf$nuts_code[i]
+      fid <- uk_sf$feature_id[i]
+
+      if (inherits(geom, "MULTIPOLYGON")) {
+        polys <- geom
+      } else {
+        polys <- list(geom)
+      }
+
+      do.call(rbind, lapply(seq_along(polys), function(j) {
+        ring <- polys[[j]]
+        if (is.list(ring)) ring <- ring[[1]]
+        coords <- as.data.frame(ring)
+        names(coords) <- c("long", "lat")
+        coords$nuts_code <- nuts
+        coords$group <- paste0(fid, ".", j)
+        coords$order <- seq_len(nrow(coords))
+        coords
+      }))
+    }))
+
+    # Merge with data values
+    uk_coords <- uk_coords %>%
+      left_join(map_data %>% select(ctry_code, region_name, map_value),
+                by = c("nuts_code" = "ctry_code"))
+
+    if (is_rta) {
+      max_dev <- max(abs(max(map_data$map_value, na.rm = TRUE) - 1),
+                     abs(1 - min(map_data$map_value, na.rm = TRUE)))
+      p <- ggplot(uk_coords, aes(x = long, y = lat, group = group)) +
+        geom_polygon(aes(fill = map_value), color = "white", linewidth = 0.3) +
+        scale_fill_gradient2(
+          low = "#08306B", mid = "#FFFFFF", high = "#B2182B",
+          midpoint = 1, na.value = "#E0E0E0", name = "RTA",
+          limits = c(1 - max_dev, 1 + max_dev)
+        )
+    } else {
+      p <- ggplot(uk_coords, aes(x = long, y = lat, group = group)) +
+        geom_polygon(aes(fill = map_value), color = "white", linewidth = 0.3) +
+        scale_fill_viridis_c(
+          na.value = "#E0E0E0",
+          name = if (is_return) "Return (%)" else "Value ($M)"
+        )
+    }
+
+    p <- p +
+      coord_fixed(1.3) +
+      labs(title = plot_title) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+        legend.position = "right",
+        panel.grid.major = element_line(color = "grey90"),
+        axis.text = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank()
+      )
+
+    return(p)
+  }, error = function(e) {
+    message("plot_uk_regions_map_gg error: ", e$message)
+    return(NULL)
+  })
+}
 
 
 # Function to detect local Dropbox path from Dropbox's config file

@@ -581,6 +581,15 @@ plot_download_buttons <- function(plot_id) {
   )
 }
 
+# Helper to create download button pair for maps (PDF vector format + CSV)
+map_download_buttons <- function(plot_id) {
+  tags$div(
+    class = "plot-download-buttons",
+    downloadButton(paste0("dl_pdf_", plot_id), "PDF", class = "btn-sm btn-outline-secondary"),
+    downloadButton(paste0("dl_csv_", plot_id), "Data (CSV)", class = "btn-sm btn-outline-secondary")
+  )
+}
+
 # Define UI
 ui <- function(request){fluidPage(
   # Add Google Font
@@ -1013,7 +1022,8 @@ ui <- function(request){fluidPage(
           id = "returnsContainer",
           tags$br(),
           tags$h4("World Map: Returns"),
-          withSpinner(plotlyOutput("world_map", width = "100%", height = "500px"), type = 4, color = "#3498db")
+          withSpinner(plotlyOutput("world_map", width = "100%", height = "500px"), type = 4, color = "#3498db"),
+          map_download_buttons("world_map")
         )
       ),
       tags$br(),
@@ -1071,7 +1081,8 @@ ui <- function(request){fluidPage(
       ),
       tags$br(),
       tags$h4("World Map: RTA"),
-      withSpinner(plotlyOutput("world_map_rta", width = "100%", height = "500px"), type = 4, color = "#e74c3c")
+      withSpinner(plotlyOutput("world_map_rta", width = "100%", height = "500px"), type = 4, color = "#e74c3c"),
+      map_download_buttons("world_map_rta")
     ),
 
     # Tab 2: Region Explorer
@@ -1184,7 +1195,8 @@ ui <- function(request){fluidPage(
           id = "returnsContainer_region",
           tags$br(),
           tags$h4("UK Regions Map: Returns"),
-          withSpinner(leafletOutput("uk_regions_map", width = "100%", height = "500px"), type = 4, color = "#3498db")
+          withSpinner(leafletOutput("uk_regions_map", width = "100%", height = "500px"), type = 4, color = "#3498db"),
+          map_download_buttons("uk_regions_map")
         )
       ),
       tags$br(),
@@ -1239,7 +1251,8 @@ ui <- function(request){fluidPage(
       ),
       tags$br(),
       tags$h4("UK Regions Map: RTA"),
-      withSpinner(leafletOutput("uk_regions_map_rta", width = "100%", height = "500px"), type = 4, color = "#e74c3c")
+      withSpinner(leafletOutput("uk_regions_map_rta", width = "100%", height = "500px"), type = 4, color = "#e74c3c"),
+      map_download_buttons("uk_regions_map_rta")
     )
   )
 )
@@ -1741,12 +1754,20 @@ server <- function(input, output, session) {
 
     # Determine if this is a return (%) or spillover ($) variable
     is_return <- grepl("strax", input$toflow)
+    map_title <- paste0("World Map: ", sub("^[^.]*\\.", "", flow_label))
+
+    # Store ggplot version and data for PDF/CSV downloads
+    plot_store$world_map_gg <- plot_world_map_gg(
+      avstrax_data = avstrax_data, value_col = "mean",
+      plot_title = map_title, is_return = is_return
+    )
+    plot_store$world_map_data <- avstrax_data
 
     plot_world_map(
       avstrax_data = avstrax_data,
       value_col = "mean",
       color_scale = "Viridis",
-      plot_title = paste0("World Map: ", sub("^[^.]*\\.", "", flow_label)),
+      plot_title = map_title,
       is_return = is_return
     )
   })
@@ -1893,6 +1914,13 @@ server <- function(input, output, session) {
       avstrax_data <- avstrax_data %>%
         filter(Allinnos >= input$minallinnos_rta)
     }
+
+    # Store ggplot version and data for PDF/CSV downloads
+    plot_store$world_map_rta_gg <- plot_world_map_gg(
+      avstrax_data = avstrax_data, value_col = "RTA",
+      plot_title = "World Map: RTA Index", is_return = FALSE
+    )
+    plot_store$world_map_rta_data <- avstrax_data
 
     # Plot RTA on world map (RTA is always an index, not a percentage or dollar value)
     plot_world_map(
@@ -2343,11 +2371,19 @@ server <- function(input, output, session) {
 
     # Determine if this is a return (%) or spillover ($) variable
     is_return <- grepl("strax", input$toflow_region)
+    map_title <- paste0("UK Regions: ", sub("^[^.]*\\.", "", flow_label))
+
+    # Store ggplot version and data for PDF/CSV downloads
+    plot_store$uk_regions_map_gg <- plot_uk_regions_map_gg(
+      avstrax_data = avstrax_data, value_col = "mean",
+      plot_title = map_title, is_return = is_return
+    )
+    plot_store$uk_regions_map_data <- avstrax_data
 
     plot_uk_regions_map(
       avstrax_data = avstrax_data,
       value_col = "mean",
-      plot_title = paste0("UK Regions: ", sub("^[^.]*\\.", "", flow_label)),
+      plot_title = map_title,
       is_return = is_return
     )
   })
@@ -2592,6 +2628,13 @@ server <- function(input, output, session) {
         filter(Allinnos >= input$minallinnos_rta_region)
     }
 
+    # Store ggplot version and data for PDF/CSV downloads
+    plot_store$uk_regions_map_rta_gg <- plot_uk_regions_map_gg(
+      avstrax_data = avstrax_data, value_col = "RTA",
+      plot_title = "UK Regions: RTA Index", is_return = FALSE
+    )
+    plot_store$uk_regions_map_rta_data <- avstrax_data
+
     # Plot RTA on UK regions map (RTA is always an index)
     plot_uk_regions_map(
       avstrax_data = avstrax_data,
@@ -2612,6 +2655,25 @@ server <- function(input, output, session) {
         p <- plot_reactive()
         if (!is.null(p)) {
           ggplot2::ggsave(file, plot = p, device = "svg", width = 10, height = 6)
+        }
+      }
+    )
+  }
+
+  make_pdf_handler <- function(plot_reactive, filename_prefix, width = 12, height = 7) {
+    downloadHandler(
+      filename = function() paste0(filename_prefix, "_", Sys.Date(), ".pdf"),
+      content = function(file) {
+        p <- plot_reactive()
+        if (!is.null(p)) {
+          tryCatch(
+            ggplot2::ggsave(file, plot = p, device = "pdf", width = width, height = height),
+            error = function(e) {
+              message("PDF export error for ", filename_prefix, ": ", e$message)
+            }
+          )
+        } else {
+          message("PDF export: plot object is NULL for ", filename_prefix)
         }
       }
     )
@@ -2675,6 +2737,27 @@ server <- function(input, output, session) {
     reactive(plot_store$rta_returns_scatter_region_gg), "rta_vs_returns_region")
   output$dl_csv_rta_returns_scatter_region <- make_csv_handler(
     reactive(plot_store$rta_returns_scatter_region_data), "rta_vs_returns_region_data")
+
+  # Map downloads (PDF vector format + CSV)
+  output$dl_pdf_world_map <- make_pdf_handler(
+    reactive(plot_store$world_map_gg), "world_map_returns")
+  output$dl_csv_world_map <- make_csv_handler(
+    reactive(plot_store$world_map_data), "world_map_returns_data")
+
+  output$dl_pdf_world_map_rta <- make_pdf_handler(
+    reactive(plot_store$world_map_rta_gg), "world_map_rta")
+  output$dl_csv_world_map_rta <- make_csv_handler(
+    reactive(plot_store$world_map_rta_data), "world_map_rta_data")
+
+  output$dl_pdf_uk_regions_map <- make_pdf_handler(
+    reactive(plot_store$uk_regions_map_gg), "uk_regions_map_returns")
+  output$dl_csv_uk_regions_map <- make_csv_handler(
+    reactive(plot_store$uk_regions_map_data), "uk_regions_map_returns_data")
+
+  output$dl_pdf_uk_regions_map_rta <- make_pdf_handler(
+    reactive(plot_store$uk_regions_map_rta_gg), "uk_regions_map_rta")
+  output$dl_csv_uk_regions_map_rta <- make_csv_handler(
+    reactive(plot_store$uk_regions_map_rta_data), "uk_regions_map_rta_data")
 
 }
 
