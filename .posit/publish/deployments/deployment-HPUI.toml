@@ -11,8 +11,8 @@ id = '019c34f8-ebab-0595-53bd-06ea9b9a8c56'
 dashboard_url = 'https://connect.posit.cloud/zevross-spatial/content/019c34f8-ebab-0595-53bd-06ea9b9a8c56'
 direct_url = 'https://019c34f8-ebab-0595-53bd-06ea9b9a8c56.share.connect.posit.cloud'
 logs_url = 'https://connect.posit.cloud/zevross-spatial/content/019c34f8-ebab-0595-53bd-06ea9b9a8c56/history'
-deployed_at = '2026-02-23T16:08:02-05:00'
-bundle_id = '019c8c51-4a24-b721-6905-eb349d1d5865'
+deployed_at = '2026-02-23T20:00:15-05:00'
+bundle_id = '019c8d27-25a1-a77d-24a7-a78d5769545f'
 files = [
   '.posit/publish/Innovation Strategy Explorer-SDHC.toml',
   '.posit/publish/deployments/deployment-HPUI.toml',
@@ -31,6 +31,7 @@ files = [
   'R/onLoadUnload.R',
   'R/runAppPackage.R',
   'R/server.R',
+  'R/themes.R',
   'R/ui.R',
   'R/utils_url_restore.R',
   'app.R',
