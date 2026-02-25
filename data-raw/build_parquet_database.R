@@ -13,13 +13,25 @@ cat("=== BUILDING PARQUET DATABASE ===\n\n")
 # 1. Load base maps
 cat("Loading base data...\n")
 countrymap <- read_fst("data-raw/big_files/countrymap.fst")
+regionmap <- read_fst("data-raw/big_files/regionmap.fst")
 techmap <- read_fst("data-raw/big_files/techmap.fst")
-firmmap <- read_fst("data-raw/big_files/firmmap.fst") |>
-  dplyr::filter(firm == "Hitachi")
+top_companies <- arrow::read_parquet("data-raw/big_files/firmmap.parquet") |>
+  dplyr::group_by(company_raw) |>
+  dplyr::count() |>
+  dplyr::arrange(desc(n)) |>
+  dplyr::ungroup() |>
+  dplyr::slice_head(n = 100) |>
+  dplyr::pull(company_raw)
+
+firmmap_top100 <- arrow::read_parquet("data-raw/big_files/firmmap.parquet") |>
+  dplyr::filter(company_raw %in% top_companies) |>
+  dplyr::rename(firm = company_raw)
 
 cat("  ✓ countrymap:", nrow(countrymap), "rows\n")
+cat("  ✓ regionmap:", nrow(regionmap), "rows\n")
 cat("  ✓ techmap:", nrow(techmap), "rows\n")
-cat("  ✓ firmmap:", nrow(firmmap), "rows\n\n")
+cat("  ✓ firmmap:", nrow(arrow::read_parquet("data-raw/big_files/firmmap.parquet")), "rows\n")
+cat("  ✓ firmmap top 100:", nrow(firmmap_top100), "rows\n\n")
 
 # 2. Find all istrax files
 cat("Finding istrax files...\n")
@@ -36,8 +48,8 @@ cat("  Found", length(istrax_files), "istrax files\n")
 print(basename(istrax_files))
 cat("\n")
 
-# 3. Load and join all istrax files
-cat("Loading istrax files...\n")
+# 3. Join BOTH country and region data
+cat("Joining country and region mappings...\n")
 istrax_data <- countrymap |>
   select(docdb_family_id, ctry_code)
 
@@ -60,9 +72,24 @@ for (file in istrax_files) {
 cat("  ✓ All istrax measures joined\n")
 cat("  Total columns:", ncol(istrax_data), "\n\n")
 
+# UK Region join
+patent_data <- istrax_data
+
+# Add region columns for GB patents
+patent_data <- patent_data |>
+  left_join(
+    regionmap |>
+      select(docdb_family_id, ctry_code, region_code, region_name),
+    by = c("docdb_family_id", "ctry_code"),
+    relationship = "many-to-many"
+  )
+
+cat("  ✓ Joined regionmap\n")
+cat("  Rows after region join:", nrow(patent_data), "\n\n")
+
 # 4. Join technologies
 cat("Joining technologies...\n")
-patent_data <- istrax_data |>
+patent_data <- patent_data |>
   left_join(
     techmap |>
       select(docdb_family_id, technology),
@@ -77,7 +104,7 @@ cat("  Rows after tech join:", nrow(patent_data), "\n\n")
 cat("Joining firms...\n")
 patent_data <- patent_data |>
   left_join(
-    firmmap |>
+    firmmap_top100 |>
       select(docdb_family_id, firm),
     by = "docdb_family_id",
     relationship = "many-to-many"
@@ -101,6 +128,7 @@ print(head(patent_data, 10))
 cat("\nUnique values:\n")
 cat("  Patents:", n_distinct(patent_data$docdb_family_id), "\n")
 cat("  Countries:", n_distinct(patent_data$ctry_code), "\n")
+cat("  Regions:", n_distinct(patent_data$region_code), "\n")
 cat("  Technologies:", n_distinct(patent_data$technology, na.rm = TRUE), "\n")
 cat("  Firms:", n_distinct(patent_data$firm, na.rm = TRUE), "\n\n")
 
