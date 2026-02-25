@@ -2,6 +2,13 @@
 # SQL query functions that replace the R-based compute functions.
 # All heavy data work (joins, filtering, aggregation) happens in DuckDB.
 # Functions return data frames in the same format the plotting functions expect.
+#
+# Performance notes:
+# - Uses pre-joined tables (istrax_country, istrax_region) created by prep_duckdb.Rmd
+#   to eliminate expensive runtime joins between istrax_values and countrymap/regionmap.
+# - Uses pre-computed patent count tables (country_patent_counts, region_patent_counts)
+#   to avoid repeated COUNT DISTINCT queries for RTA calculation.
+# - Uses TEMP tables to avoid scanning+joining data twice (main aggregation + extras).
 
 library(DBI)
 library(duckdb)
@@ -77,10 +84,11 @@ resolve_firm_filter <- function(con, firm_selection) {
 
 #' Build a SQL subquery clause to filter by firm
 #' @param firm_names Character vector of company_raw names, or NULL
+#' @param alias Table alias prefix for docdb_family_id (default "ic")
 #' @return SQL fragment string (empty string if no filter)
-firm_filter_sql <- function(firm_names) {
+firm_filter_sql <- function(firm_names, alias = "ic") {
   if (is.null(firm_names) || length(firm_names) == 0) return("")
-  paste0(" AND iv.docdb_family_id IN (SELECT DISTINCT docdb_family_id FROM firmmap WHERE company_raw IN ",
+  paste0(" AND ", alias, ".docdb_family_id IN (SELECT DISTINCT docdb_family_id FROM firmmap WHERE company_raw IN ",
          sql_in_list(firm_names), ")")
 }
 
@@ -92,9 +100,9 @@ firm_filter_sql <- function(firm_names) {
 
 #' Compute average istrax by technology category (DuckDB version)
 #'
-#' This is the SQL rewrite of compute_avstrax(). It joins istrax_values with
-#' countrymap and techmap inside DuckDB, groups by technology, and computes
-#' mean/sem/quantiles/top25/top50/top3_ids.
+#' Uses pre-joined istrax_country/istrax_region tables for fast queries.
+#' Materializes the shared CTE into a temp table to avoid scanning data twice
+#' (once for main aggregation, once for top25/top50/top3 extras).
 #'
 #' @param con DuckDB connection
 #' @param flow_type Flow type string (e.g. "istrax_global")
@@ -105,7 +113,7 @@ firm_filter_sql <- function(firm_names) {
 #' @param other_label If not NULL, technologies NOT in tech_categories are relabeled to this
 #'   (used for Plot 1's "Other" category)
 #' @param colorings Named list for greenclass assignment (passed through, applied in R)
-#' @param use_regionmap Logical; if TRUE, joins with regionmap instead of countrymap
+#' @param use_regionmap Logical; if TRUE, uses istrax_region instead of istrax_country
 #' @return Data frame with columns: technology, mean, innos, sem, q1, q2, q3,
 #'   top25, top50, top25_bin_mean, top50_bin_mean, top3_ids, top3_ids_url, greenclass
 duck_compute_avstrax <- function(con, flow_type, tech_categories = NULL,
@@ -114,11 +122,9 @@ duck_compute_avstrax <- function(con, flow_type, tech_categories = NULL,
                                   use_regionmap = FALSE) {
 
   scaler <- get_scaler(flow_type)
-  ff_sql <- firm_filter_sql(firm_names)
 
-  # Build the technology CASE WHEN for "Other" relabeling
+  # Technology column expression (with optional "Other" relabeling)
   if (!is.null(other_label) && !is.null(tech_categories)) {
-    # Technologies in tech_categories keep their name; all others become other_label
     tech_case <- paste0(
       "CASE WHEN t.technology IN ", sql_in_list(tech_categories),
       " THEN t.technology ELSE '", gsub("'", "''", other_label), "' END"
@@ -127,54 +133,69 @@ duck_compute_avstrax <- function(con, flow_type, tech_categories = NULL,
     tech_case <- "t.technology"
   }
 
-  # Choose map table and join/filter based on regionmap or countrymap
-  if (use_regionmap) {
-    map_join <- "JOIN regionmap rm ON iv.docdb_family_id = rm.docdb_family_id AND iv.ctry_code = rm.ctry_code"
-    map_filter <- paste0("AND rm.region_code IN ", sql_in_list(country_codes))
-    appln_col <- "rm.appln_id"
+  # Technology filter (independent of "Other" relabeling)
+  if (!is.null(tech_categories) && length(tech_categories) > 0 && is.null(other_label)) {
+    tech_filter_sql <- paste0("AND t.technology IN ", sql_in_list(tech_categories))
   } else {
-    map_join <- "JOIN countrymap cm ON iv.docdb_family_id = cm.docdb_family_id AND iv.ctry_code = cm.ctry_code"
-    map_filter <- paste0("AND iv.ctry_code IN ", sql_in_list(country_codes))
-    appln_col <- "cm.appln_id"
+    tech_filter_sql <- ""
   }
 
-  # --- Main aggregation query ---
-  # This mirrors compute_avstrax: join istrax_values with countrymap/regionmap on
-  # (docdb_family_id, ctry_code), join with techmap on docdb_family_id,
-  # select distinct (technology, docdb_family_id, value), group by technology
-  main_sql <- paste0("
+  # Choose pre-joined table and filter based on regionmap or countrymap
+  if (use_regionmap) {
+    src_table <- "istrax_region"
+    src_alias <- "ir"
+    country_filter <- paste0("AND ir.region_code IN ", sql_in_list(country_codes))
+    appln_col <- "ir.appln_id"
+  } else {
+    src_table <- "istrax_country"
+    src_alias <- "ic"
+    country_filter <- paste0("AND ic.ctry_code IN ", sql_in_list(country_codes))
+    appln_col <- "ic.appln_id"
+  }
+
+  ff_sql <- firm_filter_sql(firm_names, src_alias)
+
+  # --- Create temp table with the shared CTE result ---
+  # This avoids scanning+joining data twice (main + extras queries)
+  temp_sql <- paste0("
+    CREATE TEMP TABLE IF NOT EXISTS _avstrax_combined AS
     WITH base AS (
       SELECT DISTINCT
         ", tech_case, " AS technology,
-        iv.docdb_family_id,
+        ", src_alias, ".docdb_family_id,
         ", appln_col, " AS appln_id,
-        iv.value * ", scaler, " AS val
-      FROM istrax_values iv
-      ", map_join, "
+        ", src_alias, ".value * ", scaler, " AS val
+      FROM ", src_table, " ", src_alias, "
       JOIN techmap t
-        ON iv.docdb_family_id = t.docdb_family_id
-      WHERE iv.flow_type = '", gsub("'", "''", flow_type), "'
-        ", map_filter, "
+        ON ", src_alias, ".docdb_family_id = t.docdb_family_id
+      WHERE ", src_alias, ".flow_type = '", gsub("'", "''", flow_type), "'
+        ", country_filter, "
         AND t.technology != 'All'
+        ", tech_filter_sql, "
         ", ff_sql, "
     ),
     base_all AS (
       SELECT DISTINCT
         'All' AS technology,
-        iv.docdb_family_id,
+        ", src_alias, ".docdb_family_id,
         ", appln_col, " AS appln_id,
-        iv.value * ", scaler, " AS val
-      FROM istrax_values iv
-      ", map_join, "
-      WHERE iv.flow_type = '", gsub("'", "''", flow_type), "'
-        ", map_filter, "
+        ", src_alias, ".value * ", scaler, " AS val
+      FROM ", src_table, " ", src_alias, "
+      WHERE ", src_alias, ".flow_type = '", gsub("'", "''", flow_type), "'
+        ", country_filter, "
         ", ff_sql, "
-    ),
-    combined AS (
-      SELECT * FROM base
-      UNION ALL
-      SELECT * FROM base_all
     )
+    SELECT * FROM base
+    UNION ALL
+    SELECT * FROM base_all
+  ")
+
+  # Drop any leftover temp table, create new one
+  tryCatch(dbExecute(con, "DROP TABLE IF EXISTS _avstrax_combined"), error = function(e) NULL)
+  dbExecute(con, temp_sql)
+
+  # --- Main aggregation from temp table ---
+  main_sql <- "
     SELECT
       technology,
       AVG(val) AS mean,
@@ -186,13 +207,14 @@ duck_compute_avstrax <- function(con, flow_type, tech_categories = NULL,
       PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY val) AS q1,
       PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY val) AS q2,
       PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY val) AS q3
-    FROM combined
+    FROM _avstrax_combined
     GROUP BY technology
-  ")
+  "
 
   result <- dbGetQuery(con, main_sql)
 
   if (nrow(result) == 0) {
+    tryCatch(dbExecute(con, "DROP TABLE IF EXISTS _avstrax_combined"), error = function(e) NULL)
     return(data.frame(
       technology = character(0), mean = numeric(0), innos = integer(0),
       sem = numeric(0), q1 = numeric(0), q2 = numeric(0), q3 = numeric(0),
@@ -203,44 +225,12 @@ duck_compute_avstrax <- function(con, flow_type, tech_categories = NULL,
     ))
   }
 
-  # --- Top25/Top50 bin means + top3 appln_ids per technology ---
-  extras_sql <- paste0("
-    WITH base AS (
-      SELECT DISTINCT
-        ", tech_case, " AS technology,
-        iv.docdb_family_id,
-        ", appln_col, " AS appln_id,
-        iv.value * ", scaler, " AS val
-      FROM istrax_values iv
-      ", map_join, "
-      JOIN techmap t
-        ON iv.docdb_family_id = t.docdb_family_id
-      WHERE iv.flow_type = '", gsub("'", "''", flow_type), "'
-        ", map_filter, "
-        AND t.technology != 'All'
-        ", ff_sql, "
-    ),
-    base_all AS (
-      SELECT DISTINCT
-        'All' AS technology,
-        iv.docdb_family_id,
-        ", appln_col, " AS appln_id,
-        iv.value * ", scaler, " AS val
-      FROM istrax_values iv
-      ", map_join, "
-      WHERE iv.flow_type = '", gsub("'", "''", flow_type), "'
-        ", map_filter, "
-        ", ff_sql, "
-    ),
-    combined AS (
-      SELECT * FROM base
-      UNION ALL
-      SELECT * FROM base_all
-    ),
-    ranked AS (
+  # --- Top25/Top50 bin means + top3 appln_ids from same temp table ---
+  extras_sql <- "
+    WITH ranked AS (
       SELECT *,
         PERCENT_RANK() OVER (PARTITION BY technology ORDER BY val DESC) AS prank
-      FROM combined
+      FROM _avstrax_combined
     )
     SELECT
       technology,
@@ -254,9 +244,12 @@ duck_compute_avstrax <- function(con, flow_type, tech_categories = NULL,
       FROM ranked
     ) sub
     GROUP BY technology
-  ")
+  "
 
   extras <- dbGetQuery(con, extras_sql)
+
+  # Clean up temp table
+  tryCatch(dbExecute(con, "DROP TABLE IF EXISTS _avstrax_combined"), error = function(e) NULL)
 
   # Merge extras with main result
   result <- merge(result, extras, by = "technology", all.x = TRUE)
@@ -295,9 +288,8 @@ duck_compute_avstrax <- function(con, flow_type, tech_categories = NULL,
 
 #' Compute average istrax by country/region (DuckDB version)
 #'
-#' This is the SQL rewrite of compute_avstrax_for_techs(). It joins data,
-#' filters by technology, groups by ctry_code, and computes mean/sem/quantiles/
-#' top25/top50/top3_ids + RTA.
+#' Uses pre-joined istrax_country/istrax_region tables and pre-computed patent
+#' count tables for fast queries. Materializes shared CTE into temp table.
 #'
 #' @param con DuckDB connection
 #' @param flow_type Flow type string
@@ -305,8 +297,7 @@ duck_compute_avstrax <- function(con, flow_type, tech_categories = NULL,
 #'   If empty/NULL, includes all patents (no technology filter).
 #' @param country_codes Character vector of country codes
 #' @param firm_names Character vector of company_raw names, or NULL
-#' @param use_regionmap Logical; if TRUE, uses regionmap instead of countrymap
-#'   (for UK regions). Renames region_code -> ctry_code, region_name -> country_name.
+#' @param use_regionmap Logical; if TRUE, uses istrax_region instead of istrax_country
 #' @return Data frame with columns: ctry_code, [country_name], mean, innos, sem,
 #'   q1, q2, q3, top25, top50, top25_bin_mean, top50_bin_mean, top3_ids,
 #'   top3_ids_url, Allinnos, SumAllinnos, share_c, share, RTA
@@ -315,57 +306,50 @@ duck_compute_avstrax_for_techs <- function(con, flow_type, tech_filter = NULL,
                                             use_regionmap = FALSE) {
 
   scaler <- get_scaler(flow_type)
-  ff_sql <- firm_filter_sql(firm_names)
 
-  # Choose the map table and grouping columns
+  # Choose pre-joined table and grouping columns
   if (use_regionmap) {
-    map_table <- "regionmap"
-    map_join <- "iv.docdb_family_id = rm.docdb_family_id AND iv.ctry_code = rm.ctry_code"
-    group_col <- "rm.region_code"
-    name_col <- "rm.region_name"
-    country_filter <- paste0("rm.region_code IN ", sql_in_list(country_codes))
-    appln_col <- "rm.appln_id"
-    # For total counts (unfiltered by tech), use regionmap
-    count_table <- "regionmap"
-    count_group_col <- "region_code"
-    count_filter <- paste0("region_code IN ", sql_in_list(country_codes))
+    src_table <- "istrax_region"
+    src_alias <- "ir"
+    group_col <- "ir.region_code"
+    name_col <- "ir.region_name"
+    country_filter <- paste0("ir.region_code IN ", sql_in_list(country_codes))
+    appln_col <- "ir.appln_id"
+    count_table <- "region_patent_counts"
   } else {
-    map_table <- "countrymap"
-    map_join <- "iv.docdb_family_id = cm.docdb_family_id AND iv.ctry_code = cm.ctry_code"
-    group_col <- "cm.ctry_code"
+    src_table <- "istrax_country"
+    src_alias <- "ic"
+    group_col <- "ic.ctry_code"
     name_col <- "NULL"
-    country_filter <- paste0("cm.ctry_code IN ", sql_in_list(country_codes))
-    appln_col <- "cm.appln_id"
-    count_table <- "countrymap"
-    count_group_col <- "ctry_code"
-    count_filter <- paste0("ctry_code IN ", sql_in_list(country_codes))
+    country_filter <- paste0("ic.ctry_code IN ", sql_in_list(country_codes))
+    appln_col <- "ic.appln_id"
+    count_table <- "country_patent_counts"
   }
+
+  ff_sql <- firm_filter_sql(firm_names, src_alias)
 
   # Technology filter
   tech_join_sql <- ""
   if (!is.null(tech_filter) && length(tech_filter) > 0) {
     tech_join_sql <- paste0(
-      " JOIN techmap t ON iv.docdb_family_id = t.docdb_family_id AND t.technology IN ",
+      " JOIN techmap t ON ", src_alias, ".docdb_family_id = t.docdb_family_id AND t.technology IN ",
       sql_in_list(tech_filter)
     )
   }
 
-  # Alias for map table
-  map_alias <- if (use_regionmap) "rm" else "cm"
-
-  # --- Main aggregation: group by country ---
-  main_sql <- paste0("
+  # --- Create temp table with the shared CTE result ---
+  temp_sql <- paste0("
+    CREATE TEMP TABLE IF NOT EXISTS _techs_combined AS
     WITH filtered AS (
       SELECT DISTINCT
         ", group_col, " AS ctry_code,
         ", name_col, " AS country_name,
-        iv.docdb_family_id,
+        ", src_alias, ".docdb_family_id,
         ", appln_col, " AS appln_id,
-        iv.value * ", scaler, " AS val
-      FROM istrax_values iv
-      JOIN ", map_table, " ", map_alias, " ON ", map_join, "
+        ", src_alias, ".value * ", scaler, " AS val
+      FROM ", src_table, " ", src_alias, "
       ", tech_join_sql, "
-      WHERE iv.flow_type = '", gsub("'", "''", flow_type), "'
+      WHERE ", src_alias, ".flow_type = '", gsub("'", "''", flow_type), "'
         AND ", country_filter, "
         ", ff_sql, "
     ),
@@ -373,21 +357,26 @@ duck_compute_avstrax_for_techs <- function(con, flow_type, tech_filter = NULL,
       SELECT DISTINCT
         'All' AS ctry_code,
         'All' AS country_name,
-        iv.docdb_family_id,
+        ", src_alias, ".docdb_family_id,
         ", appln_col, " AS appln_id,
-        iv.value * ", scaler, " AS val
-      FROM istrax_values iv
-      JOIN ", map_table, " ", map_alias, " ON ", map_join, "
+        ", src_alias, ".value * ", scaler, " AS val
+      FROM ", src_table, " ", src_alias, "
       ", tech_join_sql, "
-      WHERE iv.flow_type = '", gsub("'", "''", flow_type), "'
+      WHERE ", src_alias, ".flow_type = '", gsub("'", "''", flow_type), "'
         AND ", country_filter, "
         ", ff_sql, "
-    ),
-    combined AS (
-      SELECT * FROM filtered
-      UNION ALL
-      SELECT * FROM filtered_all
     )
+    SELECT * FROM filtered
+    UNION ALL
+    SELECT * FROM filtered_all
+  ")
+
+  # Drop any leftover temp table, create new one
+  tryCatch(dbExecute(con, "DROP TABLE IF EXISTS _techs_combined"), error = function(e) NULL)
+  dbExecute(con, temp_sql)
+
+  # --- Main aggregation from temp table ---
+  main_sql <- "
     SELECT
       ctry_code,
       MAX(country_name) AS country_name,
@@ -400,13 +389,14 @@ duck_compute_avstrax_for_techs <- function(con, flow_type, tech_filter = NULL,
       PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY val) AS q1,
       PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY val) AS q2,
       PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY val) AS q3
-    FROM combined
+    FROM _techs_combined
     GROUP BY ctry_code
-  ")
+  "
 
   result <- dbGetQuery(con, main_sql)
 
   if (nrow(result) == 0) {
+    tryCatch(dbExecute(con, "DROP TABLE IF EXISTS _techs_combined"), error = function(e) NULL)
     return(data.frame(
       ctry_code = character(0), mean = numeric(0), innos = integer(0),
       sem = numeric(0), q1 = numeric(0), q2 = numeric(0), q3 = numeric(0),
@@ -423,44 +413,13 @@ duck_compute_avstrax_for_techs <- function(con, flow_type, tech_filter = NULL,
     result$country_name <- NULL
   }
 
-  # --- Top25/Top50 + top3_ids ---
-  extras_sql <- paste0("
-    WITH filtered AS (
-      SELECT DISTINCT
-        ", group_col, " AS ctry_code,
-        iv.docdb_family_id,
-        ", appln_col, " AS appln_id,
-        iv.value * ", scaler, " AS val
-      FROM istrax_values iv
-      JOIN ", map_table, " ", map_alias, " ON ", map_join, "
-      ", tech_join_sql, "
-      WHERE iv.flow_type = '", gsub("'", "''", flow_type), "'
-        AND ", country_filter, "
-        ", ff_sql, "
-    ),
-    filtered_all AS (
-      SELECT DISTINCT
-        'All' AS ctry_code,
-        iv.docdb_family_id,
-        ", appln_col, " AS appln_id,
-        iv.value * ", scaler, " AS val
-      FROM istrax_values iv
-      JOIN ", map_table, " ", map_alias, " ON ", map_join, "
-      ", tech_join_sql, "
-      WHERE iv.flow_type = '", gsub("'", "''", flow_type), "'
-        AND ", country_filter, "
-        ", ff_sql, "
-    ),
-    combined AS (
-      SELECT * FROM filtered
-      UNION ALL
-      SELECT * FROM filtered_all
-    ),
-    ranked AS (
+  # --- Top25/Top50 + top3_ids from same temp table ---
+  extras_sql <- "
+    WITH ranked AS (
       SELECT *,
         PERCENT_RANK() OVER (PARTITION BY ctry_code ORDER BY val DESC) AS prank,
         ROW_NUMBER() OVER (PARTITION BY ctry_code ORDER BY val DESC) AS rn
-      FROM combined
+      FROM _techs_combined
     )
     SELECT
       ctry_code,
@@ -469,46 +428,45 @@ duck_compute_avstrax_for_techs <- function(con, flow_type, tech_filter = NULL,
       STRING_AGG(CASE WHEN rn <= 10 THEN appln_id END, ', ') AS top3_ids
     FROM ranked
     GROUP BY ctry_code
-  ")
+  "
 
   extras <- dbGetQuery(con, extras_sql)
+
+  # Clean up temp table
+  tryCatch(dbExecute(con, "DROP TABLE IF EXISTS _techs_combined"), error = function(e) NULL)
+
   result <- merge(result, extras, by = "ctry_code", all.x = TRUE)
 
-  # --- Counted: total distinct patents per country (unfiltered by tech) ---
+  # --- Allinnos from pre-computed patent counts table ---
   counted_sql <- paste0("
-    SELECT ", count_group_col, " AS ctry_code,
-           COUNT(DISTINCT docdb_family_id) AS Allinnos
+    SELECT ctry_code, Allinnos
     FROM ", count_table, "
-    WHERE ", count_filter, "
-    GROUP BY ", count_group_col
+    WHERE ctry_code IN ", sql_in_list(country_codes)
   )
   counted <- dbGetQuery(con, counted_sql)
 
-  # SumAllinnos: total distinct patents across all selected countries
   sum_all_sql <- paste0("
-    SELECT COUNT(DISTINCT docdb_family_id) AS SumAllinnos
+    SELECT SUM(Allinnos) AS SumAllinnos
     FROM ", count_table, "
-    WHERE ", count_filter
+    WHERE ctry_code IN ", sql_in_list(country_codes)
   )
   sum_all <- dbGetQuery(con, sum_all_sql)$SumAllinnos
 
   # Total filtered innovations (distinct patents matching tech filter)
   if (!is.null(tech_filter) && length(tech_filter) > 0) {
     total_filtered_sql <- paste0("
-      SELECT COUNT(DISTINCT iv.docdb_family_id) AS total
-      FROM istrax_values iv
-      JOIN ", map_table, " ", map_alias, " ON ", map_join, "
+      SELECT COUNT(DISTINCT ", src_alias, ".docdb_family_id) AS total
+      FROM ", src_table, " ", src_alias, "
       ", tech_join_sql, "
-      WHERE iv.flow_type = '", gsub("'", "''", flow_type), "'
+      WHERE ", src_alias, ".flow_type = '", gsub("'", "''", flow_type), "'
         AND ", country_filter, "
         ", ff_sql
     )
   } else {
     total_filtered_sql <- paste0("
-      SELECT COUNT(DISTINCT iv.docdb_family_id) AS total
-      FROM istrax_values iv
-      JOIN ", map_table, " ", map_alias, " ON ", map_join, "
-      WHERE iv.flow_type = '", gsub("'", "''", flow_type), "'
+      SELECT COUNT(DISTINCT ", src_alias, ".docdb_family_id) AS total
+      FROM ", src_table, " ", src_alias, "
+      WHERE ", src_alias, ".flow_type = '", gsub("'", "''", flow_type), "'
         AND ", country_filter, "
         ", ff_sql
     )
@@ -547,8 +505,7 @@ duck_compute_avstrax_for_techs <- function(con, flow_type, tech_filter = NULL,
 
 #' Get raw joined data from DuckDB (for cases requiring custom R processing)
 #'
-#' Returns the joined istrax+countrymap data. Used as fallback when DuckDB
-#' aggregation can't handle the specific filtering logic.
+#' Uses the pre-joined istrax_country table for fast retrieval.
 #'
 #' @param con DuckDB connection
 #' @param flow_type Flow type string
@@ -558,20 +515,17 @@ duck_compute_avstrax_for_techs <- function(con, flow_type, tech_filter = NULL,
 duck_get_istrax_joined <- function(con, flow_type, country_codes,
                                     firm_names = NULL) {
 
-  ff_sql <- firm_filter_sql(firm_names)
+  ff_sql <- firm_filter_sql(firm_names, "ic")
 
   sql <- paste0("
     SELECT
-      cm.docdb_family_id,
-      cm.ctry_code,
-      cm.appln_id,
-      COALESCE(iv.value, 0) AS value
-    FROM countrymap cm
-    LEFT JOIN istrax_values iv
-      ON cm.docdb_family_id = iv.docdb_family_id
-      AND cm.ctry_code = iv.ctry_code
-      AND iv.flow_type = '", gsub("'", "''", flow_type), "'
-    WHERE cm.ctry_code IN ", sql_in_list(country_codes), "
+      ic.docdb_family_id,
+      ic.ctry_code,
+      ic.appln_id,
+      ic.value
+    FROM istrax_country ic
+    WHERE ic.flow_type = '", gsub("'", "''", flow_type), "'
+      AND ic.ctry_code IN ", sql_in_list(country_codes), "
     ", ff_sql
   )
 
@@ -590,6 +544,8 @@ duck_get_istrax_joined <- function(con, flow_type, country_codes,
 
 #' Get raw joined data for regions from DuckDB
 #'
+#' Uses the pre-joined istrax_region table for fast retrieval.
+#'
 #' @param con DuckDB connection
 #' @param flow_type Flow type string
 #' @param region_codes Character vector of region codes (e.g. "UKC", "UKD")
@@ -598,21 +554,18 @@ duck_get_istrax_joined <- function(con, flow_type, country_codes,
 duck_get_istrax_joined_regions <- function(con, flow_type, region_codes,
                                             firm_names = NULL) {
 
-  ff_sql <- firm_filter_sql(firm_names)
+  ff_sql <- firm_filter_sql(firm_names, "ir")
 
   sql <- paste0("
     SELECT
-      rm.docdb_family_id,
-      rm.region_code AS ctry_code,
-      rm.region_name AS country_name,
-      rm.appln_id,
-      COALESCE(iv.value, 0) AS value
-    FROM regionmap rm
-    LEFT JOIN istrax_values iv
-      ON rm.docdb_family_id = iv.docdb_family_id
-      AND rm.ctry_code = iv.ctry_code
-      AND iv.flow_type = '", gsub("'", "''", flow_type), "'
-    WHERE rm.region_code IN ", sql_in_list(region_codes), "
+      ir.docdb_family_id,
+      ir.region_code AS ctry_code,
+      ir.region_name AS country_name,
+      ir.appln_id,
+      ir.value
+    FROM istrax_region ir
+    WHERE ir.flow_type = '", gsub("'", "''", flow_type), "'
+      AND ir.region_code IN ", sql_in_list(region_codes), "
     ", ff_sql
   )
 

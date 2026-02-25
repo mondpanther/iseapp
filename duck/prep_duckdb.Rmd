@@ -71,6 +71,7 @@ if (file.exists(duck_db_path)) {
 
 ```{r create-db}
 con <- dbConnect(duckdb(), dbdir = duck_db_path)
+#con <- dbConnect(duckdb(), dbdir = duck_db_path)
 message("Created DuckDB database at: ", duck_db_path)
 ```
 
@@ -304,7 +305,164 @@ message("\nTop 10 technology categories by patent count:")
 print(tech_q)
 ```
 
-## 8. Close connection
+## 8. Create indexes
+
+Add indexes on key join/filter columns to speed up runtime queries.
+DuckDB uses ART (Adaptive Radix Tree) indexes for equality lookups and joins.
+
+```{r indexes}
+message("Creating indexes...")
+
+# istrax_values: every query filters on flow_type, then joins on (docdb_family_id, ctry_code)
+dbExecute(con, "CREATE INDEX idx_istrax_flow ON istrax_values(flow_type)")
+dbExecute(con, "CREATE INDEX idx_istrax_docdb_ctry ON istrax_values(docdb_family_id, ctry_code)")
+
+# countrymap: join key
+dbExecute(con, "CREATE INDEX idx_countrymap_docdb_ctry ON countrymap(docdb_family_id, ctry_code)")
+
+# techmap: join on docdb_family_id, filter on technology
+dbExecute(con, "CREATE INDEX idx_techmap_docdb ON techmap(docdb_family_id)")
+dbExecute(con, "CREATE INDEX idx_techmap_tech ON techmap(technology)")
+
+# regionmap: join key + region filter
+if ("regionmap" %in% dbListTables(con)) {
+  dbExecute(con, "CREATE INDEX idx_regionmap_docdb_ctry ON regionmap(docdb_family_id, ctry_code)")
+  dbExecute(con, "CREATE INDEX idx_regionmap_region ON regionmap(region_code)")
+}
+
+# firmmap: subquery lookup
+if ("firmmap" %in% dbListTables(con)) {
+  dbExecute(con, "CREATE INDEX idx_firmmap_docdb ON firmmap(docdb_family_id)")
+  dbExecute(con, "CREATE INDEX idx_firmmap_company ON firmmap(company_raw)")
+}
+
+message("Indexes created")
+```
+
+## 9. Create pre-joined tables
+
+Pre-join `istrax_values` with `countrymap` and `regionmap` to eliminate the most
+expensive runtime joins. The ORDER BY ensures DuckDB's zone maps (min-max indexes
+on row groups) are maximally effective for flow_type filtering.
+
+```{r pre-joined-country}
+message("Creating pre-joined istrax_country table...")
+
+dbExecute(con, "
+  CREATE TABLE istrax_country AS
+  SELECT DISTINCT
+    iv.docdb_family_id,
+    iv.ctry_code,
+    cm.appln_id,
+    iv.flow_type,
+    iv.value
+  FROM istrax_values iv
+  JOIN countrymap cm
+    ON iv.docdb_family_id = cm.docdb_family_id
+    AND iv.ctry_code = cm.ctry_code
+  ORDER BY iv.flow_type, iv.ctry_code, iv.docdb_family_id
+")
+
+n_ic <- dbGetQuery(con, "SELECT COUNT(*) AS n FROM istrax_country")$n
+message("istrax_country: ", n_ic, " rows")
+
+# Index the pre-joined table
+dbExecute(con, "CREATE INDEX idx_ic_flow ON istrax_country(flow_type)")
+dbExecute(con, "CREATE INDEX idx_ic_ctry ON istrax_country(ctry_code)")
+dbExecute(con, "CREATE INDEX idx_ic_docdb ON istrax_country(docdb_family_id)")
+message("istrax_country indexes created")
+```
+
+```{r pre-joined-region}
+if ("regionmap" %in% dbListTables(con)) {
+  message("Creating pre-joined istrax_region table...")
+
+  dbExecute(con, "
+    CREATE TABLE istrax_region AS
+    SELECT DISTINCT
+      iv.docdb_family_id,
+      rm.region_code,
+      rm.region_name,
+      rm.appln_id,
+      iv.flow_type,
+      iv.value
+    FROM istrax_values iv
+    JOIN regionmap rm
+      ON iv.docdb_family_id = rm.docdb_family_id
+      AND iv.ctry_code = rm.ctry_code
+    ORDER BY iv.flow_type, rm.region_code, iv.docdb_family_id
+  ")
+
+  n_ir <- dbGetQuery(con, "SELECT COUNT(*) AS n FROM istrax_region")$n
+  message("istrax_region: ", n_ir, " rows")
+
+  dbExecute(con, "CREATE INDEX idx_ir_flow ON istrax_region(flow_type)")
+  dbExecute(con, "CREATE INDEX idx_ir_region ON istrax_region(region_code)")
+  dbExecute(con, "CREATE INDEX idx_ir_docdb ON istrax_region(docdb_family_id)")
+  message("istrax_region indexes created")
+} else {
+  message("Skipping istrax_region (no regionmap)")
+}
+```
+
+## 10. Pre-compute patent counts per country/region
+
+The RTA calculation needs `Allinnos` (total distinct patents per country, unfiltered
+by technology). Pre-computing avoids expensive COUNT DISTINCT queries at runtime.
+
+```{r patent-counts}
+message("Creating pre-computed patent count tables...")
+
+dbExecute(con, "
+  CREATE TABLE country_patent_counts AS
+  SELECT ctry_code, COUNT(DISTINCT docdb_family_id) AS Allinnos
+  FROM countrymap
+  GROUP BY ctry_code
+")
+n_cpc <- dbGetQuery(con, "SELECT COUNT(*) AS n FROM country_patent_counts")$n
+message("country_patent_counts: ", n_cpc, " rows")
+
+if ("regionmap" %in% dbListTables(con)) {
+  dbExecute(con, "
+    CREATE TABLE region_patent_counts AS
+    SELECT region_code AS ctry_code, COUNT(DISTINCT docdb_family_id) AS Allinnos
+    FROM regionmap
+    GROUP BY region_code
+  ")
+  n_rpc <- dbGetQuery(con, "SELECT COUNT(*) AS n FROM region_patent_counts")$n
+  message("region_patent_counts: ", n_rpc, " rows")
+} else {
+  message("Skipping region_patent_counts (no regionmap)")
+}
+```
+
+## 11. Final verification
+
+```{r final-verify}
+tables <- dbListTables(con)
+message("All tables in DuckDB: ", paste(tables, collapse = ", "))
+
+for (tbl in tables) {
+  n <- dbGetQuery(con, paste0("SELECT COUNT(*) AS n FROM ", tbl))
+  message("  ", tbl, ": ", n$n, " rows")
+}
+
+# Verify pre-joined table matches original join
+verify_q <- dbGetQuery(con, "
+  SELECT ic.ctry_code,
+         AVG(ic.value) AS mean_val,
+         COUNT(*) AS n
+  FROM istrax_country ic
+  WHERE ic.flow_type = 'istrax_global'
+    AND ic.ctry_code IN ('US', 'GB', 'DE', 'FR', 'CN')
+  GROUP BY ic.ctry_code
+  ORDER BY ic.ctry_code
+")
+message("\nVerification query on istrax_country (should match earlier spot check):")
+print(verify_q)
+```
+
+## 12. Close connection
 
 ```{r cleanup}
 dbDisconnect(con, shutdown = TRUE)
