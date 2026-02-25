@@ -6,3 +6,5 @@
 .httr-oauth
 .claude
 dropbox_token.rds
+*.duckdb
+*.duckdb.wal

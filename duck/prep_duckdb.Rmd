@@ -1,0 +1,313 @@
+---
+title: "Prepare DuckDB Database for ISEApp"
+output: html_notebook
+---
+
+This notebook reads the source FST/parquet files from the Dropbox `Apps/iseapp` folder
+and creates a single DuckDB database file at `{iseapp_local_path}/duck/iseapp.duckdb`.
+
+The resulting database contains all tables needed by the DuckDB-backed Shiny app
+(`duck/app.R`), with all data properly normalized and ready for SQL queries.
+
+## Setup
+
+```{r setup}
+library(fst)
+library(arrow)
+library(dplyr)
+library(data.table)
+library(duckdb)
+
+# Detect Dropbox iseapp path (same logic as app.R)
+get_dropbox_path <- function() {
+  if (.Platform$OS.type == "windows") {
+    info_paths <- c(
+      file.path(Sys.getenv("APPDATA"), "Dropbox", "info.json"),
+      file.path(Sys.getenv("LOCALAPPDATA"), "Dropbox", "info.json")
+    )
+  } else {
+    info_paths <- file.path(Sys.getenv("HOME"), ".dropbox", "info.json")
+  }
+  for (p in info_paths) {
+    if (file.exists(p)) {
+      info <- jsonlite::fromJSON(p)
+      if (!is.null(info$business)) return(info$business$path)
+      if (!is.null(info$personal)) return(info$personal$path)
+    }
+  }
+  return(NULL)
+}
+
+get_local_iseapp_path <- function() {
+  env_path <- Sys.getenv("ISEAPP_PATH_LOCAL")
+  if (nzchar(env_path) && dir.exists(env_path)) return(env_path)
+  dropbox_root <- get_dropbox_path()
+  if (!is.null(dropbox_root)) {
+    iseapp_path <- file.path(dropbox_root, "Apps", "iseapp")
+    if (dir.exists(iseapp_path)) return(iseapp_path)
+  }
+  return(NULL)
+}
+
+iseapp_path <- get_local_iseapp_path()
+stopifnot("Cannot find local iseapp path" = !is.null(iseapp_path))
+message("Using iseapp data path (Dropbox): ", iseapp_path)
+
+# DuckDB output path — stored in the repo's duck/ folder (not Dropbox)
+# to avoid cloud sync corruption issues
+duck_dir <- getwd()  # Should be the duck/ directory when knitting this Rmd
+message("DuckDB output directory: ", duck_dir)
+
+duck_db_path <- file.path(duck_dir, "iseapp.duckdb")
+
+# Remove existing database to start fresh
+if (file.exists(duck_db_path)) {
+  message("Removing existing database: ", duck_db_path)
+  file.remove(duck_db_path)
+}
+```
+
+## Create DuckDB Database
+
+```{r create-db}
+con <- dbConnect(duckdb(), dbdir = duck_db_path)
+message("Created DuckDB database at: ", duck_db_path)
+```
+
+## 1. Load and write countrymap
+
+The countrymap contains the patent-country mapping with `appln_id` (application ID).
+
+```{r countrymap}
+countrymap <- read_fst(file.path(iseapp_path, "countrymap.fst"))
+message("Countrymap: ", nrow(countrymap), " rows, columns: ", paste(names(countrymap), collapse = ", "))
+
+dbWriteTable(con, "countrymap", countrymap, overwrite = TRUE)
+message("Written countrymap to DuckDB")
+```
+
+## 2. Load and write techmap (with normalization)
+
+The techmap maps patents to technology categories. We normalize category names
+and add an "All" category (one row per distinct docdb_family_id in countrymap).
+
+```{r techmap}
+techmap_raw <- read_fst(file.path(iseapp_path, "techmap.fst"))
+message("Techmap raw: ", nrow(techmap_raw), " rows")
+
+# Add "All" technology from countrymap (every patent belongs to "All")
+techmap_all <- countrymap %>%
+  select(docdb_family_id) %>%
+  distinct() %>%
+  mutate(technology = "All")
+
+techmap_processed <- bind_rows(techmap_raw, techmap_all)
+
+# Normalize technology names (matching process_techmap() in app.R)
+setDT(techmap_processed)
+techmap_processed[, technology := fcase(
+  technology == "Any Green technology", "Green Technology",
+  technology == "Any battery technology", "Battery Technology",
+  technology == "Any Hard to Abate technology", "Hard to Abate Sector Decarbonization",
+  default = technology
+)]
+
+# Remove duplicates
+techmap_processed <- unique(techmap_processed)
+message("Techmap processed: ", nrow(techmap_processed), " rows, ",
+        length(unique(techmap_processed$technology)), " unique technologies")
+
+dbWriteTable(con, "techmap", as.data.frame(techmap_processed), overwrite = TRUE)
+message("Written techmap to DuckDB")
+```
+
+## 3. Load and write regionmap
+
+```{r regionmap}
+regionmap_path <- file.path(iseapp_path, "regionmap.fst")
+if (file.exists(regionmap_path)) {
+  regionmap <- read_fst(regionmap_path)
+  message("Regionmap: ", nrow(regionmap), " rows, columns: ", paste(names(regionmap), collapse = ", "))
+  dbWriteTable(con, "regionmap", regionmap, overwrite = TRUE)
+  message("Written regionmap to DuckDB")
+} else {
+  message("WARNING: regionmap.fst not found, skipping")
+}
+```
+
+## 4. Load and write firmmap + firmsectormap
+
+```{r firmmap}
+firmmap_path <- file.path(iseapp_path, "firmmap.parquet")
+if (file.exists(firmmap_path)) {
+  firmmap <- arrow::read_parquet(firmmap_path)
+  message("Firmmap: ", nrow(firmmap), " rows")
+  dbWriteTable(con, "firmmap", as.data.frame(firmmap), overwrite = TRUE)
+  message("Written firmmap to DuckDB")
+} else {
+  message("WARNING: firmmap.parquet not found, skipping")
+}
+
+firmsectormap_path <- file.path(iseapp_path, "firmsectormap.parquet")
+if (file.exists(firmsectormap_path)) {
+  firmsectormap <- arrow::read_parquet(firmsectormap_path)
+  message("Firmsectormap: ", nrow(firmsectormap), " rows")
+  dbWriteTable(con, "firmsectormap", as.data.frame(firmsectormap), overwrite = TRUE)
+  message("Written firmsectormap to DuckDB")
+} else {
+  message("WARNING: firmsectormap.parquet not found, skipping")
+}
+```
+
+## 5. Load all istrax flow files into a single long-format table
+
+Each FST file in `istraxes/` has columns: `docdb_family_id, ctry_code, {flow_name}`.
+We combine them all into one table: `istrax_values(docdb_family_id, ctry_code, flow_type, value)`.
+
+```{r istrax-values}
+istrax_dir <- file.path(iseapp_path, "istraxes")
+flow_files <- list.files(istrax_dir, pattern = "\\.fst$", full.names = FALSE)
+message("Found ", length(flow_files), " flow files")
+
+# Create the table with the first file, then append the rest
+first <- TRUE
+
+for (ff in flow_files) {
+  flow_type <- tools::file_path_sans_ext(ff)
+  full_path <- file.path(istrax_dir, ff)
+
+  df <- read_fst(full_path)
+
+  # The value column is named after the flow_type
+  # Columns are: docdb_family_id, ctry_code, {flow_type}
+  value_col <- setdiff(names(df), c("docdb_family_id", "ctry_code"))
+
+  if (length(value_col) != 1) {
+    message("WARNING: Unexpected columns in ", ff, ": ", paste(names(df), collapse = ", "))
+    next
+  }
+
+  # Rename to standard format
+  df_long <- data.frame(
+    docdb_family_id = df$docdb_family_id,
+    ctry_code = df$ctry_code,
+    flow_type = flow_type,
+    value = df[[value_col]],
+    stringsAsFactors = FALSE
+  )
+
+  # Replace NAs with 0 (matching current app behavior)
+  df_long$value[is.na(df_long$value)] <- 0
+
+  if (first) {
+    dbWriteTable(con, "istrax_values", df_long, overwrite = TRUE)
+    first <- FALSE
+  } else {
+    dbAppendTable(con, "istrax_values", df_long)
+  }
+
+  message("  Loaded ", ff, ": ", nrow(df_long), " rows (flow_type = ", flow_type, ")")
+}
+
+# Check total rows
+total <- dbGetQuery(con, "SELECT COUNT(*) AS n FROM istrax_values")
+message("Total istrax_values rows: ", total$n)
+
+# Check distinct flow types
+flows <- dbGetQuery(con, "SELECT DISTINCT flow_type FROM istrax_values ORDER BY flow_type")
+message("Flow types (", nrow(flows), "): ", paste(flows$flow_type, collapse = ", "))
+```
+
+## 6. Create country_groups table
+
+Pre-expanded country group definitions for efficient SQL lookups.
+
+```{r country-groups}
+all_countries <- sort(unique(na.omit(countrycode::codelist$iso2c)))
+
+lmics <- c("AF","AL","DZ","AO","AR","AM","AZ","BD","BJ","BO","BA","BW","BR","BG",
+           "BF","BI","KH","CM","CV","CF","TD","CL","CN","CO","KM","CG","CR","CI",
+           "CU","DJ","DM","DO","EC","EG","SV","GQ","ER","ET","FJ","GA","GM","GE",
+           "GH","GT","GN","GW","GY","HT","HN","IN","ID","IR","IQ","JM","JO","KZ",
+           "KE","KI","KP","KG","LA","LB","LS","LR","LY","MG","MW","MY","MV","ML",
+           "MR","MU","MX","MD","MN","ME","MA","MZ","MM","NA","NP","NI","NE","NG",
+           "MK","PK","PW","PA","PG","PY","PE","PH","RW","WS","ST","SN","RS","SC",
+           "SL","SB","SO","ZA","LK","SD","SR","SY","TJ","TZ","TH","TL","TG","TO",
+           "TN","TR","TM","TV","UG","UA","UZ","VU","VE","VN","YE","ZM","ZW")
+
+lmics_excl_china <- setdiff(lmics, "CN")
+eu_countries <- c("AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR",
+                  "HU","IE","IT","LV","LT","LU","MT","NL","PL","PT","RO","SK",
+                  "SI","ES","SE")
+hic <- setdiff(all_countries, lmics)
+
+group_definitions <- list(
+  "All countries" = all_countries,
+  "LMICs" = lmics,
+  "LMICs (excl. China)" = lmics_excl_china,
+  "EU countries" = eu_countries,
+  "High income countries" = hic
+)
+
+# Build the long-format table
+groups_list <- lapply(names(group_definitions), function(gname) {
+  data.frame(
+    group_name = gname,
+    ctry_code = group_definitions[[gname]],
+    stringsAsFactors = FALSE
+  )
+})
+country_groups_df <- do.call(rbind, groups_list)
+
+dbWriteTable(con, "country_groups", country_groups_df, overwrite = TRUE)
+message("Written country_groups: ", nrow(country_groups_df), " rows, ",
+        length(unique(country_groups_df$group_name)), " groups")
+```
+
+## 7. Verify database
+
+```{r verify}
+tables <- dbListTables(con)
+message("Tables in DuckDB: ", paste(tables, collapse = ", "))
+
+for (tbl in tables) {
+  n <- dbGetQuery(con, paste0("SELECT COUNT(*) AS n FROM ", tbl))
+  message("  ", tbl, ": ", n$n, " rows")
+}
+
+# Spot checks
+message("\nSpot checks:")
+
+# Check a sample query matching compute_avstrax_for_techs logic
+sample_q <- dbGetQuery(con, "
+  SELECT iv.ctry_code,
+         AVG(iv.value) AS mean_val,
+         COUNT(*) AS n
+  FROM istrax_values iv
+  WHERE iv.flow_type = 'istrax_global'
+    AND iv.ctry_code IN ('US', 'GB', 'DE', 'FR', 'CN')
+  GROUP BY iv.ctry_code
+  ORDER BY iv.ctry_code
+")
+message("Sample aggregation (istrax_global, 5 countries):")
+print(sample_q)
+
+# Check techmap join
+tech_q <- dbGetQuery(con, "
+  SELECT t.technology, COUNT(DISTINCT t.docdb_family_id) AS n_patents
+  FROM techmap t
+  GROUP BY t.technology
+  ORDER BY n_patents DESC
+  LIMIT 10
+")
+message("\nTop 10 technology categories by patent count:")
+print(tech_q)
+```
+
+## 8. Close connection
+
+```{r cleanup}
+dbDisconnect(con, shutdown = TRUE)
+message("DuckDB database created successfully at: ", duck_db_path)
+message("File size: ", round(file.size(duck_db_path) / 1024 / 1024, 1), " MB")
+```

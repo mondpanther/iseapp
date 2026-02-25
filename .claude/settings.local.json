@@ -10,7 +10,16 @@
       "Bash(where:*)",
       "Bash(\"C:/Program Files/R/R-4.0.0/bin/x64/Rscript.exe\":*)",
       "Bash(\"C:/Program Files/R/R-4.0.0/bin/x64/Rscript.exe\" -e \"tryCatch\\(parse\\(''C:/Users/rmartin/github/iseapp/app.R''\\), error = function\\(e\\) cat\\(''PARSE ERROR:'', conditionMessage\\(e\\), ''\\\\n''\\)\\)\")",
-      "Bash(\"C:/Program Files/R/R-4.0.0/bin/x64/Rscript.exe\" -e \"tryCatch\\(parse\\(''C:/Users/rmartin/github/iseapp/dropbox_auth.R''\\), error = function\\(e\\) cat\\(''PARSE ERROR:'', conditionMessage\\(e\\), ''\\\\n''\\), warning = function\\(w\\) cat\\(''OK \\(with warnings\\)\\\\n''\\)\\)\")"
+      "Bash(\"C:/Program Files/R/R-4.0.0/bin/x64/Rscript.exe\" -e \"tryCatch\\(parse\\(''C:/Users/rmartin/github/iseapp/dropbox_auth.R''\\), error = function\\(e\\) cat\\(''PARSE ERROR:'', conditionMessage\\(e\\), ''\\\\n''\\), warning = function\\(w\\) cat\\(''OK \\(with warnings\\)\\\\n''\\)\\)\")",
+      "Bash(\"C:/Program Files/R/R-4.4.2/bin/Rscript.exe\" -e:*)",
+      "Bash(\"C:/Program Files/R/R-4.4.1/bin/Rscript.exe\":*)",
+      "Bash(\"C:/Program Files/R/R-4.4.1/bin/Rscript.exe\" -e \"library\\(fst\\); d <- read_fst\\(''C:/Users/rmart/PRINZteam Dropbox/Ralf Martin/Apps/iseapp/istraxes/avstrax_global.fst'', to=3\\); cat\\(paste\\(names\\(d\\), collapse='', ''\\)\\); cat\\(''\\\\n''\\); print\\(str\\(d\\)\\)\")",
+      "Bash(\"C:/Program Files/R/R-4.4.1/bin/Rscript.exe\" -e \"library\\(fst\\); d <- read_fst\\(''C:/Users/rmart/PRINZteam Dropbox/Ralf Martin/Apps/iseapp/countrymap.fst'', to=3\\); cat\\(paste\\(names\\(d\\), collapse='', ''\\)\\); cat\\(''\\\\n''\\); print\\(str\\(d\\)\\)\")",
+      "Bash(\"C:/Program Files/R/R-4.4.1/bin/Rscript.exe\" -e \"library\\(fst\\); d <- read_fst\\(''C:/Users/rmart/PRINZteam Dropbox/Ralf Martin/Apps/iseapp/regionmap.fst'', to=3\\); cat\\(paste\\(names\\(d\\), collapse='', ''\\)\\); cat\\(''\\\\n''\\); print\\(str\\(d\\)\\)\")",
+      "Bash(\"C:/Program Files/R/R-4.4.1/bin/Rscript.exe\" -e \"library\\(arrow\\); d <- read_parquet\\(''C:/Users/rmart/PRINZteam Dropbox/Ralf Martin/Apps/iseapp/firmmap.parquet''\\); cat\\(paste\\(names\\(d\\), collapse='', ''\\)\\); cat\\(''\\\\n''\\); cat\\(''nrow:'', nrow\\(d\\), ''\\\\n''\\); print\\(str\\(head\\(d, 3\\)\\)\\)\")",
+      "Bash(\"C:/Program Files/R/R-4.4.1/bin/Rscript.exe\" -e \"library\\(arrow\\); d <- read_parquet\\(''C:/Users/rmart/PRINZteam Dropbox/Ralf Martin/Apps/iseapp/firmsectormap.parquet''\\); cat\\(paste\\(names\\(d\\), collapse='', ''\\)\\); cat\\(''\\\\n''\\); cat\\(''nrow:'', nrow\\(d\\), ''\\\\n''\\); print\\(head\\(d, 3\\)\\)\")",
+      "Bash(\"C:/Program Files/R/R-4.4.1/bin/Rscript.exe\" -e \"library\\(fst\\); d <- read_fst\\(''C:/Users/rmart/PRINZteam Dropbox/Ralf Martin/Apps/iseapp/istraxes/istrax_nationalkey_2009_2018.fst'', to=3\\); cat\\(paste\\(names\\(d\\), collapse='', ''\\)\\); cat\\(''\\\\n''\\); print\\(head\\(d\\)\\)\")",
+      "Bash(git add:*)"
     ]
   }
 }
