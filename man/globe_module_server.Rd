@@ -2,14 +2,14 @@
 % Please edit documentation in R/module_globe.R
 \name{globe_module_server}
 \alias{globe_module_server}
-\title{Globe module Server}
+\title{Country module Server}
 \usage{
-globe_module_server(id)
+globe_module_server(id, parent_session)
 }
 \arguments{
 \item{id}{the ID of the module}
 }
 \description{
-Globe module Server
+Country module Server
 }
 \keyword{internal}

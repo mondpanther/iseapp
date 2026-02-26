@@ -4,7 +4,7 @@
 \alias{country_module_server}
 \title{Country module Server}
 \usage{
-country_module_server(id)
+country_module_server(id, parent_session)
 }
 \arguments{
 \item{id}{the ID of the module}
