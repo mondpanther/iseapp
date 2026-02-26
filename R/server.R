@@ -7,17 +7,10 @@
 #' @param session Shiny session.
 #'
 #' @keywords internal
-server <- function(input, output, session) {
+server <- function(input, output, session, con) {
 
-  con <- DBI::dbConnect(duckdb::duckdb())
-  DBI::dbExecute(con, "INSTALL httpfs; LOAD httpfs;")
-  DBI::dbExecute(con, glue::glue("SET s3_region='{Sys.getenv('AWS_DEFAULT_REGION')}';"))
-  DBI::dbExecute(con, glue::glue("SET s3_access_key_id='{Sys.getenv('AWS_ACCESS_KEY_ID')}';"))
-  DBI::dbExecute(con, glue::glue("SET s3_secret_access_key='{Sys.getenv('AWS_SECRET_ACCESS_KEY')}';"))
-  DBI::dbExecute(con, "
-    CREATE VIEW full_patent_database AS 
-    SELECT * FROM read_parquet('s3://iseapp-database/full_patent_database.parquet')
-  ")
+  startup_waiter <- waiter::Waiter$new(html = landing_ui_content())
+  startup_waiter$show()
 
   # useful for debugging; can comment off if not using
   session_id <- session$token
@@ -48,7 +41,10 @@ server <- function(input, output, session) {
   })
 
   # Call Modules
-  country_module_server("country", session, con = con)
+  landing_ready <- landing_module_server("landing", waiter = startup_waiter, con = con)
+  shiny::observeEvent(landing_ready(), once = TRUE, {
+    country_module_server("country", session, con = con)
+  })
   shiny::observeEvent(c(req(input$navbar_page == "Region Explorer")), once = TRUE, {
     region_module_server("region", session, con = con)
   })

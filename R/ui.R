@@ -21,7 +21,8 @@ ui <- function(req) {
       prompter::use_prompt(),
       sever::useSever(),
       waiter::use_waiter(),
-      waiter::autoWaiter(color = "#ffffff", fadeout = 10),
+      waiter::waiter_show_on_load(html = landing_ui_content()),
+      # waiter::autoWaiter(color = "#ffffff", fadeout = 10),
 
       shiny::tags$head(
         # shiny::tags$link(rel = "icon", href = file.path(pkgload::pkg_name(), "img/ifc_logo.svg")),

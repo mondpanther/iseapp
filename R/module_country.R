@@ -197,15 +197,15 @@ country_module_server <- function(id, parent_session, con) {
       # ")
 
       # Clean up connection on session end
-      shiny::onSessionEnded(function() {
-        DBI::dbDisconnect(con, shutdown = TRUE)
-      })
+      # shiny::onSessionEnded(function() {
+      #   DBI::dbDisconnect(con, shutdown = TRUE)
+      # })
 
       # FALLBACK: DuckDB query for Plot 1 (by-technology)
       fallback_by_tech <- shiny::reactive({
         shiny::req(input$toflow, input$country, input$tech_categories_plot1, input$firm)
 
-        # tictoc::tic("fallback_by_tech total")
+        tictoc::tic("fallback_by_tech total")
 
         toflow             <- input$toflow
         firm               <- input$firm
@@ -223,13 +223,13 @@ country_module_server <- function(id, parent_session, con) {
         # Handle "All" case — use tech_group as label directly
         use_tech_group_labels <- length(tech_filters) == 1 && names(tech_filters) == "All"
 
-        # tictoc::tic("sql_tech_base")
+        tictoc::tic("sql_tech_base")
         base_data <- DBI::dbGetQuery(con, sql_tech_base(toflow, country_sql, tech_filters, firm_clause))
-        # tictoc::toc()
+        tictoc::toc()
 
         if (nrow(base_data) == 0) return(NULL)
 
-        # tictoc::tic("R-side aggregation")
+        tictoc::tic("R-side aggregation")
 
         # Assign display label per row from tech_filters
         if (use_tech_group_labels) {
@@ -283,8 +283,8 @@ country_module_server <- function(id, parent_session, con) {
             )
           )
 
-        # tictoc::toc()
-        # tictoc::toc()
+        tictoc::toc()
+        tictoc::toc()
         out
       }) |> shiny::bindCache(input$toflow, input$country, input$tech_categories_plot1, input$firm)
 
@@ -294,7 +294,7 @@ country_module_server <- function(id, parent_session, con) {
       fallback_by_country <- shiny::reactive({
         shiny::req(input$toflow, input$country, input$techs, input$firm)
 
-        # tictoc::tic("fallback_by_country total")
+        tictoc::tic("fallback_by_country total")
 
         selected_countries <- expand_country_selection(input$country)
         toflow             <- input$toflow
@@ -310,13 +310,13 @@ country_module_server <- function(id, parent_session, con) {
 
         tech_clause <- build_tech_clause(techs)
 
-        # tictoc::tic("sql_country_base")
+        tictoc::tic("sql_country_base")
         base_data <- DBI::dbGetQuery(con, sql_country_base(toflow, country_sql, tech_clause, firm_clause))
-        # tictoc::toc()
+        tictoc::toc()
 
         if (nrow(base_data) == 0) return(NULL)
         
-        # tictoc::tic("allinnos lookup")
+        tictoc::tic("allinnos lookup")
         firm_input <- firm  # scalar from input, avoids collision with data column name
 
         allinnos_data <- allinnos_baseline |>
@@ -337,9 +337,9 @@ country_module_server <- function(id, parent_session, con) {
           ) |>
           dplyr::pull(sum_allinnos) |>
           sum()
-        # tictoc::toc()
+        tictoc::toc()
 
-        # tictoc::tic("R-side aggregation")
+        tictoc::tic("R-side aggregation")
 
         by_country <- base_data |>
           dplyr::group_by(ctry_code) |>
@@ -388,8 +388,8 @@ country_module_server <- function(id, parent_session, con) {
             RTA          = dplyr::if_else(ctry_code == "All", 1, 2 * share_c / (share_c + share))
           )
 
-        # tictoc::toc()
-        # tictoc::toc()
+        tictoc::toc()
+        tictoc::toc()
         out
 
       }) |> shiny::bindCache(input$toflow, input$country, input$techs, input$firm)

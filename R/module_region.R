@@ -246,12 +246,14 @@ region_module_server <- function(id, parent_session, con) {
       #   SELECT * FROM read_parquet('https://iseapp-database.s3.us-east-2.amazonaws.com/full_patent_database.parquet')
       # ")
 
-      shiny::onSessionEnded(function() {
-        DBI::dbDisconnect(con, shutdown = TRUE)
-      })
+      # shiny::onSessionEnded(function() {
+      #   DBI::dbDisconnect(con, shutdown = TRUE)
+      # })
       
       fallback_by_tech_region <- shiny::reactive({
         shiny::req(input$toflow_region, input$region, input$tech_categories_plot1_region, input$firm)
+
+        tictoc::tic("fallback_by_tech_region total")
 
         toflow             <- input$toflow_region
         firm               <- input$firm
@@ -267,7 +269,9 @@ region_module_server <- function(id, parent_session, con) {
         tech_filters <- build_tech_filter(input$tech_categories_plot1_region)
         use_tech_group_labels <- length(tech_filters) == 1 && names(tech_filters) == "All"
 
+        tictoc::tic("sql_region_tech_base")
         base_data <- DBI::dbGetQuery(con, sql_region_tech_base(toflow, region_sql, tech_filters, firm_clause))
+        tictoc::toc()
 
         if (nrow(base_data) == 0) return(NULL)
 
@@ -291,6 +295,8 @@ region_module_server <- function(id, parent_session, con) {
               )
             )
         }
+
+        tictoc::tic("R-side aggregation")
 
         out <- base_data |>
           dplyr::group_by(label) |>
@@ -322,11 +328,16 @@ region_module_server <- function(id, parent_session, con) {
             )
           )
 
+        tictoc::toc()
+        tictoc::toc()
         out
+
       }) |> shiny::bindCache(input$toflow_region, input$region, input$tech_categories_plot1_region, input$firm)
 
       fallback_by_region <- shiny::reactive({
         shiny::req(input$toflow_region, input$region, input$techs_region, input$firm)
+
+        tictoc::tic("fallback_by_region total")
 
         toflow           <- input$toflow_region
         firm             <- input$firm
@@ -341,10 +352,13 @@ region_module_server <- function(id, parent_session, con) {
 
         tech_clause <- build_tech_clause(input$techs_region)
 
+        tictoc::tic("sql_region_base")
         base_data <- DBI::dbGetQuery(con, sql_region_base(toflow, region_sql, tech_clause, firm_clause))
+        tictoc::toc()
 
         if (nrow(base_data) == 0) return(NULL)
 
+        tictoc::tic("allinnos lookup")
         firm_input        <- firm
         allinnos_data     <- allinnos_region_baseline |>
           dplyr::filter(region_code %in% selected_regions) |>
@@ -364,6 +378,7 @@ region_module_server <- function(id, parent_session, con) {
           ) |>
           dplyr::pull(sum_allinnos) |>
           sum()
+        tictoc::tic("R-side aggregation")
 
         by_region <- base_data |>
           dplyr::group_by(region_code) |>
@@ -398,7 +413,7 @@ region_module_server <- function(id, parent_session, con) {
             top3_ids       = paste(docdb_family_id[seq_len(min(3, dplyr::n()))], collapse = ", ")
           )
 
-        dplyr::bind_rows(by_region, all_row) |>
+        out <- dplyr::bind_rows(by_region, all_row) |>
           dplyr::left_join(allinnos_data, by = "region_code") |>
           dplyr::mutate(
             top3_ids_url = build_espacenet_search(top3_ids),
@@ -414,6 +429,10 @@ region_module_server <- function(id, parent_session, con) {
             country_name = uk_regions[region_code],
             Allinnos     = allinnos
           )
+        
+        tictoc::toc()
+        tictoc::toc()
+        out
 
       }) |> shiny::bindCache(input$toflow_region, input$region, input$techs_region, input$firm)
       # ===== RENDER OUTPUTS =====
