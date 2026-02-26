@@ -193,10 +193,14 @@ output_file <- "inst/extdata/full_patent_database.parquet"
 # Create directory if needed
 dir.create(dirname(output_file), recursive = TRUE, showWarnings = FALSE)
 
+# unused_cols <- c("avstrax_DE", "avstrax_EUPLUSUK", "avstrax_G7", "avstrax_IN", "ev_IN", "istrax_IN")
+
+
 cat("Sorting data for optimal parquet predicate pushdown...\n")
 patent_data <- patent_data |>
-  dplyr::arrange(ctry_code, tech_group)
-cat("  ✓ Sorted by ctry_code, tech_group\n")
+  # dplyr::select(-dplyr::any_of(unused_cols)) |>
+  dplyr::arrange(ctry_code, tech_group, firm)
+cat("  ✓ Sorted by ctry_code, tech_group, firm\n")
 
 # Write parquet with compression
 write_parquet(

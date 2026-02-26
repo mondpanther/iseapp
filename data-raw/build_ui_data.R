@@ -9,13 +9,19 @@ library(arrow)
 library(countrycode)
 library(DBI)
 library(duckdb)
+library(sf)
 
-parquet_path <- "inst/extdata/full_patent_database.parquet"
+use_s3 <- FALSE  # set TRUE for S3, FALSE for local
+parquet_path <- if (use_s3) {
+  "https://iseapp-database.s3.us-east-2.amazonaws.com/full_patent_database.parquet"
+} else {
+  normalizePath("inst/extdata/full_patent_database.parquet")
+}
 # Open via DuckDB — same pattern as the app
 con <- duckdb::dbConnect(duckdb::duckdb())
 DBI::dbExecute(con, sprintf(
   "CREATE VIEW full_patent_database AS SELECT * FROM read_parquet('%s')",
-  normalizePath(parquet_path)
+  parquet_path
 ))
 
 # ============================================================
@@ -391,7 +397,51 @@ sum_allinnos_region_baseline <- DBI::dbGetQuery(con, "
 cat("  ✓", nrow(allinnos_region_baseline), "region/firm combinations pre-computed\n")
 
 # ============================================================
-# 12. SAVE AS INTERNAL PACKAGE DATA
+# 12. UK NUTS1 BOUNDARIES
+# Download from GitHub and merge all four nations
+# ============================================================
+# cat("Downloading UK NUTS1 boundaries...\n")
+
+# # England & Wales from martinjc/UK-GeoJSON
+# ew_url <- "https://raw.githubusercontent.com/martinjc/UK-GeoJSON/master/json/eurostat/ew/nuts1.json"
+# uk_nuts1_sf <- sf::st_read(ew_url, quiet = TRUE)
+# cat("  ✓ England & Wales loaded\n")
+
+# # Standardise NUTS code column to NUTS1CD
+# nuts_col <- names(uk_nuts1_sf)[grepl("NUTS.*CD", names(uk_nuts1_sf), ignore.case = TRUE)][1]
+# if (nuts_col != "NUTS1CD") {
+#   uk_nuts1_sf <- uk_nuts1_sf |> dplyr::rename(NUTS1CD = !!nuts_col)
+# }
+
+# existing_codes <- uk_nuts1_sf$NUTS1CD
+
+# # Scotland (UKM) and Northern Ireland (UKN) from ONS Open Geography Portal
+# if (!"UKM" %in% existing_codes || !"UKN" %in% existing_codes) {
+#   ons_url <- "https://services1.arcgis.com/ESMARspQHYMw9BZ9/arcgis/rest/services/NUTS_Level_1_January_2018_Boundaries_UK/FeatureServer/0/query?where=1%3D1&outFields=nuts118cd,nuts118nm&f=geojson"
+#   tryCatch({
+#     ons_sf <- sf::st_read(ons_url, quiet = TRUE) |>
+#       dplyr::rename(NUTS1CD = nuts118cd, NUTS1NM = nuts118nm) |>
+#       dplyr::filter(NUTS1CD %in% c("UKM", "UKN"))
+
+#     # Keep only columns present in uk_nuts1_sf to allow rbind
+#     shared_cols <- intersect(names(uk_nuts1_sf), names(ons_sf))
+#     uk_nuts1_sf <- rbind(
+#       uk_nuts1_sf[, shared_cols],
+#       ons_sf[, shared_cols]
+#     )
+#     cat("  ✓ Scotland and Northern Ireland added from ONS\n")
+#   }, error = function(e) {
+#     stop("Could not load Scotland/NI from ONS: ", e$message,
+#          "\nAll 12 NUTS1 regions are required.")
+#   })
+# }
+
+# # Ensure consistent CRS
+# uk_nuts1_sf <- sf::st_transform(uk_nuts1_sf, 4326)
+# cat("  ✓ uk_nuts1_sf ready with", nrow(uk_nuts1_sf), "regions\n")
+
+# ============================================================
+# 13. SAVE AS INTERNAL PACKAGE DATA
 # usethis::use_data(internal = TRUE) writes ALL listed objects
 # into R/sysdata.rda, which is auto-loaded for every package function.
 # Re-running this script will overwrite R/sysdata.rda.
@@ -430,6 +480,8 @@ usethis::use_data(
   sum_allinnos_baseline,
   allinnos_region_baseline,
   sum_allinnos_region_baseline,
+  # Spatial
+  # uk_nuts1_sf,
   internal  = TRUE,
   overwrite = TRUE
 )

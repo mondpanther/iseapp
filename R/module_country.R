@@ -179,16 +179,22 @@ country_module_ui <- function(id) {
 #' @importFrom shiny moduleServer observeEvent observe req reactive reactiveValues bindEvent invalidateLater parseQueryString updateQueryString
 #'
 #' @keywords internal
-country_module_server <- function(id, parent_session) {
+country_module_server <- function(id, parent_session, con) {
   shiny::moduleServer(
     id,
     function(input, output, session) {
       ns <- session$ns
 
       # DUCKDB CONNECTION TO FULL PARQUET DATABASE
-      full_db_path <- system.file("extdata", "full_patent_database.parquet", package = "innovationStrategyExplorer")
-      con <- DBI::dbConnect(duckdb::duckdb())
-      DBI::dbExecute(con, sprintf("CREATE VIEW full_patent_database AS SELECT * FROM read_parquet('%s')", full_db_path))
+      # full_db_path <- system.file("extdata", "full_patent_database.parquet", package = "innovationStrategyExplorer")
+      # con <- DBI::dbConnect(duckdb::duckdb())
+      # DBI::dbExecute(con, sprintf("CREATE VIEW full_patent_database AS SELECT * FROM read_parquet('%s')", full_db_path))
+      # con <- DBI::dbConnect(duckdb::duckdb())
+      # DBI::dbExecute(con, "INSTALL httpfs; LOAD httpfs;")
+      # DBI::dbExecute(con, "
+      #   CREATE VIEW full_patent_database AS 
+      #   SELECT * FROM read_parquet('https://iseapp-database.s3.us-east-2.amazonaws.com/full_patent_database.parquet')
+      # ")
 
       # Clean up connection on session end
       shiny::onSessionEnded(function() {
@@ -331,11 +337,6 @@ country_module_server <- function(id, parent_session) {
           ) |>
           dplyr::pull(sum_allinnos) |>
           sum()
-        # tictoc::toc()
-
-        # tictoc::tic("sql allinnos")
-        # allinnos_data    <- DBI::dbGetQuery(con, sql_country_rta_allinnos(country_sql, firm_clause))
-        # sum_allinnos_val <- DBI::dbGetQuery(con, sql_country_rta_sum_allinnos(country_sql, firm_clause))$sum_allinnos
         # tictoc::toc()
 
         # tictoc::tic("R-side aggregation")

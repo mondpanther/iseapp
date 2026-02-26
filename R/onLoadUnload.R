@@ -12,6 +12,15 @@
 #' @noRd
 .onLoad <- function(libname, pkgname) {
 
+  cfg <- config::get("aws", file = system.file("config.yml", package = pkgname))
+  
+  Sys.setenv(
+    AWS_ACCESS_KEY_ID = cfg$key,
+    AWS_SECRET_ACCESS_KEY = cfg$secret,
+    AWS_DEFAULT_REGION = "us-east-2",
+    S3_BUCKET = "iseapp-database"
+  )
+
   # Images
   shiny::addResourcePath(
     prefix = pkgname,

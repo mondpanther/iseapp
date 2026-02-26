@@ -215,7 +215,7 @@ region_module_ui <- function(id) {
 #' @importFrom leaflet renderLeaflet
 #'
 #' @keywords internal
-region_module_server <- function(id, parent_session) {
+region_module_server <- function(id, parent_session, con) {
   shiny::moduleServer(
     id,
     function(input, output, session) {
@@ -236,9 +236,15 @@ region_module_server <- function(id, parent_session) {
       # Uses the shared con connection from runAppPackage()
       # All UI choices set directly in sidebar — no updateSelectizeInput needed
 
-      full_db_path <- system.file("extdata", "full_patent_database.parquet", package = "innovationStrategyExplorer")
-      con <- DBI::dbConnect(duckdb::duckdb())
-      DBI::dbExecute(con, sprintf("CREATE VIEW full_patent_database AS SELECT * FROM read_parquet('%s')", full_db_path))
+      # full_db_path <- system.file("extdata", "full_patent_database.parquet", package = "innovationStrategyExplorer")
+      # con <- DBI::dbConnect(duckdb::duckdb())
+      # DBI::dbExecute(con, sprintf("CREATE VIEW full_patent_database AS SELECT * FROM read_parquet('%s')", full_db_path))
+      # con <- DBI::dbConnect(duckdb::duckdb())
+      # DBI::dbExecute(con, "INSTALL httpfs; LOAD httpfs;")
+      # DBI::dbExecute(con, "
+      #   CREATE VIEW full_patent_database AS 
+      #   SELECT * FROM read_parquet('https://iseapp-database.s3.us-east-2.amazonaws.com/full_patent_database.parquet')
+      # ")
 
       shiny::onSessionEnded(function() {
         DBI::dbDisconnect(con, shutdown = TRUE)

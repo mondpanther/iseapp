@@ -21,6 +21,7 @@ Imports:
     prompter,
     sass,
     sever,
+    sf,
     shiny,
     shinyjs,
     shinyWidgets,
