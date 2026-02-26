@@ -930,7 +930,6 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
 
   # Use pre-computed data if provided, otherwise compute
   if (!is.null(precomputed_avstrax) && nrow(precomputed_avstrax) > 0) {
-    message("Using pre-computed avstrax data")
     avstrax <- precomputed_avstrax
     avstrax$group <- "Main"
     # For comparison, we still need to compute (pre-computation doesn't cover all combinations)
