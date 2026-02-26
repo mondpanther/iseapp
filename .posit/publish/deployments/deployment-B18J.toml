@@ -11,8 +11,8 @@ id = '019c97ee-12b9-7776-d9aa-ff62518c2622'
 dashboard_url = 'https://connect.posit.cloud/zevross-spatial/content/019c97ee-12b9-7776-d9aa-ff62518c2622'
 direct_url = 'https://019c97ee-12b9-7776-d9aa-ff62518c2622.share.connect.posit.cloud'
 logs_url = 'https://connect.posit.cloud/zevross-spatial/content/019c97ee-12b9-7776-d9aa-ff62518c2622/history'
-deployed_at = '2026-02-26T13:24:06-05:00'
-bundle_id = '019c9b31-3b22-ec48-0c03-04f6808e2811'
+deployed_at = '2026-02-26T14:00:07-05:00'
+bundle_id = '019c9b52-3070-7204-1c7c-6ac36dd4ec8b'
 files = [
   '.posit/publish/Innovation Strategy Explorer (-KOFK.toml',
   '.posit/publish/deployments/deployment-B18J.toml',
@@ -26,6 +26,7 @@ files = [
   'R/functions_istraxfunctions_processing.R',
   'R/innovationStrategyExplorer-package.R',
   'R/module_country.R',
+  'R/module_country2.R',
   'R/module_globe.R',
   'R/module_landing.R',
   'R/module_region.R',
