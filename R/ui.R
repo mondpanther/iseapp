@@ -80,8 +80,12 @@ ui <- function(req) {
     bslib::nav_spacer(),
 
     shiny::tabPanel(
-      "Country Explorer",
+      "Country Explorer (SQL)",
       country_module_ui("country")
+    ),
+    shiny::tabPanel(
+      "Country Explorer (R)",
+      country2_module_ui("country2")
     ),
     shiny::tabPanel(
       "Region Explorer",
