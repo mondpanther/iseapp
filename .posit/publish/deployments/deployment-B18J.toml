@@ -11,8 +11,8 @@ id = '019c97ee-12b9-7776-d9aa-ff62518c2622'
 dashboard_url = 'https://connect.posit.cloud/zevross-spatial/content/019c97ee-12b9-7776-d9aa-ff62518c2622'
 direct_url = 'https://019c97ee-12b9-7776-d9aa-ff62518c2622.share.connect.posit.cloud'
 logs_url = 'https://connect.posit.cloud/zevross-spatial/content/019c97ee-12b9-7776-d9aa-ff62518c2622/history'
-deployed_at = '2026-02-26T00:09:11-05:00'
-bundle_id = '019c9859-6582-99c5-d002-9022e5153639'
+deployed_at = '2026-02-26T11:24:05-05:00'
+bundle_id = '019c9ac3-a3cc-32a6-8b84-526f52cac2df'
 files = [
   '.posit/publish/Innovation Strategy Explorer (-KOFK.toml',
   '.posit/publish/deployments/deployment-B18J.toml',
@@ -27,6 +27,7 @@ files = [
   'R/innovationStrategyExplorer-package.R',
   'R/module_country.R',
   'R/module_globe.R',
+  'R/module_landing.R',
   'R/module_region.R',
   'R/onLoadUnload.R',
   'R/runAppPackage.R',
@@ -36,6 +37,7 @@ files = [
   'R/ui.R',
   'R/utils_url_restore.R',
   'app.R',
+  'inst/cache/ise.duckdb',
   'inst/config.yml',
   'inst/extdata/inglobe_metadata.rds',
   'inst/extdata/inglobe_processed.parquet',

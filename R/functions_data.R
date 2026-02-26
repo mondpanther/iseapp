@@ -189,3 +189,148 @@ sql_region_tech_base <- function(toflow, region_sql, tech_filters, firm_clause) 
       {firm_clause}
   ")
 }
+
+sql_country_tech_combined <- function(
+  toflow,
+  country_sql,
+  tech_filters,
+  firm_clause = ""
+) {
+
+  firm_clause <- if (firm_clause != "") paste0(" ", firm_clause) else ""
+
+  # Extract selected tech group names from filters
+  tech_names <- names(tech_filters)
+
+  # Build IN clause from names
+  tech_sql <- paste0("'", tech_names, "'", collapse = ", ")
+
+  glue::glue("
+    WITH base AS (
+      SELECT
+        tech_group AS technology,
+        docdb_family_id,
+        {toflow}
+      FROM full_patent_database
+      WHERE ctry_code IN ({country_sql})
+        AND {toflow} IS NOT NULL
+        AND tech_group IN ({tech_sql})
+        {firm_clause}
+    ),
+
+    ranked AS (
+      SELECT
+        *,
+        ROW_NUMBER() OVER (
+          PARTITION BY technology
+          ORDER BY {toflow} DESC
+        ) AS rnk,
+        COUNT(*) OVER (
+          PARTITION BY technology
+        ) AS cnt
+      FROM base
+    )
+
+    SELECT
+      technology,
+      AVG({toflow}) AS mean,
+      COUNT(*)      AS innos,
+      CASE WHEN COUNT(*) > 1
+           THEN STDDEV({toflow}) / SQRT(COUNT(*))
+      END AS sem,
+
+      quantile_cont({toflow}, 0.25) AS q1,
+      quantile_cont({toflow}, 0.50) AS q2,
+      quantile_cont({toflow}, 0.75) AS q3,
+
+      AVG(
+        CASE WHEN rnk <= CEILING(cnt * 0.25)
+             THEN {toflow}
+        END
+      ) AS top25_bin_mean,
+
+      AVG(
+        CASE WHEN rnk <= CEILING(cnt * 0.50)
+             THEN {toflow}
+        END
+      ) AS top50_bin_mean,
+
+      string_agg(
+        CASE WHEN rnk <= 3
+             THEN CAST(docdb_family_id AS VARCHAR)
+        END,
+        ', '
+      ) AS top3_ids
+
+    FROM ranked
+    GROUP BY technology
+  ")
+}
+
+sql_country_combined <- function(toflow, country_sql, tech_clause, firm_clause) {
+
+  glue::glue("
+    WITH base AS (
+      SELECT
+        ctry_code,
+        docdb_family_id,
+        {toflow}
+      FROM full_patent_database
+      WHERE ctry_code IN ({country_sql})
+        AND {toflow} IS NOT NULL
+        {tech_clause}
+        {firm_clause}
+    ),
+
+    ranked AS (
+      SELECT
+        *,
+        ROW_NUMBER() OVER (PARTITION BY ctry_code ORDER BY {toflow} DESC) AS rnk_c,
+        COUNT(*)     OVER (PARTITION BY ctry_code)                        AS cnt_c,
+        ROW_NUMBER() OVER (ORDER BY {toflow} DESC)                        AS rnk_all,
+        COUNT(*)     OVER ()                                              AS cnt_all
+      FROM base
+    ),
+
+    summary AS (
+      SELECT
+        ctry_code,
+        AVG({toflow}) AS mean,
+        COUNT(*)      AS innos,
+        CASE WHEN COUNT(*) > 1 THEN STDDEV({toflow}) / SQRT(COUNT(*)) END AS sem,
+        QUANTILE_CONT({toflow}, 0.25) AS q1,
+        QUANTILE_CONT({toflow}, 0.50) AS q2,
+        QUANTILE_CONT({toflow}, 0.75) AS q3,
+        AVG(CASE WHEN rnk_c <= CEIL(cnt_c * 0.25) THEN {toflow} END) AS top25_bin_mean,
+        AVG(CASE WHEN rnk_c <= CEIL(cnt_c * 0.50) THEN {toflow} END) AS top50_bin_mean,
+        STRING_AGG(
+          CASE WHEN rnk_c <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
+          ', ' ORDER BY {toflow} DESC
+        ) AS top3_ids
+      FROM ranked
+      GROUP BY ctry_code
+    ),
+
+    overall AS (
+      SELECT
+        'All' AS ctry_code,
+        AVG({toflow}) AS mean,
+        COUNT(*)      AS innos,
+        CASE WHEN COUNT(*) > 1 THEN STDDEV({toflow}) / SQRT(COUNT(*)) END AS sem,
+        QUANTILE_CONT({toflow}, 0.25) AS q1,
+        QUANTILE_CONT({toflow}, 0.50) AS q2,
+        QUANTILE_CONT({toflow}, 0.75) AS q3,
+        AVG(CASE WHEN rnk_all <= CEIL(cnt_all * 0.25) THEN {toflow} END) AS top25_bin_mean,
+        AVG(CASE WHEN rnk_all <= CEIL(cnt_all * 0.50) THEN {toflow} END) AS top50_bin_mean,
+        STRING_AGG(
+          CASE WHEN rnk_all <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
+          ', ' ORDER BY {toflow} DESC
+        ) AS top3_ids
+      FROM ranked
+    )
+
+    SELECT * FROM summary
+    UNION ALL
+    SELECT * FROM overall
+  ")
+}

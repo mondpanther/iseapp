@@ -223,67 +223,84 @@ country_module_server <- function(id, parent_session, con) {
         # Handle "All" case — use tech_group as label directly
         use_tech_group_labels <- length(tech_filters) == 1 && names(tech_filters) == "All"
 
+        # browser()
+
         tictoc::tic("sql_tech_base")
-        base_data <- DBI::dbGetQuery(con, sql_tech_base(toflow, country_sql, tech_filters, firm_clause))
+        out <- DBI::dbGetQuery(con, sql_country_tech_combined(toflow, country_sql, tech_filters, firm_clause))
+        # base_data <- DBI::dbGetQuery(con, sql_tech_base(toflow, country_sql, tech_filters, firm_clause))
         tictoc::toc()
 
-        if (nrow(base_data) == 0) return(NULL)
+        if (nrow(out) == 0) return(NULL)
 
-        tictoc::tic("R-side aggregation")
-
-        # Assign display label per row from tech_filters
-        if (use_tech_group_labels) {
-          base_data <- base_data |> dplyr::mutate(label = tech_group)
-        } else {
-          base_data <- base_data |>
-            dplyr::mutate(
-              label = dplyr::case_when(
-                !!!purrr::imap(tech_filters, function(filter, lbl) {
-                  if (filter == "") rlang::expr(TRUE ~ !!lbl)
-                  else if (grepl("tech_group", filter)) {
-                    grp <- gsub(".*'(.*)'.*", "\\1", filter)
-                    rlang::expr(tech_group == !!grp ~ !!lbl)
-                  } else {
-                    tech <- gsub(".*'(.*)'.*", "\\1", filter)
-                    rlang::expr(technology == !!tech ~ !!lbl)
-                  }
-                }),
-                TRUE ~ technology
-              )
-            )
-        }
-
-        out <- base_data |>
-          dplyr::group_by(label) |>
-          dplyr::arrange(dplyr::desc(.data[[toflow]]), .by_group = TRUE) |>
-          dplyr::mutate(rnk = dplyr::row_number(), cnt = dplyr::n()) |>
-          dplyr::summarise(
-            mean           = mean(.data[[toflow]], na.rm = TRUE),
-            innos          = dplyr::n(),
-            sem            = ifelse(dplyr::n() > 1, sd(.data[[toflow]], na.rm = TRUE) / sqrt(dplyr::n()), NA_real_),
-            q1             = quantile(.data[[toflow]], 0.25, na.rm = TRUE),
-            q2             = quantile(.data[[toflow]], 0.50, na.rm = TRUE),
-            q3             = quantile(.data[[toflow]], 0.75, na.rm = TRUE),
-            top25_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.25), 1)], na.rm = TRUE),
-            top50_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.50), 1)], na.rm = TRUE),
-            top3_ids       = paste(docdb_family_id[seq_len(min(3, dplyr::n()))], collapse = ", "),
-            .groups        = "drop"
-          ) |>
-          dplyr::rename(technology = label) |>
+        out <- out |>
           dplyr::mutate(
             top3_ids_url = build_espacenet_search(top3_ids),
-            greenclass   = dplyr::case_when(
-              technology %in% colorings$green           ~ "green",
-              technology %in% colorings$battery         ~ "battery",
-              technology %in% colorings$hard_to_abate   ~ "hard to abate",
-              technology %in% colorings$ai              ~ "AI",
-              technology %in% colorings$agrifood        ~ "agrifood",
-              technology %in% colorings$cpcsecs         ~ "cpcsecs",
-              TRUE                                      ~ "other"
+            greenclass = dplyr::case_when(
+              technology %in% colorings$green         ~ "green",
+              technology %in% colorings$battery       ~ "battery",
+              technology %in% colorings$hard_to_abate ~ "hard to abate",
+              technology %in% colorings$ai            ~ "AI",
+              technology %in% colorings$agrifood      ~ "agrifood",
+              technology %in% colorings$cpcsecs       ~ "cpcsecs",
+              TRUE                                    ~ "other"
             )
           )
 
-        tictoc::toc()
+        # tictoc::tic("R-side aggregation")
+
+        # # Assign display label per row from tech_filters
+        # if (use_tech_group_labels) {
+        #   base_data <- base_data |> dplyr::mutate(label = tech_group)
+        # } else {
+        #   base_data <- base_data |>
+        #     dplyr::mutate(
+        #       label = dplyr::case_when(
+        #         !!!purrr::imap(tech_filters, function(filter, lbl) {
+        #           if (filter == "") rlang::expr(TRUE ~ !!lbl)
+        #           else if (grepl("tech_group", filter)) {
+        #             grp <- gsub(".*'(.*)'.*", "\\1", filter)
+        #             rlang::expr(tech_group == !!grp ~ !!lbl)
+        #           } else {
+        #             tech <- gsub(".*'(.*)'.*", "\\1", filter)
+        #             rlang::expr(technology == !!tech ~ !!lbl)
+        #           }
+        #         }),
+        #         TRUE ~ technology
+        #       )
+        #     )
+        # }
+
+        # out <- base_data |>
+        #   dplyr::group_by(label) |>
+        #   dplyr::arrange(dplyr::desc(.data[[toflow]]), .by_group = TRUE) |>
+        #   dplyr::mutate(rnk = dplyr::row_number(), cnt = dplyr::n()) |>
+        #   dplyr::summarise(
+        #     mean           = mean(.data[[toflow]], na.rm = TRUE),
+        #     innos          = dplyr::n(),
+        #     sem            = ifelse(dplyr::n() > 1, sd(.data[[toflow]], na.rm = TRUE) / sqrt(dplyr::n()), NA_real_),
+        #     q1             = quantile(.data[[toflow]], 0.25, na.rm = TRUE),
+        #     q2             = quantile(.data[[toflow]], 0.50, na.rm = TRUE),
+        #     q3             = quantile(.data[[toflow]], 0.75, na.rm = TRUE),
+        #     top25_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.25), 1)], na.rm = TRUE),
+        #     top50_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.50), 1)], na.rm = TRUE),
+        #     top3_ids       = paste(docdb_family_id[seq_len(min(3, dplyr::n()))], collapse = ", "),
+        #     .groups        = "drop"
+        #   ) |>
+        #   dplyr::rename(technology = label) |>
+        #   dplyr::mutate(
+        #     top3_ids_url = build_espacenet_search(top3_ids),
+        #     greenclass   = dplyr::case_when(
+        #       technology %in% colorings$green           ~ "green",
+        #       technology %in% colorings$battery         ~ "battery",
+        #       technology %in% colorings$hard_to_abate   ~ "hard to abate",
+        #       technology %in% colorings$ai              ~ "AI",
+        #       technology %in% colorings$agrifood        ~ "agrifood",
+        #       technology %in% colorings$cpcsecs         ~ "cpcsecs",
+        #       TRUE                                      ~ "other"
+        #     )
+        #   )
+
+        # tictoc::toc()
         tictoc::toc()
         out
       }) |> shiny::bindCache(input$toflow, input$country, input$tech_categories_plot1, input$firm)
@@ -310,7 +327,10 @@ country_module_server <- function(id, parent_session, con) {
 
         tech_clause <- build_tech_clause(techs)
 
+        # browser()
+
         tictoc::tic("sql_country_base")
+        # x <- DBI::dbGetQuery(con, sql_country_combined(toflow, country_sql, tech_clause, firm_clause))
         base_data <- DBI::dbGetQuery(con, sql_country_base(toflow, country_sql, tech_clause, firm_clause))
         tictoc::toc()
 
