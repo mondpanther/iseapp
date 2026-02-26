@@ -29,3 +29,5 @@ Imports:
     duckdb,
     DBI,
     arrow
+Depends: 
+    R (>= 3.5)
