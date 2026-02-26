@@ -76,6 +76,16 @@ build_tech_filter <- function(selected) {
   })
 }
 
+#' Build a boolean SQL tech_group expression (no leading AND)
+#' For use inside CASE WHEN expressions
+#' @param selected Character vector of technology names from the UI.
+#' @return Character. Boolean SQL expression string.
+build_tech_bool <- function(selected) {
+  if ("All" %in% selected || length(selected) == 0) return("TRUE")
+  tech_sql <- paste0("'", selected, "'", collapse = ", ")
+  glue::glue("tech_group IN ({tech_sql})")
+}
+
 # SQL Query Functions for Country and Region Modules
 # 
 # These functions generate SQL queries for aggregating patent return flows
@@ -267,14 +277,21 @@ sql_country_tech_combined <- function(
   ")
 }
 
-sql_country_combined <- function(toflow, country_sql, tech_clause, firm_clause) {
+sql_country_combined <- function(toflow, country_sql, techs, firm_clause) {
+
+  tech_bool   <- build_tech_bool(techs)
+  tech_clause <- build_tech_clause(techs)
 
   glue::glue("
-    WITH base AS (
+    WITH ranked AS (
       SELECT
         ctry_code,
         docdb_family_id,
-        {toflow}
+        {toflow},
+        ROW_NUMBER() OVER (PARTITION BY ctry_code ORDER BY {toflow} DESC) AS rnk_c,
+        COUNT(*)     OVER (PARTITION BY ctry_code)                        AS cnt_c,
+        ROW_NUMBER() OVER (ORDER BY {toflow} DESC)                        AS rnk_all,
+        COUNT(*)     OVER ()                                              AS cnt_all
       FROM full_patent_database
       WHERE ctry_code IN ({country_sql})
         AND {toflow} IS NOT NULL
@@ -282,51 +299,42 @@ sql_country_combined <- function(toflow, country_sql, tech_clause, firm_clause) 
         {firm_clause}
     ),
 
-    ranked AS (
-      SELECT
-        *,
-        ROW_NUMBER() OVER (PARTITION BY ctry_code ORDER BY {toflow} DESC) AS rnk_c,
-        COUNT(*)     OVER (PARTITION BY ctry_code)                        AS cnt_c,
-        ROW_NUMBER() OVER (ORDER BY {toflow} DESC)                        AS rnk_all,
-        COUNT(*)     OVER ()                                              AS cnt_all
-      FROM base
-    ),
-
     summary AS (
       SELECT
         ctry_code,
-        AVG({toflow}) AS mean,
-        COUNT(*)      AS innos,
-        CASE WHEN COUNT(*) > 1 THEN STDDEV({toflow}) / SQRT(COUNT(*)) END AS sem,
-        QUANTILE_CONT({toflow}, 0.25) AS q1,
-        QUANTILE_CONT({toflow}, 0.50) AS q2,
-        QUANTILE_CONT({toflow}, 0.75) AS q3,
-        AVG(CASE WHEN rnk_c <= CEIL(cnt_c * 0.25) THEN {toflow} END) AS top25_bin_mean,
-        AVG(CASE WHEN rnk_c <= CEIL(cnt_c * 0.50) THEN {toflow} END) AS top50_bin_mean,
+        AVG({toflow})                                                          AS mean,
+        COUNT(*)                                                               AS innos,
+        CASE WHEN COUNT(*) > 1 THEN STDDEV({toflow}) / SQRT(COUNT(*)) END     AS sem,
+        QUANTILE_CONT({toflow}, 0.25)                                          AS q1,
+        QUANTILE_CONT({toflow}, 0.50)                                          AS q2,
+        QUANTILE_CONT({toflow}, 0.75)                                          AS q3,
+        AVG(CASE WHEN rnk_c <= CEIL(cnt_c * 0.25) THEN {toflow} END)          AS top25_bin_mean,
+        AVG(CASE WHEN rnk_c <= CEIL(cnt_c * 0.50) THEN {toflow} END)          AS top50_bin_mean,
         STRING_AGG(
           CASE WHEN rnk_c <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
           ', ' ORDER BY {toflow} DESC
-        ) AS top3_ids
+        )                                                                      AS top3_ids
       FROM ranked
       GROUP BY ctry_code
     ),
 
     overall AS (
       SELECT
-        'All' AS ctry_code,
-        AVG({toflow}) AS mean,
-        COUNT(*)      AS innos,
-        CASE WHEN COUNT(*) > 1 THEN STDDEV({toflow}) / SQRT(COUNT(*)) END AS sem,
-        QUANTILE_CONT({toflow}, 0.25) AS q1,
-        QUANTILE_CONT({toflow}, 0.50) AS q2,
-        QUANTILE_CONT({toflow}, 0.75) AS q3,
-        AVG(CASE WHEN rnk_all <= CEIL(cnt_all * 0.25) THEN {toflow} END) AS top25_bin_mean,
-        AVG(CASE WHEN rnk_all <= CEIL(cnt_all * 0.50) THEN {toflow} END) AS top50_bin_mean,
+        'All'                                                                  AS ctry_code,
+        AVG({toflow})                                                          AS mean,
+        COUNT(*)                                                               AS innos,
+        CASE WHEN COUNT(*) > 1 THEN STDDEV({toflow}) / SQRT(COUNT(*)) END     AS sem,
+        QUANTILE_CONT({toflow}, 0.25)                                          AS q1,
+        QUANTILE_CONT({toflow}, 0.50)                                          AS q2,
+        QUANTILE_CONT({toflow}, 0.75)                                          AS q3,
+        AVG(CASE WHEN rnk_all <= CEIL(cnt_all * 0.25) THEN {toflow} END)      AS top25_bin_mean,
+        AVG(CASE WHEN rnk_all <= CEIL(cnt_all * 0.50) THEN {toflow} END)      AS top50_bin_mean,
         STRING_AGG(
           CASE WHEN rnk_all <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
           ', ' ORDER BY {toflow} DESC
-        ) AS top3_ids
+        )                                                                      AS top3_ids
       FROM ranked
+      GROUP BY cnt_all
     )
 
     SELECT * FROM summary

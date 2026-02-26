@@ -330,85 +330,112 @@ country_module_server <- function(id, parent_session, con) {
         # browser()
 
         tictoc::tic("sql_country_base")
-        # x <- DBI::dbGetQuery(con, sql_country_combined(toflow, country_sql, tech_clause, firm_clause))
-        base_data <- DBI::dbGetQuery(con, sql_country_base(toflow, country_sql, tech_clause, firm_clause))
+        out <- out <- DBI::dbGetQuery(con, sql_country_combined(toflow, country_sql, techs, firm_clause))
+        # base_data <- DBI::dbGetQuery(con, sql_country_base(toflow, country_sql, tech_clause, firm_clause))
         tictoc::toc()
 
-        if (nrow(base_data) == 0) return(NULL)
+        if (nrow(out) == 0) return(NULL)
         
-        tictoc::tic("allinnos lookup")
-        firm_input <- firm  # scalar from input, avoids collision with data column name
-
+        firm_input    <- firm
         allinnos_data <- allinnos_baseline |>
           dplyr::filter(ctry_code %in% selected_countries) |>
           dplyr::filter(
-            if (firm_input == "All Firms") is.na(firm) | !is.na(firm)
+            if (firm_input == "All Firms") TRUE
             else if (firm_input == "No Firm") is.na(firm)
             else firm == firm_input
           ) |>
           dplyr::group_by(ctry_code) |>
           dplyr::summarise(allinnos = sum(allinnos), .groups = "drop")
 
-        sum_allinnos_val <- sum_allinnos_baseline |>
-          dplyr::filter(
-            if (firm_input == "All Firms") is.na(firm) | !is.na(firm)
-            else if (firm_input == "No Firm") is.na(firm)
-            else firm == firm_input
-          ) |>
-          dplyr::pull(sum_allinnos) |>
-          sum()
-        tictoc::toc()
+        sum_allinnos_val <- sum(allinnos_data$allinnos)
 
-        tictoc::tic("R-side aggregation")
-
-        by_country <- base_data |>
-          dplyr::group_by(ctry_code) |>
-          dplyr::arrange(dplyr::desc(.data[[toflow]]), .by_group = TRUE) |>
-          dplyr::mutate(rnk = dplyr::row_number(), cnt = dplyr::n()) |>
-          dplyr::summarise(
-            mean           = mean(.data[[toflow]], na.rm = TRUE),
-            innos          = dplyr::n(),
-            sem            = ifelse(dplyr::n() > 1, sd(.data[[toflow]], na.rm = TRUE) / sqrt(dplyr::n()), NA_real_),
-            q1             = quantile(.data[[toflow]], 0.25, na.rm = TRUE),
-            q2             = quantile(.data[[toflow]], 0.50, na.rm = TRUE),
-            q3             = quantile(.data[[toflow]], 0.75, na.rm = TRUE),
-            top25_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.25), 1)], na.rm = TRUE),
-            top50_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.50), 1)], na.rm = TRUE),
-            top3_ids       = paste(docdb_family_id[seq_len(min(3, dplyr::n()))], collapse = ", "),
-            .groups        = "drop"
-          )
-
-        # Global "All" row
-        all_row <- base_data |>
-          dplyr::arrange(dplyr::desc(.data[[toflow]])) |>
-          dplyr::mutate(rnk = dplyr::row_number(), cnt = dplyr::n()) |>
-          dplyr::summarise(
-            ctry_code      = "All",
-            mean           = mean(.data[[toflow]], na.rm = TRUE),
-            innos          = dplyr::n(),
-            sem            = ifelse(dplyr::n() > 1, sd(.data[[toflow]], na.rm = TRUE) / sqrt(dplyr::n()), NA_real_),
-            q1             = quantile(.data[[toflow]], 0.25, na.rm = TRUE),
-            q2             = quantile(.data[[toflow]], 0.50, na.rm = TRUE),
-            q3             = quantile(.data[[toflow]], 0.75, na.rm = TRUE),
-            top25_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.25), 1)], na.rm = TRUE),
-            top50_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.50), 1)], na.rm = TRUE),
-            top3_ids       = paste(docdb_family_id[seq_len(min(3, dplyr::n()))], collapse = ", ")
-          )
-
-        out <- dplyr::bind_rows(by_country, all_row) |>
+        out <- out |>
           dplyr::left_join(allinnos_data, by = "ctry_code") |>
           dplyr::mutate(
             top3_ids_url = build_espacenet_search(top3_ids),
             top25        = 0.25,
             top50        = 0.5,
             allinnos     = dplyr::if_else(ctry_code == "All", innos, allinnos),
-            sum_allinnos = sum_allinnos_val,
             share_c      = dplyr::if_else(ctry_code == "All", 1, innos / allinnos),
             share        = dplyr::if_else(ctry_code == "All", 1, sum(innos[ctry_code != "All"]) / sum_allinnos_val),
             RTA          = dplyr::if_else(ctry_code == "All", 1, 2 * share_c / (share_c + share))
           )
 
-        tictoc::toc()
+        # if (nrow(base_data) == 0) return(NULL)
+        
+        # tictoc::tic("allinnos lookup")
+        # firm_input <- firm  # scalar from input, avoids collision with data column name
+
+        # allinnos_data <- allinnos_baseline |>
+        #   dplyr::filter(ctry_code %in% selected_countries) |>
+        #   dplyr::filter(
+        #     if (firm_input == "All Firms") is.na(firm) | !is.na(firm)
+        #     else if (firm_input == "No Firm") is.na(firm)
+        #     else firm == firm_input
+        #   ) |>
+        #   dplyr::group_by(ctry_code) |>
+        #   dplyr::summarise(allinnos = sum(allinnos), .groups = "drop")
+
+        # sum_allinnos_val <- sum_allinnos_baseline |>
+        #   dplyr::filter(
+        #     if (firm_input == "All Firms") is.na(firm) | !is.na(firm)
+        #     else if (firm_input == "No Firm") is.na(firm)
+        #     else firm == firm_input
+        #   ) |>
+        #   dplyr::pull(sum_allinnos) |>
+        #   sum()
+        # tictoc::toc()
+
+        # tictoc::tic("R-side aggregation")
+
+        # by_country <- base_data |>
+        #   dplyr::group_by(ctry_code) |>
+        #   dplyr::arrange(dplyr::desc(.data[[toflow]]), .by_group = TRUE) |>
+        #   dplyr::mutate(rnk = dplyr::row_number(), cnt = dplyr::n()) |>
+        #   dplyr::summarise(
+        #     mean           = mean(.data[[toflow]], na.rm = TRUE),
+        #     innos          = dplyr::n(),
+        #     sem            = ifelse(dplyr::n() > 1, sd(.data[[toflow]], na.rm = TRUE) / sqrt(dplyr::n()), NA_real_),
+        #     q1             = quantile(.data[[toflow]], 0.25, na.rm = TRUE),
+        #     q2             = quantile(.data[[toflow]], 0.50, na.rm = TRUE),
+        #     q3             = quantile(.data[[toflow]], 0.75, na.rm = TRUE),
+        #     top25_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.25), 1)], na.rm = TRUE),
+        #     top50_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.50), 1)], na.rm = TRUE),
+        #     top3_ids       = paste(docdb_family_id[seq_len(min(3, dplyr::n()))], collapse = ", "),
+        #     .groups        = "drop"
+        #   )
+
+        # # Global "All" row
+        # all_row <- base_data |>
+        #   dplyr::arrange(dplyr::desc(.data[[toflow]])) |>
+        #   dplyr::mutate(rnk = dplyr::row_number(), cnt = dplyr::n()) |>
+        #   dplyr::summarise(
+        #     ctry_code      = "All",
+        #     mean           = mean(.data[[toflow]], na.rm = TRUE),
+        #     innos          = dplyr::n(),
+        #     sem            = ifelse(dplyr::n() > 1, sd(.data[[toflow]], na.rm = TRUE) / sqrt(dplyr::n()), NA_real_),
+        #     q1             = quantile(.data[[toflow]], 0.25, na.rm = TRUE),
+        #     q2             = quantile(.data[[toflow]], 0.50, na.rm = TRUE),
+        #     q3             = quantile(.data[[toflow]], 0.75, na.rm = TRUE),
+        #     top25_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.25), 1)], na.rm = TRUE),
+        #     top50_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.50), 1)], na.rm = TRUE),
+        #     top3_ids       = paste(docdb_family_id[seq_len(min(3, dplyr::n()))], collapse = ", ")
+        #   )
+
+        # out <- dplyr::bind_rows(by_country, all_row) |>
+        #   dplyr::left_join(allinnos_data, by = "ctry_code") |>
+        #   dplyr::mutate(
+        #     top3_ids_url = build_espacenet_search(top3_ids),
+        #     top25        = 0.25,
+        #     top50        = 0.5,
+        #     allinnos     = dplyr::if_else(ctry_code == "All", innos, allinnos),
+        #     sum_allinnos = sum_allinnos_val,
+        #     share_c      = dplyr::if_else(ctry_code == "All", 1, innos / allinnos),
+        #     share        = dplyr::if_else(ctry_code == "All", 1, sum(innos[ctry_code != "All"]) / sum_allinnos_val),
+        #     RTA          = dplyr::if_else(ctry_code == "All", 1, 2 * share_c / (share_c + share))
+        #   )
+
+        # tictoc::toc()
         tictoc::toc()
         out
 
