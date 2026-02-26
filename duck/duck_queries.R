@@ -17,16 +17,44 @@ library(duckdb)
 # Connection Management
 # ============================================================================
 
-#' Open a read-only DuckDB connection
-#' @param duck_db_path Path to the .duckdb file
+#' Open a DuckDB connection (MotherDuck cloud or local file)
+#'
+#' If MOTHERDUCK_TOKEN is set, tries MotherDuck first. Falls back to local file.
+#' Note: The MotherDuck R extension is not available on Windows; on Windows the
+#' fallback to local file will be used automatically.
+#'
+#' @param duck_db_path Path to the local .duckdb file (NULL to skip local fallback)
 #' @return DBI connection object
-duck_connect <- function(duck_db_path) {
-  if (!file.exists(duck_db_path)) {
+duck_connect <- function(duck_db_path = NULL) {
+  md_token <- Sys.getenv("MOTHERDUCK_TOKEN")
+
+  # Try MotherDuck if token is available
+  if (nzchar(md_token)) {
+    con <- tryCatch({
+      message("Connecting to MotherDuck...")
+      md_con <- dbConnect(duckdb::duckdb())
+      dbExecute(md_con, "INSTALL 'motherduck'")
+      dbExecute(md_con, "LOAD 'motherduck'")
+      dbExecute(md_con, paste0("SET motherduck_token = '", md_token, "'"))
+      dbExecute(md_con, "ATTACH 'md:iseapp' AS iseapp")
+      dbExecute(md_con, "USE iseapp")
+      message("Connected to MotherDuck: iseapp")
+      md_con
+    }, error = function(e) {
+      message("MotherDuck connection failed: ", conditionMessage(e))
+      message("Falling back to local database...")
+      NULL
+    })
+    if (!is.null(con)) return(con)
+  }
+
+  # Fallback: local file
+  if (is.null(duck_db_path) || !file.exists(duck_db_path)) {
     stop("DuckDB database not found at: ", duck_db_path,
-         "\nPlease run prep_duckdb.Rmd first to build the database.")
+         "\nSet MOTHERDUCK_TOKEN for cloud access, or run prep_duckdb.Rmd for local.")
   }
   con <- dbConnect(duckdb(), dbdir = duck_db_path, read_only = TRUE)
-  message("Connected to DuckDB: ", duck_db_path)
+  message("Connected to local DuckDB: ", duck_db_path)
   con
 }
 

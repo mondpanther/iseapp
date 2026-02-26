@@ -59,7 +59,9 @@ duck_dir <- getwd()  # Should be the duck/ directory when knitting this Rmd
 message("DuckDB output directory: ", duck_dir)
 
 duck_db_path <- file.path(duck_dir, "iseapp.duckdb")
+```
 
+```{r}
 # Remove existing database to start fresh
 if (file.exists(duck_db_path)) {
   message("Removing existing database: ", duck_db_path)
@@ -462,7 +464,89 @@ message("\nVerification query on istrax_country (should match earlier spot check
 print(verify_q)
 ```
 
-## 12. Close connection
+## 12. Upload to MotherDuck
+
+Upload the completed database to MotherDuck cloud as `iseapp`. Requires the
+`MOTHERDUCK_TOKEN` environment variable to be set (get your token from the
+MotherDuck UI under Settings → Tokens, then add `MOTHERDUCK_TOKEN=your_token`
+to your `~/.Renviron` file and restart R).
+
+```{r motherduck-upload, eval=FALSE}
+# Close the local connection first to release the file lock
+if (exists("con")) try(dbDisconnect(con, shutdown = TRUE), silent = TRUE)
+
+md_token <- Sys.getenv("MOTHERDUCK_TOKEN")
+if (!nzchar(md_token)) {
+  message("MOTHERDUCK_TOKEN not set - skipping MotherDuck upload.")
+  message("Set it in ~/.Renviron and restart R to enable cloud upload.")
+} else {
+  db_path_fwd <- gsub("\\\\", "/", duck_db_path)
+
+  # Try R-native approach first (works on Linux/Mac)
+  # Note: extension autoloading is OFF in R's duckdb package, so we must
+  # use an in-memory connection and explicitly INSTALL/LOAD the extension.
+  # This may fail on Windows where the R motherduck extension isn't available.
+  upload_ok <- tryCatch({
+    message("Connecting to MotherDuck via R duckdb extension...")
+    con_md <- dbConnect(duckdb::duckdb())
+    dbExecute(con_md, "INSTALL 'motherduck'")
+    dbExecute(con_md, "LOAD 'motherduck'")
+    dbExecute(con_md, paste0("SET motherduck_token = '", md_token, "'"))
+    dbExecute(con_md, "ATTACH 'md:'")
+
+    message("Uploading database to MotherDuck as 'iseapp' (this may take a while)...")
+    dbExecute(con_md, paste0("CREATE OR REPLACE DATABASE iseapp FROM '", db_path_fwd, "'"))
+
+    message("Upload complete. Verifying remote database...")
+    dbExecute(con_md, "USE iseapp")
+    remote_tables <- dbListTables(con_md)
+    message("Remote tables: ", paste(remote_tables, collapse = ", "))
+
+    dbDisconnect(con_md, shutdown = TRUE)
+    TRUE
+  }, error = function(e) {
+    message("R duckdb extension failed: ", conditionMessage(e))
+    try(dbDisconnect(con_md, shutdown = TRUE), silent = TRUE)
+    FALSE
+  })
+
+  # Fallback: use DuckDB CLI (works on Windows)
+  # Install CLI via: winget install DuckDB.cli
+  if (!upload_ok) {
+    duckdb_cli <- Sys.which("duckdb")
+    if (nzchar(duckdb_cli)) {
+      message("Falling back to DuckDB CLI at: ", duckdb_cli)
+      # Feed SQL via stdin to avoid shell quoting issues with the JWT token
+      sql_lines <- c(
+        "INSTALL motherduck;",
+        "LOAD motherduck;",
+        paste0("SET motherduck_token = '", md_token, "';"),
+        "ATTACH 'md:';",
+        paste0("CREATE OR REPLACE DATABASE iseapp FROM '", db_path_fwd, "';")
+      )
+      cli_output <- system2(duckdb_cli, input = sql_lines,
+                            stdout = TRUE, stderr = TRUE)
+      exit_status <- attr(cli_output, "status")
+      if (is.null(exit_status) || exit_status == 0) {
+        message("MotherDuck upload via CLI completed successfully.")
+      } else {
+        warning("DuckDB CLI upload failed. Output:\n", paste(cli_output, collapse = "\n"))
+      }
+    } else {
+      warning("DuckDB CLI not found on PATH.\n",
+              "Install it via: winget install DuckDB.cli\n",
+              "Or download from: https://duckdb.org/docs/installation/")
+    }
+  } else {
+    message("MotherDuck upload finished successfully.")
+  }
+}
+
+# Re-open local connection for the cleanup chunk
+con <- dbConnect(duckdb(), dbdir = duck_db_path)
+```
+
+## 13. Close connection
 
 ```{r cleanup}
 dbDisconnect(con, shutdown = TRUE)

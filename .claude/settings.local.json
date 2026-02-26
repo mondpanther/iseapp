@@ -19,7 +19,8 @@
       "Bash(\"C:/Program Files/R/R-4.4.1/bin/Rscript.exe\" -e \"library\\(arrow\\); d <- read_parquet\\(''C:/Users/rmart/PRINZteam Dropbox/Ralf Martin/Apps/iseapp/firmmap.parquet''\\); cat\\(paste\\(names\\(d\\), collapse='', ''\\)\\); cat\\(''\\\\n''\\); cat\\(''nrow:'', nrow\\(d\\), ''\\\\n''\\); print\\(str\\(head\\(d, 3\\)\\)\\)\")",
       "Bash(\"C:/Program Files/R/R-4.4.1/bin/Rscript.exe\" -e \"library\\(arrow\\); d <- read_parquet\\(''C:/Users/rmart/PRINZteam Dropbox/Ralf Martin/Apps/iseapp/firmsectormap.parquet''\\); cat\\(paste\\(names\\(d\\), collapse='', ''\\)\\); cat\\(''\\\\n''\\); cat\\(''nrow:'', nrow\\(d\\), ''\\\\n''\\); print\\(head\\(d, 3\\)\\)\")",
       "Bash(\"C:/Program Files/R/R-4.4.1/bin/Rscript.exe\" -e \"library\\(fst\\); d <- read_fst\\(''C:/Users/rmart/PRINZteam Dropbox/Ralf Martin/Apps/iseapp/istraxes/istrax_nationalkey_2009_2018.fst'', to=3\\); cat\\(paste\\(names\\(d\\), collapse='', ''\\)\\); cat\\(''\\\\n''\\); print\\(head\\(d\\)\\)\")",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "WebFetch(domain:motherduck.com)"
     ]
   }
 }

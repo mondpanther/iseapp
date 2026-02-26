@@ -89,8 +89,7 @@ if (!is.null(iseapp_local_path)) {
   message("Local Dropbox not found - DuckDB database must exist locally")
 }
 
-# Determine the DuckDB path — stored locally in the repo's duck/ folder
-# (not in Dropbox, to avoid sync/corruption issues with cloud storage)
+# Determine the DuckDB path — may be NULL if using MotherDuck cloud only
 duck_db_path <- file.path(getwd(), "iseapp.duckdb")
 if (!file.exists(duck_db_path)) {
   # Try relative to this script's location
@@ -102,10 +101,16 @@ if (!file.exists(duck_db_path)) {
 }
 
 if (!file.exists(duck_db_path)) {
-  stop("DuckDB database not found. Expected iseapp.duckdb in the duck/ folder.",
-       "\nPlease run prep_duckdb.Rmd first to build the database.")
+  if (nzchar(Sys.getenv("MOTHERDUCK_TOKEN"))) {
+    message("Local database not found - will use MotherDuck cloud database.")
+    duck_db_path <- NULL
+  } else {
+    stop("DuckDB database not found. Expected iseapp.duckdb in the duck/ folder.",
+         "\nPlease run prep_duckdb.Rmd first, or set MOTHERDUCK_TOKEN for cloud access.")
+  }
+} else {
+  message("DuckDB database path: ", duck_db_path)
 }
-message("DuckDB database path: ", duck_db_path)
 
 # ============================================================================
 # Make www/ assets available via addResourcePath
