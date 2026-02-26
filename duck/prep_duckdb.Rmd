@@ -438,7 +438,148 @@ if ("regionmap" %in% dbListTables(con)) {
 }
 ```
 
-## 11. Final verification
+## 11. Lookup tables for SQL-complete queries
+
+These small lookup tables enable the Shiny app's SQL queries to return fully
+plot-ready dataframes without any R-side post-processing.
+
+### 11a. Technology → greenclass mapping
+
+```{r create-tech-greenclass}
+# Technology class definitions (same as app.R)
+green_classes <- c("Green Technology","Green Energy", "Green Transport", "Circular Economy",
+                   "Green Manufacturing", "Adaptation", "Green Housing", "Green ICT",
+                   "Green Agriculture", "GHG Capture")
+
+battery_classes <- c("Battery Technology", "Lithium Extraction & Processing",
+                     "Graphite & Carbon Materials", "Cathode Materials", "Anode Materials",
+                     "Electrolytes & Additives", "Separators", "Battery Cell Design & Assembly",
+                     "Battery Management Systems (BMS)", "Electric Vehicles & Mobility",
+                     "Battery Recycling & Recovery")
+
+hard_to_abate_classes <- c("Hard to Abate Sector Decarbonization", "Aviation Decarbonisation",
+                           "Cement & Concrete Decarbonisation", "Chemicals & Plastics Decarbonisation",
+                           "Shipping Decarbonisation", "Steel & Iron Decarbonisation")
+
+ai_classes <- c("AI", "Machine Learning", "Deep Learning", "Natural Language Processing (NLP)",
+                "Computer Vision", "Speech Recognition & Synthesis", "Robotics & Autonomous Systems",
+                "Knowledge Representation & Reasoning", "Planning & Decision Making", "Generative AI",
+                "Semiconductors", "Cloud & Data Infrastructure", "Data Rettrieval & Processing System",
+                "Platform & Frameworks", "Deployment & Support")
+
+cpc_sections <- c("Human Necessities", "Performing Operations; Transporting ",
+                  "Chemistry; Metallurgy ", "Textiles; Paper", "Fixed Constructions",
+                  "Mechanical Engineering; Lighting; Heating; Weapons; Blasting",
+                  "Physics", "Electricity",
+                  "General tagging of new or cross-sectional technology")
+
+agrifood_classes <- c("Any Agriculture & Food technology", "Input supply",
+                      "Primary food and feed production", "Post-harvest handling & aggregation",
+                      "Processing", "Distribution/wholesale", "Retail/consumption", "Crosscutting")
+
+tech_greenclass <- data.frame(
+  technology = c(green_classes, battery_classes, hard_to_abate_classes,
+                 ai_classes, cpc_sections, agrifood_classes, "All"),
+  greenclass = c(rep("green", length(green_classes)),
+                 rep("battery", length(battery_classes)),
+                 rep("hard to abate", length(hard_to_abate_classes)),
+                 rep("AI", length(ai_classes)),
+                 rep("CPC Sections", length(cpc_sections)),
+                 rep("agrifood", length(agrifood_classes)),
+                 "other"),
+  stringsAsFactors = FALSE
+)
+
+dbWriteTable(con, "tech_greenclass", tech_greenclass, overwrite = TRUE)
+message("tech_greenclass: ", nrow(tech_greenclass), " rows")
+```
+
+### 11b. Country code → English name mapping
+
+```{r create-country-names}
+library(countrycode)
+
+# Get all ISO2 codes from the database
+all_codes <- dbGetQuery(con, "SELECT DISTINCT ctry_code FROM countrymap ORDER BY ctry_code")$ctry_code
+country_df <- data.frame(
+  ctry_code = all_codes,
+  country_name = countrycode(all_codes, "iso2c", "country.name.en", warn = FALSE),
+  stringsAsFactors = FALSE
+)
+# Use code itself as fallback for unrecognised codes
+country_df$country_name[is.na(country_df$country_name)] <-
+  country_df$ctry_code[is.na(country_df$country_name)]
+
+# Add UK NUTS1 region codes (override any existing entries)
+uk_regions <- data.frame(
+  ctry_code = c("UKC","UKD","UKE","UKF","UKG","UKH","UKI","UKJ","UKK","UKL","UKM","UKN"),
+  country_name = c("North East England","North West England","Yorkshire and The Humber",
+                    "East Midlands","West Midlands","East of England","London",
+                    "South East England","South West England","Wales","Scotland",
+                    "Northern Ireland"),
+  stringsAsFactors = FALSE
+)
+country_df <- rbind(country_df[!country_df$ctry_code %in% uk_regions$ctry_code, ], uk_regions)
+
+dbWriteTable(con, "country_names", country_df, overwrite = TRUE)
+message("country_names: ", nrow(country_df), " rows")
+```
+
+### 11c. GDP per capita data (for scatter plots)
+
+```{r create-gdp-data}
+gdp_per_capita_2015 <- data.frame(
+  ctry_code = c("AD", "AE", "AF", "AG", "AL", "AM", "AO", "AR", "AT", "AU",
+                "AZ", "BA", "BB", "BD", "BE", "BF", "BG", "BH", "BI", "BJ",
+                "BN", "BO", "BR", "BS", "BT", "BW", "BY", "BZ", "CA", "CD",
+                "CF", "CG", "CH", "CI", "CL", "CM", "CN", "CO", "CR", "CU",
+                "CV", "CY", "CZ", "DE", "DJ", "DK", "DM", "DO", "DZ", "EC",
+                "EE", "EG", "ER", "ES", "ET", "FI", "FJ", "FM", "FR", "GA",
+                "GB", "GD", "GE", "GH", "GM", "GN", "GQ", "GR", "GT", "GW",
+                "GY", "HK", "HN", "HR", "HT", "HU", "ID", "IE", "IL", "IN",
+                "IQ", "IR", "IS", "IT", "JM", "JO", "JP", "KE", "KG", "KH",
+                "KI", "KM", "KN", "KP", "KR", "KW", "KZ", "LA", "LB", "LC",
+                "LI", "LK", "LR", "LS", "LT", "LU", "LV", "LY", "MA", "MC",
+                "MD", "ME", "MG", "MK", "ML", "MM", "MN", "MO", "MR", "MT",
+                "MU", "MV", "MW", "MX", "MY", "MZ", "NA", "NE", "NG", "NI",
+                "NL", "NO", "NP", "NZ", "OM", "PA", "PE", "PG", "PH", "PK",
+                "PL", "PR", "PS", "PT", "PW", "PY", "QA", "RO", "RS", "RU",
+                "RW", "SA", "SB", "SC", "SD", "SE", "SG", "SI", "SK", "SL",
+                "SM", "SN", "SO", "SR", "SS", "ST", "SV", "SY", "SZ", "TD",
+                "TG", "TH", "TJ", "TL", "TM", "TN", "TO", "TR", "TT", "TV",
+                "TW", "TZ", "UA", "UG", "US", "UY", "UZ", "VC", "VE", "VN",
+                "VU", "WS", "XK", "YE", "ZA", "ZM", "ZW"),
+  gdp_pc_2015 = c(NA, 67127, 1934, 21071, 12387, 11632, 7640, 22536, 52612, 48401,
+                  16553, 13679, 15943, 4248, 49145, 2042, 21168, 47384, 758, 2967,
+                  76057, 7877, 15065, 31802, 10442, 16687, 18498, 7913, 46780, 1037,
+                  868, 5387, 66025, 4789, 24034, 3665, 14439, 14324, 17682, NA,
+                  7009, 37898, 34817, 51914, 3744, 52752, 11997, 15784, 13966, 11410,
+                  30248, 12035, 1820, 36668, 2086, 45389, 12709, 3587, 43968, 14683,
+                  45071, 14790, 12046, 5267, 2331, 2350, 25039, 28037, 8381, 1971,
+                  11789, 58573, 5232, 24865, 1795, 27180, 11188, 68883, 37347, 6096,
+                  13847, 18765, 50406, 40723, 9025, 10891, 41384, 4373, 3726, 3959,
+                  2036, 2914, 23775, NA, 38292, 60566, 25178, 7327, 14073, 14027,
+                  NA, 12956, 1350, 3145, 30543, 108797, 26078, 15904, 7780, NA,
+                  9614, 18188, 1594, 14949, 2317, 5189, 12456, 107721, 5133, 40160,
+                  22534, 17048, 1480, 18934, 27029, 1344, 10622, 1196, 5670, 5678,
+                  53955, 64192, 3093, 39935, 32993, 27839, 13009, 4302, 8351, 5174,
+                  27963, 37605, 5886, 32871, 16219, 12531, 116582, 24491, 16281, 25218,
+                  2178, 49519, 2517, 27632, 4330, 50338, 88155, 35417, 30693, 1622,
+                  62644, 3371, NA, 18252, 1879, 3821, 8316, NA, 9895, 2154,
+                  1822, 17445, 3280, 5000, 16056, 11604, 6168, 26949, 31251, 4776,
+                  NA, 2864, 12270, 2240, 57486, 21928, 6924, 13107, NA, 6826,
+                  3008, 6260, 10906, 2591, 13572, 3770, 2413),
+  stringsAsFactors = FALSE
+)
+
+# Remove NAs before writing
+gdp_per_capita_2015 <- gdp_per_capita_2015[!is.na(gdp_per_capita_2015$gdp_pc_2015), ]
+
+dbWriteTable(con, "gdp_data", gdp_per_capita_2015, overwrite = TRUE)
+message("gdp_data: ", nrow(gdp_per_capita_2015), " rows")
+```
+
+## 12. Final verification
 
 ```{r final-verify}
 tables <- dbListTables(con)

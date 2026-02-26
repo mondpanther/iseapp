@@ -29,8 +29,8 @@ library(duckdb)
 
 # Source helper files with relative paths
 source("../dropbox_auth.R")
-source("../istraxfunctions.R")
-source("duck_queries.R")
+source("duck_queries.R")      # SQL query functions (all data processing in DuckDB)
+source("duck_plots.R")        # Clean plotting functions (visualization only)
 
 # Register Google Font
 register_gfont("Open Sans")
@@ -182,16 +182,9 @@ ai_classes_d           =setdiff(ai_classes,"AI")
 agrifood_classes_d     =setdiff(agrifood_classes,"Any Agriculture & Food technology")
 
 
-colorings=list(green=green_classes,battery=battery_classes,hard_to_abate=hard_to_abate_classes,ai=ai_classes,cpcsecs=cpc_sections,agrifood=agrifood_classes)
-
-# Define custom colors
-custom_colors <- c("green" = "forestgreen",
-                   "battery" = "gold",
-                   "other" = "gray70",
-                   "hard to abate"="blue",
-                   "AI"="orange",
-                   "cpcsecs"="purple",
-                   "agrifood"="burlywood")
+# Note: colorings list and custom_colors are no longer needed here.
+# Greenclass comes from the tech_greenclass table via SQL JOIN.
+# custom_colors is defined in duck_plots.R.
 
 other_techs <- c(setdiff(all_techs, c(green_classes, battery_classes,hard_to_abate_classes,cpc_sections,agrifood_classes)),"Green Technology","Battery Technology","Hard to Abate Sector Decarbonization","Any Agriculture & Food technology")
 
@@ -1165,14 +1158,13 @@ server <- function(input, output, session) {
 
     other_label <- if (include_other) "Other" else NULL
 
-    # Use duck_compute_avstrax for DuckDB aggregation
+    # Use duck_compute_avstrax for DuckDB aggregation (greenclass from SQL)
     precomputed <- duck_compute_avstrax(
       duck_con, input$toflow,
       tech_categories = if (length(explicit_categories) > 0) explicit_categories else NULL,
       country_codes = selected_countries,
       firm_names = firm_names,
-      other_label = other_label,
-      colorings = colorings
+      other_label = other_label
     )
 
     # Calculate responsive dimensions
@@ -1181,20 +1173,16 @@ server <- function(input, output, session) {
     aspect_ratio <- ifelse(plot_width > 1200, 0.5, ifelse(plot_width > 800, 0.6, 0.7))
     height_inches <- width_inches * aspect_ratio
 
-    result <- plot_avstrax_by_country(
-      pdata = NULL,
-      classes = NULL,
-      country_code = selected_countries,
+    result <- duck_plot_tech_bars(
+      data = precomputed,
       toflow = input$toflow,
       custom_colors = custom_colors,
-      colorings = colorings,
       bwidthscale = input$bwidthscale,
       display_mode = input$display_mode,
       show_top3_ids = input$show_top3_ids,
       width_svg = width_inches,
       height_svg = height_inches,
-      plot_title = sub("^[^.]*\\.", "", flow_label),
-      precomputed_data = precomputed
+      plot_title = sub("^[^.]*\\.", "", flow_label)
     )
 
     plot_store$avstrax_plot1_gg <- result$ggplot
@@ -1229,11 +1217,9 @@ server <- function(input, output, session) {
       duck_con, input$toflow,
       tech_filter = tech_filter,
       country_codes = selected_countries,
-      firm_names = firm_names
+      firm_names = firm_names,
+      min_innos = input$mininno  # Filtering in SQL
     )
-
-    # Handle comparison technologies
-    has_comparison <- !is.null(input$techs_comparison) && length(input$techs_comparison) > 0
 
     # Calculate responsive dimensions
     plot_width <- max(window_dims$width, 400)
@@ -1243,32 +1229,18 @@ server <- function(input, output, session) {
     min_height <- 4
     height_inches <- max(min_height, n_countries * height_per_bar)
 
-    # For comparison, compute separately if needed
-    comparison_techs_arg <- NULL
-    if (has_comparison && is.null(firm_names)) {
-      # With DuckDB precomputed data, comparison is not directly supported in the precomputed path
-      # We pass comparison_technologies = NULL since we use precomputed_avstrax
-      comparison_techs_arg <- NULL
-    } else if (has_comparison) {
-      comparison_techs_arg <- NULL
-    }
-
-    result <- plot_avstrax_by_technology(
-      pdata = NULL,
-      classes = NULL,
-      technologies = input$techs,
+    result <- duck_plot_country_bars(
+      data = precomputed,
       toflow = input$toflow,
       custom_colors = custom_colors,
       topn = input$topn,
-      mininno = input$mininno,
+      mininno = 0,  # Already filtered in SQL
       bwidthscale = input$bwidthscale,
       display_mode = input$display_mode,
       show_top3_ids = input$show_top3_ids,
       width_svg = width_inches,
       height_svg = height_inches,
-      plot_title = sub("^[^.]*\\.", "", flow_label),
-      comparison_technologies = comparison_techs_arg,
-      precomputed_avstrax = precomputed
+      plot_title = sub("^[^.]*\\.", "", flow_label)
     )
 
     plot_store$avstrax_plot2_gg <- result$ggplot
@@ -1297,26 +1269,23 @@ server <- function(input, output, session) {
       duck_con, input$toflow,
       tech_filter = tech_filter,
       country_codes = selected_countries,
-      firm_names = firm_names
+      firm_names = firm_names,
+      min_innos = input$mininno  # Filtering in SQL
     )
-
-    # Filter by minimum innovations
-    avstrax_data <- avstrax_data %>%
-      filter(innos >= input$mininno)
 
     # Determine if this is a return (%) or spillover ($) variable
     is_return <- grepl("strax", input$toflow)
     map_title <- paste0("World Map: ", sub("^[^.]*\\.", "", flow_label))
 
     # Store ggplot version and data for PDF/CSV downloads
-    plot_store$world_map_gg <- plot_world_map_gg(
-      avstrax_data = avstrax_data, value_col = "mean",
+    plot_store$world_map_gg <- duck_plot_world_map_gg(
+      data = avstrax_data, value_col = "mean",
       plot_title = map_title, is_return = is_return
     )
     plot_store$world_map_data <- avstrax_data
 
-    plot_world_map(
-      avstrax_data = avstrax_data,
+    duck_plot_world_map(
+      data = avstrax_data,
       value_col = "mean",
       color_scale = "Viridis",
       plot_title = map_title,
@@ -1349,7 +1318,9 @@ server <- function(input, output, session) {
       duck_con, input$toflow,
       tech_filter = tech_filter,
       country_codes = selected_countries,
-      firm_names = NULL  # RTA not affected by firm filter in original
+      firm_names = NULL,  # RTA not affected by firm filter in original
+      min_innos = input$mininno_rta,
+      min_allinnos = input$minallinnos_rta
     )
 
     # Calculate responsive dimensions
@@ -1365,22 +1336,18 @@ server <- function(input, output, session) {
     tech_label <- paste(input$techs, collapse = ", ")
     rta_title <- paste0("RTA in ", tech_label, " by Country")
 
-    result <- plot_avstrax_rta(
-      pdata = NULL,
-      classes = NULL,
-      technologies = input$techs,
+    result <- duck_plot_rta_bars(
+      data = precomputed_data,
       toflow = input$toflow,
-      custom_colors = custom_colors,
       topn = input$topn_rta,
       bottomn = input$bottomn_rta,
-      mininno = input$mininno_rta,
-      minallinnos = input$minallinnos_rta,
+      mininno = 0,  # Already filtered in SQL
+      minallinnos = 0,  # Already filtered in SQL
       bwidthscale = input$bwidthscale,
       show_top3_ids = input$show_top3_ids,
       width_svg = width_inches,
       height_svg = height_inches,
-      plot_title = rta_title,
-      precomputed_avstrax = precomputed_data
+      plot_title = rta_title
     )
 
     plot_store$avstrax_plot2_rta_gg <- result$ggplot
@@ -1408,29 +1375,21 @@ server <- function(input, output, session) {
       duck_con, input$toflow,
       tech_filter = tech_filter,
       country_codes = selected_countries,
-      firm_names = NULL
+      firm_names = NULL,
+      min_innos = input$mininno_rta,
+      min_allinnos = input$minallinnos_rta
     )
 
-    # Filter by minimum innovations (using RTA-specific thresholds)
-    avstrax_data <- avstrax_data %>%
-      filter(innos >= input$mininno_rta)
-
-    # Apply Allinnos filter if the column exists
-    if ("Allinnos" %in% names(avstrax_data) && input$minallinnos_rta > 0) {
-      avstrax_data <- avstrax_data %>%
-        filter(Allinnos >= input$minallinnos_rta)
-    }
-
     # Store ggplot version and data for PDF/CSV downloads
-    plot_store$world_map_rta_gg <- plot_world_map_gg(
-      avstrax_data = avstrax_data, value_col = "RTA",
+    plot_store$world_map_rta_gg <- duck_plot_world_map_gg(
+      data = avstrax_data, value_col = "RTA",
       plot_title = "World Map: RTA Index", is_return = FALSE
     )
     plot_store$world_map_rta_data <- avstrax_data
 
     # Plot RTA on world map
-    plot_world_map(
-      avstrax_data = avstrax_data,
+    duck_plot_world_map(
+      data = avstrax_data,
       value_col = "RTA",
       color_scale = "RdYlGn",
       plot_title = "World Map: RTA Index",
@@ -1457,7 +1416,9 @@ server <- function(input, output, session) {
       duck_con, input$toflow,
       tech_filter = tech_filter,
       country_codes = selected_countries,
-      firm_names = NULL
+      firm_names = NULL,
+      min_innos = input$mininno_rta,
+      min_allinnos = input$minallinnos_rta
     )
 
     # Get plot dimensions
@@ -1472,10 +1433,10 @@ server <- function(input, output, session) {
     tech_label <- paste(input$techs, collapse = ", ")
     scatter_title <- paste0("RTA vs Returns: ", tech_label)
 
-    result <- plot_rta_returns_scatter(
-      avstrax_data = avstrax_data,
-      mininno = input$mininno_rta,
-      minallinnos = input$minallinnos_rta,
+    result <- duck_plot_rta_scatter(
+      data = avstrax_data,
+      mininno = 0,  # Already filtered in SQL
+      minallinnos = 0,
       bwidthscale = input$bwidthscale,
       width_svg = width_inches,
       height_svg = height_inches,
@@ -1504,11 +1465,14 @@ server <- function(input, output, session) {
     tech_filter <- input$techs
     if ("All Innovations" %in% tech_filter) tech_filter <- NULL
 
-    avstrax_data <- duck_compute_avstrax_for_techs(
+    # Use the GDP scatter helper — gets avstrax_for_techs + GDP in SQL
+    gdp_data <- duck_data_for_gdp_scatter(
       duck_con, input$toflow,
       tech_filter = tech_filter,
       country_codes = selected_countries,
-      firm_names = NULL
+      firm_names = NULL,
+      min_innos = input$mininno_rta,
+      min_allinnos = input$minallinnos_rta
     )
 
     # Get plot dimensions
@@ -1523,10 +1487,8 @@ server <- function(input, output, session) {
     tech_label <- paste(input$techs, collapse = ", ")
     scatter_title <- paste0("RTA vs GDP per Capita: ", tech_label)
 
-    result <- plot_rta_gdp_scatter(
-      avstrax_data = avstrax_data,
-      mininno = input$mininno_rta,
-      minallinnos = input$minallinnos_rta,
+    result <- duck_plot_gdp_scatter(
+      data = gdp_data,
       bwidthscale = input$bwidthscale,
       width_svg = width_inches,
       height_svg = height_inches,
@@ -1570,7 +1532,6 @@ server <- function(input, output, session) {
       country_codes = selected_regions,
       firm_names = firm_names,
       other_label = other_label,
-      colorings = colorings,
       use_regionmap = TRUE
     )
 
@@ -1579,20 +1540,16 @@ server <- function(input, output, session) {
     aspect_ratio <- ifelse(plot_width > 1200, 0.5, ifelse(plot_width > 800, 0.6, 0.7))
     height_inches <- width_inches * aspect_ratio
 
-    result <- plot_avstrax_by_country(
-      pdata = NULL,
-      classes = NULL,
-      country_code = selected_regions,
+    result <- duck_plot_tech_bars(
+      data = precomputed,
       toflow = input$toflow_region,
       custom_colors = custom_colors,
-      colorings = colorings,
       bwidthscale = input$bwidthscale_region,
       display_mode = input$display_mode_region,
       show_top3_ids = input$show_top3_ids_region,
       width_svg = width_inches,
       height_svg = height_inches,
-      plot_title = sub("^[^.]*\\.", "", flow_label),
-      precomputed_data = precomputed
+      plot_title = sub("^[^.]*\\.", "", flow_label)
     )
 
     plot_store$avstrax_plot1_region_gg <- result$ggplot
@@ -1627,12 +1584,9 @@ server <- function(input, output, session) {
       tech_filter = tech_filter,
       country_codes = selected_regions,
       firm_names = firm_names,
-      use_regionmap = TRUE
+      use_regionmap = TRUE,
+      min_innos = input$mininno_region  # Filtering in SQL
     )
-
-    # Handle comparison technologies
-    has_comparison <- !is.null(input$techs_comparison_region) && length(input$techs_comparison_region) > 0
-    comparison_techs_arg <- NULL
 
     plot_width <- max(window_dims$width, 400)
     width_inches <- plot_width / 96
@@ -1641,23 +1595,19 @@ server <- function(input, output, session) {
     min_height <- 4
     height_inches <- max(min_height, n_regions * height_per_bar)
 
-    result <- plot_avstrax_by_technology(
-      pdata = NULL,
-      classes = NULL,
-      technologies = input$techs_region,
+    result <- duck_plot_country_bars(
+      data = precomputed,
       toflow = input$toflow_region,
       custom_colors = custom_colors,
       topn = input$topn_region,
-      mininno = input$mininno_region,
+      mininno = 0,  # Already filtered in SQL
       bwidthscale = input$bwidthscale_region,
       display_mode = input$display_mode_region,
       show_top3_ids = input$show_top3_ids_region,
       width_svg = width_inches,
       height_svg = height_inches,
       plot_title = sub("^[^.]*\\.", "", flow_label),
-      x_label = "Region",
-      comparison_technologies = comparison_techs_arg,
-      precomputed_avstrax = precomputed
+      x_label = "Region"
     )
 
     plot_store$avstrax_plot2_region_gg <- result$ggplot
@@ -1687,26 +1637,23 @@ server <- function(input, output, session) {
       tech_filter = tech_filter,
       country_codes = selected_regions,
       firm_names = firm_names,
-      use_regionmap = TRUE
+      use_regionmap = TRUE,
+      min_innos = input$mininno_region  # Filtering in SQL
     )
-
-    # Filter by minimum innovations
-    avstrax_data <- avstrax_data %>%
-      filter(innos >= input$mininno_region)
 
     # Determine if this is a return (%) or spillover ($) variable
     is_return <- grepl("strax", input$toflow_region)
     map_title <- paste0("UK Regions: ", sub("^[^.]*\\.", "", flow_label))
 
     # Store ggplot version and data for PDF/CSV downloads
-    plot_store$uk_regions_map_gg <- plot_uk_regions_map_gg(
-      avstrax_data = avstrax_data, value_col = "mean",
+    plot_store$uk_regions_map_gg <- duck_plot_uk_regions_map_gg(
+      data = avstrax_data, value_col = "mean",
       plot_title = map_title, is_return = is_return
     )
     plot_store$uk_regions_map_data <- avstrax_data
 
-    plot_uk_regions_map(
-      avstrax_data = avstrax_data,
+    duck_plot_uk_regions_map(
+      data = avstrax_data,
       value_col = "mean",
       plot_title = map_title,
       is_return = is_return
@@ -1739,7 +1686,9 @@ server <- function(input, output, session) {
       tech_filter = tech_filter,
       country_codes = selected_regions,
       firm_names = NULL,
-      use_regionmap = TRUE
+      use_regionmap = TRUE,
+      min_innos = input$mininno_rta_region,
+      min_allinnos = input$minallinnos_rta_region
     )
 
     # Calculate responsive dimensions
@@ -1755,23 +1704,19 @@ server <- function(input, output, session) {
     tech_label <- paste(input$techs_region, collapse = ", ")
     rta_title <- paste0("RTA in ", tech_label, " by Region")
 
-    result <- plot_avstrax_rta(
-      pdata = NULL,
-      classes = NULL,
-      technologies = input$techs_region,
+    result <- duck_plot_rta_bars(
+      data = precomputed_data,
       toflow = input$toflow_region,
-      custom_colors = custom_colors,
       topn = input$topn_rta_region,
       bottomn = input$bottomn_rta_region,
-      mininno = input$mininno_rta_region,
-      minallinnos = input$minallinnos_rta_region,
+      mininno = 0,  # Already filtered in SQL
+      minallinnos = 0,
       bwidthscale = input$bwidthscale_region,
       show_top3_ids = input$show_top3_ids_region,
       width_svg = width_inches,
       height_svg = height_inches,
       plot_title = rta_title,
-      x_label = "Region",
-      precomputed_avstrax = precomputed_data
+      x_label = "Region"
     )
 
     plot_store$avstrax_plot2_region_rta_gg <- result$ggplot
@@ -1799,7 +1744,9 @@ server <- function(input, output, session) {
       tech_filter = tech_filter,
       country_codes = selected_regions,
       firm_names = NULL,
-      use_regionmap = TRUE
+      use_regionmap = TRUE,
+      min_innos = input$mininno_rta_region,
+      min_allinnos = input$minallinnos_rta_region
     )
 
     # Get plot dimensions
@@ -1814,10 +1761,10 @@ server <- function(input, output, session) {
     tech_label <- paste(input$techs_region, collapse = ", ")
     scatter_title <- paste0("RTA vs Returns: ", tech_label)
 
-    result <- plot_rta_returns_scatter(
-      avstrax_data = avstrax_data,
-      mininno = input$mininno_rta_region,
-      minallinnos = input$minallinnos_rta_region,
+    result <- duck_plot_rta_scatter(
+      data = avstrax_data,
+      mininno = 0,  # Already filtered in SQL
+      minallinnos = 0,
       bwidthscale = input$bwidthscale_region,
       width_svg = width_inches,
       height_svg = height_inches,
@@ -1852,29 +1799,21 @@ server <- function(input, output, session) {
       tech_filter = tech_filter,
       country_codes = selected_regions,
       firm_names = NULL,
-      use_regionmap = TRUE
+      use_regionmap = TRUE,
+      min_innos = input$mininno_rta_region,
+      min_allinnos = input$minallinnos_rta_region
     )
 
-    # Filter by minimum innovations (using RTA-specific thresholds)
-    avstrax_data <- avstrax_data %>%
-      filter(innos >= input$mininno_rta_region)
-
-    # Apply Allinnos filter if the column exists
-    if ("Allinnos" %in% names(avstrax_data) && input$minallinnos_rta_region > 0) {
-      avstrax_data <- avstrax_data %>%
-        filter(Allinnos >= input$minallinnos_rta_region)
-    }
-
     # Store ggplot version and data for PDF/CSV downloads
-    plot_store$uk_regions_map_rta_gg <- plot_uk_regions_map_gg(
-      avstrax_data = avstrax_data, value_col = "RTA",
+    plot_store$uk_regions_map_rta_gg <- duck_plot_uk_regions_map_gg(
+      data = avstrax_data, value_col = "RTA",
       plot_title = "UK Regions: RTA Index", is_return = FALSE
     )
     plot_store$uk_regions_map_rta_data <- avstrax_data
 
     # Plot RTA on UK regions map
-    plot_uk_regions_map(
-      avstrax_data = avstrax_data,
+    duck_plot_uk_regions_map(
+      data = avstrax_data,
       value_col = "RTA",
       plot_title = "UK Regions: RTA Index",
       is_return = FALSE

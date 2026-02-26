@@ -132,6 +132,9 @@ firm_filter_sql <- function(firm_names, alias = "ic") {
 #' Materializes the shared CTE into a temp table to avoid scanning data twice
 #' (once for main aggregation, once for top25/top50/top3 extras).
 #'
+#' Greenclass is resolved via SQL JOIN with tech_greenclass table.
+#' Espacenet URLs are built in SQL using STRING_AGG + CONCAT.
+#'
 #' @param con DuckDB connection
 #' @param flow_type Flow type string (e.g. "istrax_global")
 #' @param tech_categories Character vector of technology categories to include.
@@ -140,13 +143,12 @@ firm_filter_sql <- function(firm_names, alias = "ic") {
 #' @param firm_names Character vector of company_raw names for firm filter, or NULL
 #' @param other_label If not NULL, technologies NOT in tech_categories are relabeled to this
 #'   (used for Plot 1's "Other" category)
-#' @param colorings Named list for greenclass assignment (passed through, applied in R)
 #' @param use_regionmap Logical; if TRUE, uses istrax_region instead of istrax_country
 #' @return Data frame with columns: technology, mean, innos, sem, q1, q2, q3,
 #'   top25, top50, top25_bin_mean, top50_bin_mean, top3_ids, top3_ids_url, greenclass
 duck_compute_avstrax <- function(con, flow_type, tech_categories = NULL,
                                   country_codes, firm_names = NULL,
-                                  other_label = NULL, colorings = NULL,
+                                  other_label = NULL,
                                   use_regionmap = FALSE) {
 
   scaler <- get_scaler(flow_type)
@@ -222,27 +224,73 @@ duck_compute_avstrax <- function(con, flow_type, tech_categories = NULL,
   tryCatch(dbExecute(con, "DROP TABLE IF EXISTS _avstrax_combined"), error = function(e) NULL)
   dbExecute(con, temp_sql)
 
-  # --- Main aggregation from temp table ---
-  main_sql <- "
+  # --- Single query: main aggregation + extras + greenclass + URLs ---
+  full_sql <- "
+    WITH main_agg AS (
+      SELECT
+        technology,
+        AVG(val) AS mean,
+        COUNT(*) AS innos,
+        CASE WHEN COUNT(*) > 1
+          THEN STDDEV_SAMP(val) / SQRT(COUNT(*))
+          ELSE 0
+        END AS sem,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY val) AS q1,
+        PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY val) AS q2,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY val) AS q3
+      FROM _avstrax_combined
+      GROUP BY technology
+    ),
+    ranked AS (
+      SELECT *,
+        PERCENT_RANK() OVER (PARTITION BY technology ORDER BY val DESC) AS prank,
+        ROW_NUMBER() OVER (PARTITION BY technology ORDER BY val DESC) AS rn
+      FROM _avstrax_combined
+    ),
+    extras AS (
+      SELECT
+        technology,
+        AVG(CASE WHEN prank < 0.25 THEN val END) AS top25_bin_mean,
+        AVG(CASE WHEN prank < 0.50 THEN val END) AS top50_bin_mean,
+        STRING_AGG(CASE WHEN rn <= 10 THEN CAST(appln_id AS VARCHAR) END, ', ')
+          AS top3_ids,
+        'javascript:window.open(\"https://worldwide.espacenet.com/patent/search?q=' ||
+          REPLACE(
+            COALESCE(STRING_AGG(
+              CASE WHEN rn <= 10 THEN 'ap%3D' || CAST(appln_id AS VARCHAR) END,
+              '%20OR%20'
+            ), ''),
+            ' ', '%20'
+          ) || '\")' AS top3_ids_url
+      FROM ranked
+      GROUP BY technology
+    )
     SELECT
-      technology,
-      AVG(val) AS mean,
-      COUNT(*) AS innos,
-      CASE WHEN COUNT(*) > 1
-        THEN STDDEV_SAMP(val) / SQRT(COUNT(*))
-        ELSE 0
-      END AS sem,
-      PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY val) AS q1,
-      PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY val) AS q2,
-      PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY val) AS q3
-    FROM _avstrax_combined
-    GROUP BY technology
+      m.technology,
+      m.mean,
+      m.innos,
+      m.sem,
+      m.q1,
+      m.q2,
+      m.q3,
+      0.25 AS top25,
+      0.5 AS top50,
+      e.top25_bin_mean,
+      e.top50_bin_mean,
+      e.top3_ids,
+      e.top3_ids_url,
+      COALESCE(tg.greenclass, 'other') AS greenclass
+    FROM main_agg m
+    LEFT JOIN extras e ON m.technology = e.technology
+    LEFT JOIN tech_greenclass tg ON m.technology = tg.technology
   "
 
-  result <- dbGetQuery(con, main_sql)
+  result <- dbGetQuery(con, full_sql)
+
+  # Clean up temp table
+  tryCatch(dbExecute(con, "DROP TABLE IF EXISTS _avstrax_combined"), error = function(e) NULL)
 
   if (nrow(result) == 0) {
-    tryCatch(dbExecute(con, "DROP TABLE IF EXISTS _avstrax_combined"), error = function(e) NULL)
     return(data.frame(
       technology = character(0), mean = numeric(0), innos = integer(0),
       sem = numeric(0), q1 = numeric(0), q2 = numeric(0), q3 = numeric(0),
@@ -251,58 +299,6 @@ duck_compute_avstrax <- function(con, flow_type, tech_categories = NULL,
       top3_ids = character(0), top3_ids_url = character(0),
       greenclass = character(0)
     ))
-  }
-
-  # --- Top25/Top50 bin means + top3 appln_ids from same temp table ---
-  extras_sql <- "
-    WITH ranked AS (
-      SELECT *,
-        PERCENT_RANK() OVER (PARTITION BY technology ORDER BY val DESC) AS prank
-      FROM _avstrax_combined
-    )
-    SELECT
-      technology,
-      AVG(CASE WHEN prank < 0.25 THEN val END) AS top25_bin_mean,
-      AVG(CASE WHEN prank < 0.50 THEN val END) AS top50_bin_mean,
-      STRING_AGG(CASE WHEN prank_inner <= 10 THEN appln_id END, ', ')
-        AS top3_ids
-    FROM (
-      SELECT *,
-        ROW_NUMBER() OVER (PARTITION BY technology ORDER BY val DESC) AS prank_inner
-      FROM ranked
-    ) sub
-    GROUP BY technology
-  "
-
-  extras <- dbGetQuery(con, extras_sql)
-
-  # Clean up temp table
-  tryCatch(dbExecute(con, "DROP TABLE IF EXISTS _avstrax_combined"), error = function(e) NULL)
-
-  # Merge extras with main result
-  result <- merge(result, extras, by = "technology", all.x = TRUE)
-
-  # Add compatibility columns
-  result$top25 <- 0.25
-  result$top50 <- 0.5
-
-  # Build Espacenet search URL (reuse function from istraxfunctions.R)
-  result$top3_ids_url <- if (exists("build_espacenet_search")) {
-    build_espacenet_search(result$top3_ids)
-  } else {
-    rep("", nrow(result))
-  }
-
-  # Add greenclass categorization (lightweight R-side lookup)
-  if (!is.null(colorings)) {
-    result$greenclass <- ifelse(result$technology %in% unlist(colorings["green"]), "green",
-                         ifelse(result$technology %in% unlist(colorings["battery"]), "battery",
-                         ifelse(result$technology %in% unlist(colorings["hard_to_abate"]), "hard to abate",
-                         ifelse(result$technology %in% unlist(colorings["ai"]), "AI",
-                         ifelse(result$technology %in% unlist(colorings["cpcsecs"]), "CPC Sections",
-                         ifelse(result$technology %in% unlist(colorings["agrifood"]), "agrifood", "other"))))))
-  } else {
-    result$greenclass <- "other"
   }
 
   result
@@ -319,6 +315,10 @@ duck_compute_avstrax <- function(con, flow_type, tech_categories = NULL,
 #' Uses pre-joined istrax_country/istrax_region tables and pre-computed patent
 #' count tables for fast queries. Materializes shared CTE into temp table.
 #'
+#' All processing (aggregation, RTA calculation, country name resolution,
+#' Espacenet URL building, mininno/minallinnos filtering) happens in SQL.
+#' Returns a fully plot-ready dataframe.
+#'
 #' @param con DuckDB connection
 #' @param flow_type Flow type string
 #' @param tech_filter Character vector of technology names to filter by.
@@ -326,12 +326,16 @@ duck_compute_avstrax <- function(con, flow_type, tech_categories = NULL,
 #' @param country_codes Character vector of country codes
 #' @param firm_names Character vector of company_raw names, or NULL
 #' @param use_regionmap Logical; if TRUE, uses istrax_region instead of istrax_country
-#' @return Data frame with columns: ctry_code, [country_name], mean, innos, sem,
+#' @param min_innos Minimum innovation count to include a country (default 0 = no filter)
+#' @param min_allinnos Minimum all-innovation count threshold (default 0 = no filter)
+#' @return Data frame with columns: ctry_code, country_name, mean, innos, sem,
 #'   q1, q2, q3, top25, top50, top25_bin_mean, top50_bin_mean, top3_ids,
 #'   top3_ids_url, Allinnos, SumAllinnos, share_c, share, RTA
 duck_compute_avstrax_for_techs <- function(con, flow_type, tech_filter = NULL,
                                             country_codes, firm_names = NULL,
-                                            use_regionmap = FALSE) {
+                                            use_regionmap = FALSE,
+                                            min_innos = 0,
+                                            min_allinnos = 0) {
 
   scaler <- get_scaler(flow_type)
 
@@ -344,6 +348,9 @@ duck_compute_avstrax_for_techs <- function(con, flow_type, tech_filter = NULL,
     country_filter <- paste0("ir.region_code IN ", sql_in_list(country_codes))
     appln_col <- "ir.appln_id"
     count_table <- "region_patent_counts"
+    # For regions, country_name comes from the source table
+    name_join_sql <- ""
+    name_expr <- "MAX(tc.country_name)"
   } else {
     src_table <- "istrax_country"
     src_alias <- "ic"
@@ -352,6 +359,9 @@ duck_compute_avstrax_for_techs <- function(con, flow_type, tech_filter = NULL,
     country_filter <- paste0("ic.ctry_code IN ", sql_in_list(country_codes))
     appln_col <- "ic.appln_id"
     count_table <- "country_patent_counts"
+    # For countries, country_name comes from the country_names lookup table
+    name_join_sql <- ""
+    name_expr <- "NULL"
   }
 
   ff_sql <- firm_filter_sql(firm_names, src_alias)
@@ -403,30 +413,138 @@ duck_compute_avstrax_for_techs <- function(con, flow_type, tech_filter = NULL,
   tryCatch(dbExecute(con, "DROP TABLE IF EXISTS _techs_combined"), error = function(e) NULL)
   dbExecute(con, temp_sql)
 
-  # --- Main aggregation from temp table ---
-  main_sql <- "
-    SELECT
-      ctry_code,
-      MAX(country_name) AS country_name,
-      AVG(val) AS mean,
-      COUNT(*) AS innos,
-      CASE WHEN COUNT(*) > 1
-        THEN STDDEV_SAMP(val) / SQRT(COUNT(*))
-        ELSE 0
-      END AS sem,
-      PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY val) AS q1,
-      PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY val) AS q2,
-      PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY val) AS q3
-    FROM _techs_combined
-    GROUP BY ctry_code
-  "
+  # --- Build filter clauses for min_innos and min_allinnos ---
+  having_clause <- ""
+  where_filters <- character(0)
+  if (min_innos > 0) {
+    where_filters <- c(where_filters, paste0("m.innos >= ", min_innos))
+  }
+  # min_allinnos filter applied after JOIN with patent counts
+  allinnos_filter <- ""
+  if (min_allinnos > 0) {
+    allinnos_filter <- paste0(" AND pc.Allinnos >= ", min_allinnos)
+  }
 
-  result <- dbGetQuery(con, main_sql)
+  innos_where <- if (length(where_filters) > 0) {
+    paste0(" WHERE ", paste(where_filters, collapse = " AND "))
+  } else {
+    ""
+  }
+
+  # --- Single comprehensive query: agg + extras + RTA + country names + URLs ---
+  full_sql <- paste0("
+    WITH main_agg AS (
+      SELECT
+        ctry_code,
+        MAX(country_name) AS region_name,
+        AVG(val) AS mean,
+        COUNT(*) AS innos,
+        CASE WHEN COUNT(*) > 1
+          THEN STDDEV_SAMP(val) / SQRT(COUNT(*))
+          ELSE 0
+        END AS sem,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY val) AS q1,
+        PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY val) AS q2,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY val) AS q3
+      FROM _techs_combined
+      GROUP BY ctry_code
+    ),
+    ranked AS (
+      SELECT *,
+        PERCENT_RANK() OVER (PARTITION BY ctry_code ORDER BY val DESC) AS prank,
+        ROW_NUMBER() OVER (PARTITION BY ctry_code ORDER BY val DESC) AS rn
+      FROM _techs_combined
+    ),
+    extras AS (
+      SELECT
+        ctry_code,
+        AVG(CASE WHEN prank < 0.25 THEN val END) AS top25_bin_mean,
+        AVG(CASE WHEN prank < 0.50 THEN val END) AS top50_bin_mean,
+        STRING_AGG(CASE WHEN rn <= 10 THEN CAST(appln_id AS VARCHAR) END, ', ')
+          AS top3_ids,
+        'javascript:window.open(\"https://worldwide.espacenet.com/patent/search?q=' ||
+          REPLACE(
+            COALESCE(STRING_AGG(
+              CASE WHEN rn <= 10 THEN 'ap%3D' || CAST(appln_id AS VARCHAR) END,
+              '%20OR%20'
+            ), ''),
+            ' ', '%20'
+          ) || '\")' AS top3_ids_url
+      FROM ranked
+      GROUP BY ctry_code
+    ),
+    patent_counts AS (
+      SELECT ctry_code, Allinnos
+      FROM ", count_table, "
+      WHERE ctry_code IN ", sql_in_list(country_codes), "
+    ),
+    total_patent_counts AS (
+      SELECT SUM(Allinnos) AS SumAllinnos
+      FROM ", count_table, "
+      WHERE ctry_code IN ", sql_in_list(country_codes), "
+    ),
+    total_filtered AS (
+      SELECT COUNT(DISTINCT docdb_family_id) AS total_innos
+      FROM _techs_combined
+      WHERE ctry_code != 'All'
+    )
+    SELECT
+      m.ctry_code,
+      CASE
+        WHEN m.ctry_code = 'All' THEN 'All'
+        WHEN ", if (use_regionmap) "TRUE" else "FALSE", " THEN m.region_name
+        ELSE COALESCE(cn.country_name, m.ctry_code)
+      END AS country_name,
+      m.mean,
+      m.innos,
+      m.sem,
+      m.q1,
+      m.q2,
+      m.q3,
+      0.25 AS top25,
+      0.5 AS top50,
+      e.top25_bin_mean,
+      e.top50_bin_mean,
+      e.top3_ids,
+      e.top3_ids_url,
+      pc.Allinnos,
+      tp.SumAllinnos,
+      CASE WHEN pc.Allinnos > 0
+        THEN m.innos * 1.0 / pc.Allinnos
+        ELSE NULL
+      END AS share_c,
+      CASE WHEN tp.SumAllinnos > 0
+        THEN tf.total_innos * 1.0 / tp.SumAllinnos
+        ELSE NULL
+      END AS share,
+      CASE
+        WHEN pc.Allinnos > 0 AND tp.SumAllinnos > 0
+          AND (m.innos * 1.0 / pc.Allinnos + tf.total_innos * 1.0 / tp.SumAllinnos) > 0
+        THEN 2.0 * (m.innos * 1.0 / pc.Allinnos) /
+             (m.innos * 1.0 / pc.Allinnos + tf.total_innos * 1.0 / tp.SumAllinnos)
+        ELSE NULL
+      END AS RTA
+    FROM main_agg m
+    LEFT JOIN extras e ON m.ctry_code = e.ctry_code
+    LEFT JOIN patent_counts pc ON m.ctry_code = pc.ctry_code
+    CROSS JOIN total_patent_counts tp
+    CROSS JOIN total_filtered tf",
+    if (!use_regionmap) "
+    LEFT JOIN country_names cn ON m.ctry_code = cn.ctry_code" else "", "
+    WHERE (m.ctry_code = 'All' OR TRUE)
+    ", if (min_innos > 0) paste0("AND (m.ctry_code = 'All' OR m.innos >= ", min_innos, ")") else "", "
+    ", if (min_allinnos > 0) paste0("AND (m.ctry_code = 'All' OR pc.Allinnos IS NULL OR pc.Allinnos >= ", min_allinnos, ")") else ""
+  )
+
+  result <- dbGetQuery(con, full_sql)
+
+  # Clean up temp table
+  tryCatch(dbExecute(con, "DROP TABLE IF EXISTS _techs_combined"), error = function(e) NULL)
 
   if (nrow(result) == 0) {
-    tryCatch(dbExecute(con, "DROP TABLE IF EXISTS _techs_combined"), error = function(e) NULL)
     return(data.frame(
-      ctry_code = character(0), mean = numeric(0), innos = integer(0),
+      ctry_code = character(0), country_name = character(0),
+      mean = numeric(0), innos = integer(0),
       sem = numeric(0), q1 = numeric(0), q2 = numeric(0), q3 = numeric(0),
       top25 = numeric(0), top50 = numeric(0),
       top25_bin_mean = numeric(0), top50_bin_mean = numeric(0),
@@ -436,94 +554,80 @@ duck_compute_avstrax_for_techs <- function(con, flow_type, tech_filter = NULL,
     ))
   }
 
-  # Remove country_name column if it's all NULL (non-region case)
-  if (!use_regionmap) {
-    result$country_name <- NULL
-  }
-
-  # --- Top25/Top50 + top3_ids from same temp table ---
-  extras_sql <- "
-    WITH ranked AS (
-      SELECT *,
-        PERCENT_RANK() OVER (PARTITION BY ctry_code ORDER BY val DESC) AS prank,
-        ROW_NUMBER() OVER (PARTITION BY ctry_code ORDER BY val DESC) AS rn
-      FROM _techs_combined
-    )
-    SELECT
-      ctry_code,
-      AVG(CASE WHEN prank < 0.25 THEN val END) AS top25_bin_mean,
-      AVG(CASE WHEN prank < 0.50 THEN val END) AS top50_bin_mean,
-      STRING_AGG(CASE WHEN rn <= 10 THEN appln_id END, ', ') AS top3_ids
-    FROM ranked
-    GROUP BY ctry_code
-  "
-
-  extras <- dbGetQuery(con, extras_sql)
-
-  # Clean up temp table
-  tryCatch(dbExecute(con, "DROP TABLE IF EXISTS _techs_combined"), error = function(e) NULL)
-
-  result <- merge(result, extras, by = "ctry_code", all.x = TRUE)
-
-  # --- Allinnos from pre-computed patent counts table ---
-  counted_sql <- paste0("
-    SELECT ctry_code, Allinnos
-    FROM ", count_table, "
-    WHERE ctry_code IN ", sql_in_list(country_codes)
-  )
-  counted <- dbGetQuery(con, counted_sql)
-
-  sum_all_sql <- paste0("
-    SELECT SUM(Allinnos) AS SumAllinnos
-    FROM ", count_table, "
-    WHERE ctry_code IN ", sql_in_list(country_codes)
-  )
-  sum_all <- dbGetQuery(con, sum_all_sql)$SumAllinnos
-
-  # Total filtered innovations (distinct patents matching tech filter)
-  if (!is.null(tech_filter) && length(tech_filter) > 0) {
-    total_filtered_sql <- paste0("
-      SELECT COUNT(DISTINCT ", src_alias, ".docdb_family_id) AS total
-      FROM ", src_table, " ", src_alias, "
-      ", tech_join_sql, "
-      WHERE ", src_alias, ".flow_type = '", gsub("'", "''", flow_type), "'
-        AND ", country_filter, "
-        ", ff_sql
-    )
-  } else {
-    total_filtered_sql <- paste0("
-      SELECT COUNT(DISTINCT ", src_alias, ".docdb_family_id) AS total
-      FROM ", src_table, " ", src_alias, "
-      WHERE ", src_alias, ".flow_type = '", gsub("'", "''", flow_type), "'
-        AND ", country_filter, "
-        ", ff_sql
-    )
-  }
-  total_filtered <- dbGetQuery(con, total_filtered_sql)$total
-
-  # Join counted and compute RTA
-  result <- merge(result, counted, by = "ctry_code", all.x = TRUE)
-  result$SumAllinnos <- sum_all
-
-  # RTA = 2 * share_c / (share_c + share)
-  # share_c = innos / Allinnos (country's share of filtered tech in total patents)
-  # share = total_filtered / SumAllinnos (global share of filtered tech)
-  result$share_c <- result$innos / result$Allinnos
-  result$share <- total_filtered / sum_all
-  result$RTA <- 2 * result$share_c / (result$share_c + result$share)
-
-  # Compatibility columns
-  result$top25 <- 0.25
-  result$top50 <- 0.5
-
-  # Espacenet URL
-  result$top3_ids_url <- if (exists("build_espacenet_search")) {
-    build_espacenet_search(result$top3_ids)
-  } else {
-    rep("", nrow(result))
-  }
-
   result
+}
+
+
+# ============================================================================
+# duck_data_for_gdp_scatter: avstrax_for_techs + GDP join
+# ============================================================================
+
+#' Get avstrax-for-techs data with GDP per capita joined (for scatter plots)
+#'
+#' Wraps duck_compute_avstrax_for_techs() and JOINs the gdp_data table in SQL.
+#' Filters out UK regions and rows without GDP data.
+#'
+#' @param con DuckDB connection
+#' @param flow_type Flow type string
+#' @param tech_filter Character vector of technology names, or NULL
+#' @param country_codes Character vector of country codes
+#' @param firm_names Character vector of company_raw names, or NULL
+#' @param min_innos Minimum innovation count (default 0)
+#' @param min_allinnos Minimum all-innovation count (default 0)
+#' @return Data frame with all avstrax_for_techs columns plus gdp_pc_2015, log_gdp_pc
+duck_data_for_gdp_scatter <- function(con, flow_type, tech_filter = NULL,
+                                       country_codes, firm_names = NULL,
+                                       min_innos = 0, min_allinnos = 0) {
+
+  # Get the base avstrax_for_techs data
+  avstrax_data <- duck_compute_avstrax_for_techs(
+    con, flow_type,
+    tech_filter = tech_filter,
+    country_codes = country_codes,
+    firm_names = firm_names,
+    min_innos = min_innos,
+    min_allinnos = min_allinnos
+  )
+
+  if (nrow(avstrax_data) == 0) return(avstrax_data)
+
+  # Filter out "All" and UK regions, then JOIN GDP via SQL
+  # We have the data in R already; do the GDP join in SQL for consistency
+  uk_regions <- c("UKC","UKD","UKE","UKF","UKG","UKH","UKI","UKJ","UKK","UKL","UKM","UKN")
+  eligible <- avstrax_data[!avstrax_data$ctry_code %in% c("All", uk_regions), ]
+
+  if (nrow(eligible) == 0) return(eligible)
+
+  # Query GDP data from DuckDB for the specific country codes
+  gdp_sql <- paste0("
+    SELECT ctry_code, gdp_pc_2015, LN(gdp_pc_2015) AS log_gdp_pc
+    FROM gdp_data
+    WHERE gdp_pc_2015 IS NOT NULL AND gdp_pc_2015 > 0
+      AND ctry_code IN ", sql_in_list(eligible$ctry_code)
+  )
+  gdp <- dbGetQuery(con, gdp_sql)
+
+  # Merge
+  result <- merge(eligible, gdp, by = "ctry_code", all.x = FALSE)
+  result
+}
+
+
+# ============================================================================
+# build_espacenet_search: URL builder (kept for backward compatibility)
+# ============================================================================
+
+#' Build Espacenet search URLs from comma-separated application IDs
+#' @param id_strings Character vector of comma-separated appln_id strings
+#' @return Character vector of javascript onclick URLs
+build_espacenet_search <- function(id_strings) {
+  sapply(id_strings, function(ids) {
+    if (is.na(ids) || ids == "") return("")
+    id_vec <- unlist(strsplit(ids, ",\\s*"))
+    query <- paste(paste0("ap=", id_vec), collapse = " OR ")
+    paste0('window.open("https://worldwide.espacenet.com/patent/search?q=',
+           utils::URLencode(query, reserved = TRUE), '")')
+  }, USE.NAMES = FALSE)
 }
 
 
