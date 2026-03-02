@@ -26,6 +26,24 @@ firmmap_top100 <- arrow::read_parquet("data-raw/big_files/firmmap.parquet") |>
   dplyr::filter(company_raw %in% top_companies) |>
   dplyr::rename(firm = company_raw)
 
+# firmmap_top100 |>
+#   count(docdb_family_id) |>
+#   arrange(desc(n))
+
+# firmmap_top100 |>
+#   filter(
+#     docdb_family_id == "62562639"
+#   )
+
+# countrymap |> 
+#   count(docdb_family_id) |>
+#   arrange(desc(n))
+
+# countrymap |>
+#   dplyr::filter(
+#     docdb_family_id =="58995202"
+#   )
+
 firmsectormap <- arrow::read_parquet("data-raw/big_files/firmsectormap.parquet") |>
   dplyr::select(company_raw, firm_sector = sector)
 
@@ -50,6 +68,63 @@ istrax_files <- istrax_files[!grepl("_joined", basename(istrax_files))]
 cat("  Found", length(istrax_files), "istrax files\n")
 print(basename(istrax_files))
 cat("\n")
+
+# foo <- read_fst("data-raw/big_files/istraxes/istrax_global.fst" )
+# nrow(read_fst("data-raw/big_files/istraxes/istrax_FR.fst"))
+# nrow(read_fst("data-raw/big_files/istraxes/istrax_global.fst"))
+
+# foo |>
+#   filter(
+#     docdb_family_id =="58995202"
+#   )
+
+# names(foo)
+
+# istrax_global <- read_fst("data-raw/big_files/istraxes/istrax_global.fst")
+# istrax_global |>
+#   count(docdb_family_id) |>
+#   arrange(desc(n)) |>
+#   head(10)
+# istrax_global |>
+#   add_count(docdb_family_id) |>
+#   arrange(desc(n), docdb_family_id)|>
+#   head(10)
+
+# countrymap |>
+#   dplyr::filter(
+#     docdb_family_id == "58995202"
+#   ) |>
+#   head()
+
+# arrow::read_parquet("data-raw/big_files/firmmap.parquet") |>
+#   dplyr::filter(
+#     docdb_family_id == "58995202"
+#   ) |>
+#   head(20)
+
+
+# ev_global <- read_fst("data-raw/big_files/istraxes/ev_global.fst")
+# ev_global |>
+#   count(docdb_family_id) |>
+#   arrange(desc(n)) |>
+#   head(20)
+
+# ev_global |>
+#   add_count(docdb_family_id) |>
+#   arrange(desc(n), docdb_family_id)|>
+#   head(20)
+
+# countrymap |>
+#   dplyr::filter(
+#     docdb_family_id == ""
+#   ) |>
+#   head()
+
+# arrow::read_parquet("data-raw/big_files/firmmap.parquet") |>
+#   dplyr::filter(
+#     docdb_family_id == ""
+#   ) |>
+#   head(20)
 
 # 3. Join BOTH country and region data
 cat("Joining country and region mappings...\n")
@@ -100,6 +175,15 @@ patent_data <- patent_data |>
     relationship = "many-to-many"
   )
 
+# techmap |>
+#   count(docdb_family_id) |>
+#   arrange(desc(n))
+
+# techmap |>
+#   filter(
+#     docdb_family_id == "48872867"
+#   )
+
 cat("  ✓ Joined techmap\n")
 cat("  Rows after tech join:", nrow(patent_data), "\n\n")
 
@@ -109,7 +193,7 @@ patent_data <- patent_data |>
   left_join(
     firmmap_top100 |>
       select(docdb_family_id, firm),
-    by = "docdb_family_id",
+    by = c("docdb_family_id"),
     relationship = "many-to-many"
   )
 

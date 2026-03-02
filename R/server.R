@@ -45,9 +45,9 @@ server <- function(input, output, session, con) {
   shiny::observeEvent(landing_ready(), once = TRUE, {
     country_module_server("country", session, con = con)
   })
-  shiny::observeEvent(landing_ready(), once = TRUE, {
-    country2_module_server("country2", session, con = con)
-  })
+  # shiny::observeEvent(landing_ready(), once = TRUE, {
+  #   country2_module_server("country2", session, con = con)
+  # })
   shiny::observeEvent(c(req(input$navbar_page == "Region Explorer")), once = TRUE, {
     region_module_server("region", session, con = con)
   })
