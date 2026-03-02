@@ -49,6 +49,7 @@ landing_module_server <- function(id, waiter, con) {
         tech_filters       <- build_tech_filter(c("AI", "Green Technology"))
 
         DBI::dbGetQuery(con, sql_tech_base(toflow, country_sql, tech_filters, firm_clause))
+        # DBI::dbGetQuery(con, sql_tech_base_v2(toflow, country_sql, tech_filters, firm_clause))
 
         ready(TRUE)
         waiter$hide()

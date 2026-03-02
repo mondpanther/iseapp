@@ -83,10 +83,10 @@ ui <- function(req) {
       "Country Explorer (SQL)",
       country_module_ui("country")
     ),
-    shiny::tabPanel(
-      "Country Explorer (R)",
-      country2_module_ui("country2")
-    ),
+    # shiny::tabPanel(
+    #   "Country Explorer (R)",
+    #   country2_module_ui("country2")
+    # ),
     shiny::tabPanel(
       "Region Explorer",
       region_module_ui("region")

@@ -205,7 +205,7 @@ country2_module_server <- function(id, parent_session, con) {
       fallback_by_tech <- shiny::reactive({
         shiny::req(input$toflow, input$country, input$tech_categories_plot1, input$firm)
 
-        tictoc::tic("fallback_by_tech total")
+        tictoc::tic("R fallback_by_tech total")
 
         toflow             <- input$toflow
         firm               <- input$firm
@@ -288,7 +288,11 @@ country2_module_server <- function(id, parent_session, con) {
             top3_ids       = paste(docdb_family_id[seq_len(min(3, dplyr::n()))], collapse = ", "),
             .groups        = "drop"
           ) |>
-          dplyr::rename(technology = label) |>
+          dplyr::rename(technology = label)
+
+        tictoc::toc()
+        
+        out <- out |>
           dplyr::mutate(
             top3_ids_url = build_espacenet_search(top3_ids),
             greenclass   = dplyr::case_when(
@@ -302,7 +306,7 @@ country2_module_server <- function(id, parent_session, con) {
             )
           )
 
-        tictoc::toc()
+        
         tictoc::toc()
         out
       }) |> shiny::bindCache(input$toflow, input$country, input$tech_categories_plot1, input$firm)

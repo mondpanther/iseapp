@@ -205,7 +205,7 @@ country_module_server <- function(id, parent_session, con) {
       fallback_by_tech <- shiny::reactive({
         shiny::req(input$toflow, input$country, input$tech_categories_plot1, input$firm)
 
-        tictoc::tic("fallback_by_tech total")
+        tictoc::tic("SQL fallback_by_tech total")
 
         toflow             <- input$toflow
         firm               <- input$firm
@@ -223,10 +223,11 @@ country_module_server <- function(id, parent_session, con) {
         # Handle "All" case — use tech_group as label directly
         use_tech_group_labels <- length(tech_filters) == 1 && names(tech_filters) == "All"
 
-        # browser()
+        browser()
 
-        tictoc::tic("sql_tech_base")
+        tictoc::tic("sql_country_tech_combined")
         out <- DBI::dbGetQuery(con, sql_country_tech_combined(toflow, country_sql, tech_filters, firm_clause))
+        # out <- DBI::dbGetQuery(con, sql_country_tech_combined_v2(toflow, country_sql, tech_filters, firm_clause))
         # base_data <- DBI::dbGetQuery(con, sql_tech_base(toflow, country_sql, tech_filters, firm_clause))
         tictoc::toc()
 
@@ -330,7 +331,8 @@ country_module_server <- function(id, parent_session, con) {
         # browser()
 
         tictoc::tic("sql_country_base")
-        out <- out <- DBI::dbGetQuery(con, sql_country_combined(toflow, country_sql, techs, firm_clause))
+        out <- DBI::dbGetQuery(con, sql_country_combined(toflow, country_sql, techs, firm_clause))
+        # out <- DBI::dbGetQuery(con, sql_country_combined_v2(toflow, country_sql, techs, firm_clause))
         # base_data <- DBI::dbGetQuery(con, sql_country_base(toflow, country_sql, tech_clause, firm_clause))
         tictoc::toc()
 
