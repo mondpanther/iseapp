@@ -41,15 +41,14 @@ landing_module_server <- function(id, waiter, con) {
 
       shiny::observe({
         # Hardcoded defaults matching country module sidebar
-        toflow             <- "istrax_global"
-        firm               <- "All Firms"
+        toflow             <- "is_global"
+        firm               <- "All"
         selected_countries <- expand_country_selection("All countries")
         country_sql        <- paste0("'", selected_countries, "'", collapse = ", ")
         firm_clause        <- ""
-        tech_filters       <- build_tech_filter(c("AI", "Green Technology"))
+        tech_filters       <- build_tech_filter_v2(c("AI", "Green Technology"))
 
-        DBI::dbGetQuery(con, sql_tech_base(toflow, country_sql, tech_filters, firm_clause))
-        # DBI::dbGetQuery(con, sql_tech_base_v2(toflow, country_sql, tech_filters, firm_clause))
+        DBI::dbGetQuery(con, sql_country_tech_combined_v2(toflow, country_sql, tech_filters, firm_clause))
 
         ready(TRUE)
         waiter$hide()

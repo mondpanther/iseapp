@@ -42,7 +42,7 @@ country_module_sidebar <- function(id) {
           inputId = ns("toflow"),
           label = "Return flow",
           choices = toflow_choices,
-          selected = "istrax_global",
+          selected = "is_global",
           multiple = FALSE,
           width = "400px",
           options = list(placeholder = 'Choose a return flow...')
@@ -185,134 +185,52 @@ country_module_server <- function(id, parent_session, con) {
     function(input, output, session) {
       ns <- session$ns
 
-      # DUCKDB CONNECTION TO FULL PARQUET DATABASE
-      # full_db_path <- system.file("extdata", "full_patent_database.parquet", package = "innovationStrategyExplorer")
-      # con <- DBI::dbConnect(duckdb::duckdb())
-      # DBI::dbExecute(con, sprintf("CREATE VIEW full_patent_database AS SELECT * FROM read_parquet('%s')", full_db_path))
-      # con <- DBI::dbConnect(duckdb::duckdb())
-      # DBI::dbExecute(con, "INSTALL httpfs; LOAD httpfs;")
-      # DBI::dbExecute(con, "
-      #   CREATE VIEW full_patent_database AS 
-      #   SELECT * FROM read_parquet('https://iseapp-database.s3.us-east-2.amazonaws.com/full_patent_database.parquet')
-      # ")
-
-      # Clean up connection on session end
-      # shiny::onSessionEnded(function() {
-      #   DBI::dbDisconnect(con, shutdown = TRUE)
-      # })
-
-      # FALLBACK: DuckDB query for Plot 1 (by-technology)
+      # DuckDB query for Plot 1 (by-technology)
       fallback_by_tech <- shiny::reactive({
         shiny::req(input$toflow, input$country, input$tech_categories_plot1, input$firm)
-
-        tictoc::tic("SQL fallback_by_tech total")
 
         toflow             <- input$toflow
         firm               <- input$firm
         selected_countries <- expand_country_selection(input$country)
         country_sql        <- paste0("'", selected_countries, "'", collapse = ", ")
 
-        firm_clause <- dplyr::case_when(
-          firm == "All Firms" ~ "",
-          firm == "No Firm"   ~ "AND firm IS NULL",
-          TRUE                ~ glue::glue("AND firm = '{firm}'")
-        )
+        firm_clause  <- build_firm_clause_v2(firm)
+        tech_filters <- build_tech_filter_v2(input$tech_categories_plot1)
 
-        tech_filters <- build_tech_filter(input$tech_categories_plot1)
+        sql <- sql_country_tech_combined_v2(toflow, country_sql, tech_filters, firm_clause)
 
-        # Handle "All" case — use tech_group as label directly
-        use_tech_group_labels <- length(tech_filters) == 1 && names(tech_filters) == "All"
+        out <- DBI::dbGetQuery(con, sql)
 
-        browser()
-
-        tictoc::tic("sql_country_tech_combined")
-        out <- DBI::dbGetQuery(con, sql_country_tech_combined(toflow, country_sql, tech_filters, firm_clause))
-        # out <- DBI::dbGetQuery(con, sql_country_tech_combined_v2(toflow, country_sql, tech_filters, firm_clause))
-        # base_data <- DBI::dbGetQuery(con, sql_tech_base(toflow, country_sql, tech_filters, firm_clause))
-        tictoc::toc()
-
-        if (nrow(out) == 0) return(NULL)
+        if (nrow(out) == 0) {
+          return(NULL)
+        }
 
         out <- out |>
           dplyr::mutate(
             top3_ids_url = build_espacenet_search(top3_ids),
             greenclass = dplyr::case_when(
-              technology %in% colorings$green         ~ "green",
-              technology %in% colorings$battery       ~ "battery",
-              technology %in% colorings$hard_to_abate ~ "hard to abate",
-              technology %in% colorings$ai            ~ "AI",
-              technology %in% colorings$agrifood      ~ "agrifood",
-              technology %in% colorings$cpcsecs       ~ "cpcsecs",
-              TRUE                                    ~ "other"
+              technology == "Green Technology"                      ~ "green",
+              technology == "Battery Technology"                    ~ "battery",
+              technology == "Hard to Abate Sector Decarbonization" ~ "hard to abate",
+              technology == "AI"                                    ~ "AI",
+              technology == "Any Agriculture & Food technology"     ~ "agrifood",
+              technology %in% colorings$green                      ~ "green",
+              technology %in% colorings$battery                    ~ "battery",
+              technology %in% colorings$hard_to_abate              ~ "hard to abate",
+              technology %in% colorings$ai                         ~ "AI",
+              technology %in% colorings$agrifood                   ~ "agrifood",
+              technology %in% colorings$cpcsecs                    ~ "cpcsecs",
+              TRUE                                                  ~ "other"
             )
           )
 
-        # tictoc::tic("R-side aggregation")
-
-        # # Assign display label per row from tech_filters
-        # if (use_tech_group_labels) {
-        #   base_data <- base_data |> dplyr::mutate(label = tech_group)
-        # } else {
-        #   base_data <- base_data |>
-        #     dplyr::mutate(
-        #       label = dplyr::case_when(
-        #         !!!purrr::imap(tech_filters, function(filter, lbl) {
-        #           if (filter == "") rlang::expr(TRUE ~ !!lbl)
-        #           else if (grepl("tech_group", filter)) {
-        #             grp <- gsub(".*'(.*)'.*", "\\1", filter)
-        #             rlang::expr(tech_group == !!grp ~ !!lbl)
-        #           } else {
-        #             tech <- gsub(".*'(.*)'.*", "\\1", filter)
-        #             rlang::expr(technology == !!tech ~ !!lbl)
-        #           }
-        #         }),
-        #         TRUE ~ technology
-        #       )
-        #     )
-        # }
-
-        # out <- base_data |>
-        #   dplyr::group_by(label) |>
-        #   dplyr::arrange(dplyr::desc(.data[[toflow]]), .by_group = TRUE) |>
-        #   dplyr::mutate(rnk = dplyr::row_number(), cnt = dplyr::n()) |>
-        #   dplyr::summarise(
-        #     mean           = mean(.data[[toflow]], na.rm = TRUE),
-        #     innos          = dplyr::n(),
-        #     sem            = ifelse(dplyr::n() > 1, sd(.data[[toflow]], na.rm = TRUE) / sqrt(dplyr::n()), NA_real_),
-        #     q1             = quantile(.data[[toflow]], 0.25, na.rm = TRUE),
-        #     q2             = quantile(.data[[toflow]], 0.50, na.rm = TRUE),
-        #     q3             = quantile(.data[[toflow]], 0.75, na.rm = TRUE),
-        #     top25_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.25), 1)], na.rm = TRUE),
-        #     top50_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.50), 1)], na.rm = TRUE),
-        #     top3_ids       = paste(docdb_family_id[seq_len(min(3, dplyr::n()))], collapse = ", "),
-        #     .groups        = "drop"
-        #   ) |>
-        #   dplyr::rename(technology = label) |>
-        #   dplyr::mutate(
-        #     top3_ids_url = build_espacenet_search(top3_ids),
-        #     greenclass   = dplyr::case_when(
-        #       technology %in% colorings$green           ~ "green",
-        #       technology %in% colorings$battery         ~ "battery",
-        #       technology %in% colorings$hard_to_abate   ~ "hard to abate",
-        #       technology %in% colorings$ai              ~ "AI",
-        #       technology %in% colorings$agrifood        ~ "agrifood",
-        #       technology %in% colorings$cpcsecs         ~ "cpcsecs",
-        #       TRUE                                      ~ "other"
-        #     )
-        #   )
-
-        # tictoc::toc()
-        tictoc::toc()
         out
+
       }) |> shiny::bindCache(input$toflow, input$country, input$tech_categories_plot1, input$firm)
 
-      # ============================================================================
-      # FALLBACK: DuckDB query for Plot 2 / World Map (by-country)
-      # ============================================================================
+      # DuckDB query for Plot 2 / World Map (by-country)
       fallback_by_country <- shiny::reactive({
         shiny::req(input$toflow, input$country, input$techs, input$firm)
-
-        tictoc::tic("fallback_by_country total")
 
         selected_countries <- expand_country_selection(input$country)
         toflow             <- input$toflow
@@ -320,21 +238,11 @@ country_module_server <- function(id, parent_session, con) {
         techs              <- input$techs
         country_sql        <- paste0("'", selected_countries, "'", collapse = ", ")
 
-        firm_clause <- dplyr::case_when(
-          firm == "All Firms" ~ "",
-          firm == "No Firm"   ~ "AND firm IS NULL",
-          TRUE                ~ glue::glue("AND firm = '{firm}'")
-        )
+        firm_clause <- build_firm_clause_v2(firm)
 
-        tech_clause <- build_tech_clause(techs)
+        tech_clause <- build_tech_clause_v2(techs)
 
-        # browser()
-
-        tictoc::tic("sql_country_base")
-        out <- DBI::dbGetQuery(con, sql_country_combined(toflow, country_sql, techs, firm_clause))
-        # out <- DBI::dbGetQuery(con, sql_country_combined_v2(toflow, country_sql, techs, firm_clause))
-        # base_data <- DBI::dbGetQuery(con, sql_country_base(toflow, country_sql, tech_clause, firm_clause))
-        tictoc::toc()
+        out <- DBI::dbGetQuery(con, sql_country_combined_v2(toflow, country_sql, techs, firm_clause))
 
         if (nrow(out) == 0) return(NULL)
         
@@ -342,8 +250,8 @@ country_module_server <- function(id, parent_session, con) {
         allinnos_data <- allinnos_baseline |>
           dplyr::filter(ctry_code %in% selected_countries) |>
           dplyr::filter(
-            if (firm_input == "All Firms") TRUE
-            else if (firm_input == "No Firm") is.na(firm)
+            if (firm_input %in% c("All", "All Firms")) TRUE
+            else if (firm_input == "None") is.na(firm)
             else firm == firm_input
           ) |>
           dplyr::group_by(ctry_code) |>
@@ -363,82 +271,6 @@ country_module_server <- function(id, parent_session, con) {
             RTA          = dplyr::if_else(ctry_code == "All", 1, 2 * share_c / (share_c + share))
           )
 
-        # if (nrow(base_data) == 0) return(NULL)
-        
-        # tictoc::tic("allinnos lookup")
-        # firm_input <- firm  # scalar from input, avoids collision with data column name
-
-        # allinnos_data <- allinnos_baseline |>
-        #   dplyr::filter(ctry_code %in% selected_countries) |>
-        #   dplyr::filter(
-        #     if (firm_input == "All Firms") is.na(firm) | !is.na(firm)
-        #     else if (firm_input == "No Firm") is.na(firm)
-        #     else firm == firm_input
-        #   ) |>
-        #   dplyr::group_by(ctry_code) |>
-        #   dplyr::summarise(allinnos = sum(allinnos), .groups = "drop")
-
-        # sum_allinnos_val <- sum_allinnos_baseline |>
-        #   dplyr::filter(
-        #     if (firm_input == "All Firms") is.na(firm) | !is.na(firm)
-        #     else if (firm_input == "No Firm") is.na(firm)
-        #     else firm == firm_input
-        #   ) |>
-        #   dplyr::pull(sum_allinnos) |>
-        #   sum()
-        # tictoc::toc()
-
-        # tictoc::tic("R-side aggregation")
-
-        # by_country <- base_data |>
-        #   dplyr::group_by(ctry_code) |>
-        #   dplyr::arrange(dplyr::desc(.data[[toflow]]), .by_group = TRUE) |>
-        #   dplyr::mutate(rnk = dplyr::row_number(), cnt = dplyr::n()) |>
-        #   dplyr::summarise(
-        #     mean           = mean(.data[[toflow]], na.rm = TRUE),
-        #     innos          = dplyr::n(),
-        #     sem            = ifelse(dplyr::n() > 1, sd(.data[[toflow]], na.rm = TRUE) / sqrt(dplyr::n()), NA_real_),
-        #     q1             = quantile(.data[[toflow]], 0.25, na.rm = TRUE),
-        #     q2             = quantile(.data[[toflow]], 0.50, na.rm = TRUE),
-        #     q3             = quantile(.data[[toflow]], 0.75, na.rm = TRUE),
-        #     top25_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.25), 1)], na.rm = TRUE),
-        #     top50_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.50), 1)], na.rm = TRUE),
-        #     top3_ids       = paste(docdb_family_id[seq_len(min(3, dplyr::n()))], collapse = ", "),
-        #     .groups        = "drop"
-        #   )
-
-        # # Global "All" row
-        # all_row <- base_data |>
-        #   dplyr::arrange(dplyr::desc(.data[[toflow]])) |>
-        #   dplyr::mutate(rnk = dplyr::row_number(), cnt = dplyr::n()) |>
-        #   dplyr::summarise(
-        #     ctry_code      = "All",
-        #     mean           = mean(.data[[toflow]], na.rm = TRUE),
-        #     innos          = dplyr::n(),
-        #     sem            = ifelse(dplyr::n() > 1, sd(.data[[toflow]], na.rm = TRUE) / sqrt(dplyr::n()), NA_real_),
-        #     q1             = quantile(.data[[toflow]], 0.25, na.rm = TRUE),
-        #     q2             = quantile(.data[[toflow]], 0.50, na.rm = TRUE),
-        #     q3             = quantile(.data[[toflow]], 0.75, na.rm = TRUE),
-        #     top25_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.25), 1)], na.rm = TRUE),
-        #     top50_bin_mean = mean(.data[[toflow]][rnk <= max(floor(cnt * 0.50), 1)], na.rm = TRUE),
-        #     top3_ids       = paste(docdb_family_id[seq_len(min(3, dplyr::n()))], collapse = ", ")
-        #   )
-
-        # out <- dplyr::bind_rows(by_country, all_row) |>
-        #   dplyr::left_join(allinnos_data, by = "ctry_code") |>
-        #   dplyr::mutate(
-        #     top3_ids_url = build_espacenet_search(top3_ids),
-        #     top25        = 0.25,
-        #     top50        = 0.5,
-        #     allinnos     = dplyr::if_else(ctry_code == "All", innos, allinnos),
-        #     sum_allinnos = sum_allinnos_val,
-        #     share_c      = dplyr::if_else(ctry_code == "All", 1, innos / allinnos),
-        #     share        = dplyr::if_else(ctry_code == "All", 1, sum(innos[ctry_code != "All"]) / sum_allinnos_val),
-        #     RTA          = dplyr::if_else(ctry_code == "All", 1, 2 * share_c / (share_c + share))
-        #   )
-
-        # tictoc::toc()
-        tictoc::toc()
         out
 
       }) |> shiny::bindCache(input$toflow, input$country, input$techs, input$firm)
@@ -506,8 +338,8 @@ country_module_server <- function(id, parent_session, con) {
           dplyr::filter(ctry_code != "All", innos >= input$mininno)
 
         if (nrow(avstrax_data) == 0) return(NULL)
-
-        is_return <- grepl("strax", input$toflow)
+        
+        is_return <- grepl("^is", input$toflow)
 
         plot_world_map(
           avstrax_data = avstrax_data,
