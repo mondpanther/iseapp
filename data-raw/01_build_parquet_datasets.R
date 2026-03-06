@@ -275,3 +275,33 @@ file_size <- file.info(output_file)$size / 1024^3 # Convert to GB
 cat("  File size:", round(file_size, 2), "GB\n\n")
 
 cat("=== DONE ===\n")
+
+# 9 Load and convert the InGlobe data
+df_raw <- fst::read_fst("data-raw/big_files/long_final.fst")
+
+df_processed <- df_raw |>
+  dplyr::arrange(sce_country, tech_group, tech_subgroup, source_id, wave) |>
+  dplyr::mutate(
+    wave = as.integer(wave),
+    chain_id = paste0(
+      sce_country, "_", tech_group, "_",
+      ifelse(is.na(tech_subgroup), "ALL", tech_subgroup), "_",
+      sample_size, "_", source_id
+    )
+  )
+
+df_processed <- df_processed |>
+  dplyr::select(
+    sce_country,
+    sce_tech_display,
+    tech_group,
+    sample_size,
+    wave,
+    source_lon,
+    source_lat,
+    target_lon,
+    target_lat,
+    chain_id
+  )
+
+arrow::write_parquet(df_processed, "inst/extdata/inglobe_processed.parquet")

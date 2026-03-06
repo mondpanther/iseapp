@@ -49,52 +49,53 @@ library(dplyr)
 library(tidyr)
 library(data.table)
 
-source("dropbox_auth.R")
+# source("dropbox_auth.R")
 
-# Dropbox path detection (same as app.R)
-get_dropbox_path <- function() {
-  if (.Platform$OS.type == "windows") {
-    info_paths <- c(
-      file.path(Sys.getenv("APPDATA"), "Dropbox", "info.json"),
-      file.path(Sys.getenv("LOCALAPPDATA"), "Dropbox", "info.json")
-    )
-  } else {
-    info_paths <- file.path(Sys.getenv("HOME"), ".dropbox", "info.json")
-  }
-  for (p in info_paths) {
-    if (file.exists(p)) {
-      info <- jsonlite::fromJSON(p)
-      if (!is.null(info$business)) return(info$business$path)
-      else if (!is.null(info$personal)) return(info$personal$path)
-    }
-  }
-  return(NULL)
-}
+# # Dropbox path detection (same as app.R)
+# get_dropbox_path <- function() {
+#   if (.Platform$OS.type == "windows") {
+#     info_paths <- c(
+#       file.path(Sys.getenv("APPDATA"), "Dropbox", "info.json"),
+#       file.path(Sys.getenv("LOCALAPPDATA"), "Dropbox", "info.json")
+#     )
+#   } else {
+#     info_paths <- file.path(Sys.getenv("HOME"), ".dropbox", "info.json")
+#   }
+#   for (p in info_paths) {
+#     if (file.exists(p)) {
+#       info <- jsonlite::fromJSON(p)
+#       if (!is.null(info$business)) return(info$business$path)
+#       else if (!is.null(info$personal)) return(info$personal$path)
+#     }
+#   }
+#   return(NULL)
+# }
 
-get_local_iseapp_path <- function() {
-  env_path <- Sys.getenv("ISEAPP_PATH_LOCAL")
-  if (nzchar(env_path) && dir.exists(env_path)) return(env_path)
-  dropbox_root <- get_dropbox_path()
-  if (!is.null(dropbox_root)) {
-    iseapp_path <- file.path(dropbox_root, "Apps", "iseapp")
-    if (dir.exists(iseapp_path)) return(iseapp_path)
-  }
-  return(NULL)
-}
+# get_local_iseapp_path <- function() {
+#   env_path <- Sys.getenv("ISEAPP_PATH_LOCAL")
+#   if (nzchar(env_path) && dir.exists(env_path)) return(env_path)
+#   dropbox_root <- get_dropbox_path()
+#   if (!is.null(dropbox_root)) {
+#     iseapp_path <- file.path(dropbox_root, "Apps", "iseapp")
+#     if (dir.exists(iseapp_path)) return(iseapp_path)
+#   }
+#   return(NULL)
+# }
+# iseapp_local_path <- get_local_iseapp_path()
 
-iseapp_local_path <- get_local_iseapp_path()
+iseapp_local_path <- "."
+
 message("Using iseapp path: ", iseapp_local_path)
 
 localpath_fname <- function(fname) {
-  if (!is.null(iseapp_local_path)) {
-    fname <- sub("^/+", "", fname)
-    return(file.path(iseapp_local_path, fname))
-  }
-  return("")
+  # Remove leading slashes and construct path from package root
+  fname <- sub("^/+", "", fname)
+  return(file.path(fname))
 }
 
 # Create prepdata directory
-prepdata_path <- file.path(iseapp_local_path, "prepdata")
+# prepdata_path <- file.path(iseapp_local_path, "prepdata")
+prepdata_path <- "inst/extdata/prepdata"
 if (!dir.exists(prepdata_path)) {
   dir.create(prepdata_path, recursive = TRUE)
   message("Created prepdata directory: ", prepdata_path)
@@ -208,6 +209,20 @@ cpc_sections <- c("Human Necessities", "Performing Operations; Transporting ",
                   "Mechanical Engineering; Lighting; Heating; Weapons; Blasting",
                   "Physics", "Electricity", "General tagging of new or cross-sectional technology")
 
+agrifood_classes <- c("Any Agriculture & Food technology", "Input supply", 
+                      "Primary food and feed production", "Post-harvest handling & aggregation", 
+                      "Processing", "Distribution/wholesale", "Retail/consumption", "Crosscutting")
+
+colorings <- list(
+  green = green_classes,
+  battery = battery_classes,
+  hard_to_abate = hard_to_abate_classes,
+  ai = ai_classes,
+  cpcsecs = cpc_sections,
+  agrifood = agrifood_classes
+)
+
+
 # Key technology categories for pre-computation
 tech_categories <- list(
   "All" = "All",
@@ -234,7 +249,7 @@ cat("- UK regions:", length(uk_regions), "\n")
 
 ```{r load-base-data}
 # Load countrymap
-pp <- localpath_fname("countrymap.fst")
+pp <- localpath_fname("inst/extdata/countrymap.fst")
 if (file.exists(pp)) {
   countrymap <- read_fst(pp)
   message("Loaded countrymap: ", nrow(countrymap), " rows")
@@ -243,7 +258,7 @@ if (file.exists(pp)) {
 }
 
 # Load techmap
-pp <- localpath_fname("techmap.fst")
+pp <- localpath_fname("inst/extdata/techmap.fst")
 if (file.exists(pp)) {
   techmap <- read_fst(pp)
   message("Loaded techmap: ", nrow(techmap), " rows")
@@ -268,7 +283,7 @@ techmap[, technology := fcase(
 )]
 
 # Load regionmap if available
-pp_region <- localpath_fname("regionmap.fst")
+pp_region <- localpath_fname("inst/extdata/regionmap.fst")
 if (file.exists(pp_region)) {
   regionmap <- read_fst(pp_region)
   message("Loaded regionmap: ", nrow(regionmap), " rows")
@@ -281,7 +296,7 @@ if (file.exists(pp_region)) {
 # Pre-computation Functions
 
 ```{r precompute-functions}
-source("istraxfunctions.R")
+source("R/functions_istraxfunctions.R")
 
 # Function to generate safe filename
 safe_filename <- function(...) {
@@ -296,7 +311,7 @@ safe_filename <- function(...) {
 # Pre-compute avstrax by technology for a given toflow and country group
 precompute_by_tech <- function(toflow, country_group_name, country_codes) {
   # Load istrax data
-  istrax_path <- localpath_fname(paste0("istraxes/", toflow, ".fst"))
+  istrax_path <- file.path("inst/extdata/istraxes", paste0(toflow, ".fst"))
   if (!file.exists(istrax_path)) {
     message("  Skipping - istrax file not found: ", toflow)
     return(NULL)
@@ -323,7 +338,7 @@ precompute_by_tech <- function(toflow, country_group_name, country_codes) {
   # Compute avstrax using the existing function
   # We need to pass techmap as classes
   result <- tryCatch({
-    compute_avstrax(data, toflow, techmap, colorings = NULL)
+    compute_avstrax(data, toflow, techmap, colorings = colorings)
   }, error = function(e) {
     message("  Error computing avstrax: ", e$message)
     return(NULL)
@@ -340,7 +355,7 @@ precompute_by_tech <- function(toflow, country_group_name, country_codes) {
 # Pre-compute avstrax by country for a given toflow and technology
 precompute_by_country <- function(toflow, tech_name, tech_filter) {
   # Load istrax data
-  istrax_path <- localpath_fname(paste0("istraxes/", toflow, ".fst"))
+  istrax_path <- file.path("inst/extdata/istraxes", paste0(toflow, ".fst"))
   if (!file.exists(istrax_path)) {
     message("  Skipping - istrax file not found: ", toflow)
     return(NULL)
@@ -455,7 +470,7 @@ if (!is.null(regionmap) && nrow(regionmap) > 0) {
     message("\nProcessing toflow: ", toflow)
 
     # Load istrax data
-    istrax_path <- localpath_fname(paste0("istraxes/", toflow, ".fst"))
+    istrax_path <- file.path("inst/extdata/istraxes", paste0(toflow, ".fst"))
     if (!file.exists(istrax_path)) {
       message("  Skipping - istrax file not found")
       next

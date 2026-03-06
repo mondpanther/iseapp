@@ -356,48 +356,27 @@ cat("  ✓", nrow(allinnos_region_baseline), "region/firm combinations pre-compu
 cat("  ✓", nrow(sum_allinnos_region_baseline), "region combinations pre-computed\n")
 
 # ============================================================
-# 12. UK NUTS1 BOUNDARIES
-# Download from GitHub and merge all four nations
+# 11. PRE-COMPUTED Some inglobe tab stuff
 # ============================================================
-# cat("Downloading UK NUTS1 boundaries...\n")
 
-# # England & Wales from martinjc/UK-GeoJSON
-# ew_url <- "https://raw.githubusercontent.com/martinjc/UK-GeoJSON/master/json/eurostat/ew/nuts1.json"
-# uk_nuts1_sf <- sf::st_read(ew_url, quiet = TRUE)
-# cat("  ✓ England & Wales loaded\n")
+df_processed <- arrow::read_parquet("inst/extdata/inglobe_processed.parquet")
 
-# # Standardise NUTS code column to NUTS1CD
-# nuts_col <- names(uk_nuts1_sf)[grepl("NUTS.*CD", names(uk_nuts1_sf), ignore.case = TRUE)][1]
-# if (nuts_col != "NUTS1CD") {
-#   uk_nuts1_sf <- uk_nuts1_sf |> dplyr::rename(NUTS1CD = !!nuts_col)
-# }
+# Precompute metadata
+metadata <- df_processed |>
+  dplyr::distinct(sce_country, sce_tech_display, tech_group, sample_size)
 
-# existing_codes <- uk_nuts1_sf$NUTS1CD
+# Precompute wave range
+wave_range <- data.frame(
+  min_wave = min(df_processed$wave),
+  max_wave = max(df_processed$wave)
+)
 
-# # Scotland (UKM) and Northern Ireland (UKN) from ONS Open Geography Portal
-# if (!"UKM" %in% existing_codes || !"UKN" %in% existing_codes) {
-#   ons_url <- "https://services1.arcgis.com/ESMARspQHYMw9BZ9/arcgis/rest/services/NUTS_Level_1_January_2018_Boundaries_UK/FeatureServer/0/query?where=1%3D1&outFields=nuts118cd,nuts118nm&f=geojson"
-#   tryCatch({
-#     ons_sf <- sf::st_read(ons_url, quiet = TRUE) |>
-#       dplyr::rename(NUTS1CD = nuts118cd, NUTS1NM = nuts118nm) |>
-#       dplyr::filter(NUTS1CD %in% c("UKM", "UKN"))
-
-#     # Keep only columns present in uk_nuts1_sf to allow rbind
-#     shared_cols <- intersect(names(uk_nuts1_sf), names(ons_sf))
-#     uk_nuts1_sf <- rbind(
-#       uk_nuts1_sf[, shared_cols],
-#       ons_sf[, shared_cols]
-#     )
-#     cat("  ✓ Scotland and Northern Ireland added from ONS\n")
-#   }, error = function(e) {
-#     stop("Could not load Scotland/NI from ONS: ", e$message,
-#          "\nAll 12 NUTS1 regions are required.")
-#   })
-# }
-
-# # Ensure consistent CRS
-# uk_nuts1_sf <- sf::st_transform(uk_nuts1_sf, 4326)
-# cat("  ✓ uk_nuts1_sf ready with", nrow(uk_nuts1_sf), "regions\n")
+# Precompute tech group definitions
+tech_group_definitions <- list(
+  "All" = sort(unique(metadata$sce_tech_display[metadata$tech_group == "All"])),
+  "Green" = sort(unique(metadata$sce_tech_display[metadata$tech_group == "Green"])),
+  "Non-Green" = sort(unique(metadata$sce_tech_display[metadata$tech_group == "Non-Green"]))
+)
 
 # ============================================================
 # 13. SAVE AS INTERNAL PACKAGE DATA
@@ -441,6 +420,10 @@ usethis::use_data(
   allinnos_region_baseline,
   sum_allinnos_region_baseline,
   sum_allinnos_region_firm_baseline,
+  # InGlobe
+  metadata,
+  wave_range,
+  tech_group_definitions,
   # Spatial
   # uk_nuts1_sf,
   internal  = TRUE,
