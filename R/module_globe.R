@@ -112,11 +112,6 @@ globe_module_server <- function(id, parent_session) {
       shiny::onSessionEnded(function() {
         DBI::dbDisconnect(con, shutdown = TRUE)
       })
-
-      # Load precomputed metadata (no queries!)
-      metadata <- readRDS(system.file("extdata", "inglobe_metadata.rds", package = "innovationStrategyExplorer"))
-      wave_range <- readRDS(system.file("extdata", "inglobe_wave_range.rds", package = "innovationStrategyExplorer"))
-      tech_group_definitions <- readRDS(system.file("extdata", "inglobe_tech_groups.rds", package = "innovationStrategyExplorer"))
       
       ###############################################################
       # COUNTRY GROUP DEFINITIONS

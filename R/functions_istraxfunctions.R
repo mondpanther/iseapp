@@ -321,8 +321,8 @@ plot_avstrax_by_country_hc <- function(
   }
   
   # Prepare axis labels and data
-  ylab <- ifelse(grepl("strax", toflow), "Return in %", "Millions of $")
-  is_return <- grepl("strax", toflow)
+  ylab <- ifelse(grepl("^is_", toflow), "Return in %", "Millions of $")
+  is_return <- grepl("^is_", toflow)
   
   allmean <- avstrax |>
     dplyr::pull(mean) |>
@@ -581,7 +581,7 @@ plot_avstrax_by_country <- function(
     # cat("Total time after data preparation:", round(difftime(Sys.time(), start_time, units = "secs"), 2), "secs\n")
   }
 
-  ylab <- ifelse(grepl("strax", toflow), "Return in %", "Millions of $")
+  ylab <- ifelse(grepl("^is_", toflow), "Return in %", "Millions of $")
   
   allmean <- avstrax |>
     # filter(technology == "All") |>
@@ -598,7 +598,7 @@ plot_avstrax_by_country <- function(
       dplyr::filter(technology != "All")
   }
 
-  is_return <- grepl("strax", toflow)
+  is_return <- grepl("^is_", toflow)
 
   # Data transformations
   # transform_start <- Sys.time()
@@ -1116,8 +1116,8 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   }
 
   # Create the plot
-  ylab <- ifelse(grepl("strax", toflow), "Return in %", "Millions of $")
-  is_return <- grepl("strax", toflow)
+  ylab <- ifelse(grepl("^is_", toflow), "Return in %", "Millions of $")
+  is_return <- grepl("^is_", toflow)
 
   # Add formatted value labels for tooltips
   if (is_return) {
