@@ -25,7 +25,7 @@ ui <- function(req) {
       # waiter::autoWaiter(color = "#ffffff", fadeout = 10),
 
       shiny::tags$head(
-        # shiny::tags$link(rel = "icon", href = file.path(pkgload::pkg_name(), "img/ifc_logo.svg")),
+        shiny::tags$link(rel = "icon", type = "image/svg+xml", href = file.path(pkgload::pkg_name(), "img/favicon.svg")),
         shiny::tags$link(href = file.path(pkgload::pkg_name(), "css/custom-styles.min.css"), rel = "stylesheet", type = "text/css"),
         shiny::tags$script(src = file.path(pkgload::pkg_name(), "js/custom-js.js"))
       )#,
