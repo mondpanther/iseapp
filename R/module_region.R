@@ -154,7 +154,7 @@ region_module_sidebar <- function(id) {
 #' @keywords internal
 region_module_ui <- function(id) {
   ns <- shiny::NS(id)
-  
+
   bslib::layout_sidebar(
     sidebar = bslib::sidebar(
       id = ns("sidebar"),
@@ -162,44 +162,51 @@ region_module_ui <- function(id) {
       width = 330,
       region_module_sidebar(id)
     ),
-    
+
+    download_buttons_css(),
+
     # Main content with inner tabs
     bslib::navset_card_tab(
       id = ns("inner_tabs"),
-      
+
       bslib::nav_panel(
         "Returns by Technology",
         shiny::div(
-          ggiraph::girafeOutput(ns("avstrax_plot1_region"), width = "100%", height = "auto")
+          ggiraph::girafeOutput(ns("avstrax_plot1_region"), width = "100%", height = "auto"),
+          plot_download_buttons(ns, "avstrax_plot1_region")
         )
       ),
-      
+
       bslib::nav_panel(
         "Returns by Region",
         shiny::div(
-          ggiraph::girafeOutput(ns("avstrax_plot2_region"), width = "100%", height = "auto")
+          ggiraph::girafeOutput(ns("avstrax_plot2_region"), width = "100%", height = "auto"),
+          plot_download_buttons(ns, "avstrax_plot2_region")
         )
       ),
-      
+
       bslib::nav_panel(
         "UK Map",
         shiny::div(
-          # shiny::h3("UK Regions Map: Returns"),
-          leaflet::leafletOutput(ns("uk_regions_map"), width = "100%", height = "500px")
+          leaflet::leafletOutput(ns("uk_regions_map"), width = "100%", height = "500px"),
+          map_download_buttons(ns, "uk_regions_map")
         )
       ),
-      
+
       bslib::nav_panel(
         "RTA",
         shiny::div(
           shiny::h3("RTA by Region"),
           ggiraph::girafeOutput(ns("avstrax_plot2_region_rta"), width = "100%", height = "auto"),
+          plot_download_buttons(ns, "avstrax_plot2_region_rta"),
           shiny::tags$br(),
           shiny::h3("RTA vs Returns"),
           ggiraph::girafeOutput(ns("rta_returns_scatter_region"), width = "100%", height = "auto"),
+          plot_download_buttons(ns, "rta_returns_scatter_region"),
           shiny::tags$br(),
           shiny::h3("RTA by Region Map"),
-          leaflet::leafletOutput(ns("uk_regions_map_rta"), width = "100%", height = "500px")
+          leaflet::leafletOutput(ns("uk_regions_map_rta"), width = "100%", height = "500px"),
+          map_download_buttons(ns, "uk_regions_map_rta")
         )
       )
     )
@@ -220,7 +227,10 @@ region_module_server <- function(id, parent_session, con) {
     id,
     function(input, output, session) {
       ns <- session$ns
-      
+
+      # Reactive store for ggplot objects and data (for download handlers)
+      plot_store <- shiny::reactiveValues()
+
       # Update URL when subtab changes
       shiny::observeEvent(input$inner_tabs, {
         query <- shiny::parseQueryString(parent_session$clientData$url_search)
@@ -335,7 +345,7 @@ region_module_server <- function(id, parent_session, con) {
         pdata      <- fallback_by_tech_region()
         if (is.null(pdata) || nrow(pdata) == 0) return(NULL)
 
-        plot_avstrax_by_country(
+        result <- plot_avstrax_by_country(
           pdata            = pdata,
           toflow           = input$toflow_region,
           custom_colors    = custom_colors,
@@ -346,6 +356,14 @@ region_module_server <- function(id, parent_session, con) {
           plot_title       = sub("^[^.]*\\.", "", flow_label),
           precomputed_data = pdata
         )
+
+        if (!is.null(result$ggplot)) {
+          plot_store$avstrax_plot1_region_gg   <- result$ggplot
+          plot_store$avstrax_plot1_region_data <- result$plot_data
+          result$girafe
+        } else {
+          result
+        }
       })
       
       # Plot 2: Returns by Region
@@ -359,7 +377,7 @@ region_module_server <- function(id, parent_session, con) {
         precomputed_data <- fallback_by_region()
         if (is.null(precomputed_data) || nrow(precomputed_data) == 0) return(NULL)
 
-        plot_avstrax_by_technology(
+        result <- plot_avstrax_by_technology(
           pdata                   = data.frame(),
           classes                 = NULL,
           technologies            = input$techs_region,
@@ -375,6 +393,14 @@ region_module_server <- function(id, parent_session, con) {
           comparison_technologies = input$techs_comparison_region,
           precomputed_avstrax     = precomputed_data
         )
+
+        if (!is.null(result$ggplot)) {
+          plot_store$avstrax_plot2_region_gg   <- result$ggplot
+          plot_store$avstrax_plot2_region_data <- result$plot_data
+          result$girafe
+        } else {
+          result
+        }
       })
       
       # UK Map: Returns
@@ -389,11 +415,23 @@ region_module_server <- function(id, parent_session, con) {
 
         if (nrow(map_data) == 0) return(NULL)
 
+        is_return  <- grepl("^is", input$toflow_region)
+        map_title  <- paste0("Returns: ", paste(input$techs_region, collapse = ", "))
+
+        # Store ggplot version and data for PDF/CSV downloads
+        plot_store$uk_regions_map_gg <- plot_uk_regions_map_gg(
+          data       = map_data,
+          value_col  = "mean",
+          plot_title = map_title,
+          is_return  = is_return
+        )
+        plot_store$uk_regions_map_data <- map_data
+
         plot_uk_regions_map(
-          avstrax_data  = map_data,
-          value_col = "mean",
-          plot_title = paste0("Returns: ", paste(input$techs_region, collapse = ", ")),
-          is_return = grepl("^is", input$toflow_region)
+          avstrax_data = map_data,
+          value_col    = "mean",
+          plot_title   = map_title,
+          is_return    = is_return
         )
       })
       
@@ -408,7 +446,7 @@ region_module_server <- function(id, parent_session, con) {
         precomputed_data <- fallback_by_region()
         if (is.null(precomputed_data) || nrow(precomputed_data) == 0) return(NULL)
 
-        plot_avstrax_rta(
+        result <- plot_avstrax_rta(
           pdata               = NULL,
           classes             = NULL,
           technologies        = input$techs_region,
@@ -423,6 +461,14 @@ region_module_server <- function(id, parent_session, con) {
           plot_title          = paste0("RTA: ", paste(input$techs_region, collapse = ", "), " - ", sub("^[^.]*\\.", "", flow_label)),
           precomputed_avstrax = precomputed_data
         )
+
+        if (!is.null(result$ggplot)) {
+          plot_store$avstrax_plot2_region_rta_gg   <- result$ggplot
+          plot_store$avstrax_plot2_region_rta_data <- result$plot_data
+          result$girafe
+        } else {
+          result
+        }
       })
       
       # RTA Scatter: RTA vs Returns
@@ -435,7 +481,7 @@ region_module_server <- function(id, parent_session, con) {
         precomputed_data <- fallback_by_region()
         if (is.null(precomputed_data) || nrow(precomputed_data) == 0) return(NULL)
 
-        plot_rta_returns_scatter(
+        result <- plot_rta_returns_scatter(
           avstrax_data = precomputed_data,
           mininno      = input$mininno_rta_region,
           minallinnos  = input$minallinnos_rta_region,
@@ -444,6 +490,14 @@ region_module_server <- function(id, parent_session, con) {
           x_label      = "RTA",
           y_label      = "Return (%)"
         )
+
+        if (!is.null(result$ggplot)) {
+          plot_store$rta_returns_scatter_region_gg   <- result$ggplot
+          plot_store$rta_returns_scatter_region_data <- result$plot_data
+          result$girafe
+        } else {
+          result
+        }
       })
       
       # UK Map: RTA
@@ -458,13 +512,57 @@ region_module_server <- function(id, parent_session, con) {
 
         if (nrow(map_data) == 0) return(NULL)
 
+        rta_title <- paste0("RTA: ", paste(input$techs_region, collapse = ", "))
+
+        # Store ggplot version and data for PDF/CSV downloads
+        plot_store$uk_regions_map_rta_gg <- plot_uk_regions_map_gg(
+          data       = map_data,
+          value_col  = "RTA",
+          plot_title = rta_title,
+          is_return  = FALSE
+        )
+        plot_store$uk_regions_map_rta_data <- map_data
+
         plot_uk_regions_map(
           avstrax_data = map_data,
           value_col    = "RTA",
-          plot_title   = paste0("RTA: ", paste(input$techs_region, collapse = ", ")),
+          plot_title   = rta_title,
           is_return    = FALSE
         )
       })
+
+      # ── Download handlers ──────────────────────────────────────────────────
+      # SVG + CSV for girafe plots
+      output$dl_svg_avstrax_plot1_region <- make_svg_handler(
+        reactive(plot_store$avstrax_plot1_region_gg), "region_returns_by_technology")
+      output$dl_csv_avstrax_plot1_region <- make_csv_handler(
+        reactive(plot_store$avstrax_plot1_region_data), "region_returns_by_technology")
+
+      output$dl_svg_avstrax_plot2_region <- make_svg_handler(
+        reactive(plot_store$avstrax_plot2_region_gg), "region_returns_by_region")
+      output$dl_csv_avstrax_plot2_region <- make_csv_handler(
+        reactive(plot_store$avstrax_plot2_region_data), "region_returns_by_region")
+
+      output$dl_svg_avstrax_plot2_region_rta <- make_svg_handler(
+        reactive(plot_store$avstrax_plot2_region_rta_gg), "region_rta_by_region")
+      output$dl_csv_avstrax_plot2_region_rta <- make_csv_handler(
+        reactive(plot_store$avstrax_plot2_region_rta_data), "region_rta_by_region")
+
+      output$dl_svg_rta_returns_scatter_region <- make_svg_handler(
+        reactive(plot_store$rta_returns_scatter_region_gg), "region_rta_vs_returns")
+      output$dl_csv_rta_returns_scatter_region <- make_csv_handler(
+        reactive(plot_store$rta_returns_scatter_region_data), "region_rta_vs_returns")
+
+      # PDF + CSV for UK region maps
+      output$dl_pdf_uk_regions_map <- make_pdf_handler(
+        reactive(plot_store$uk_regions_map_gg), "uk_regions_map")
+      output$dl_csv_uk_regions_map <- make_csv_handler(
+        reactive(plot_store$uk_regions_map_data), "uk_regions_map")
+
+      output$dl_pdf_uk_regions_map_rta <- make_pdf_handler(
+        reactive(plot_store$uk_regions_map_rta_gg), "uk_regions_map_rta")
+      output$dl_csv_uk_regions_map_rta <- make_csv_handler(
+        reactive(plot_store$uk_regions_map_rta_data), "uk_regions_map_rta")
 
     }
   )

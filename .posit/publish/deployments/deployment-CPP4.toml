@@ -11,8 +11,8 @@ id = '019cc8b0-8b5f-b143-36e9-f95ca7da3d9b'
 dashboard_url = 'https://connect.posit.cloud/mondpanther/content/019cc8b0-8b5f-b143-36e9-f95ca7da3d9b'
 direct_url = 'https://019cc8b0-8b5f-b143-36e9-f95ca7da3d9b.share.connect.posit.cloud'
 logs_url = 'https://connect.posit.cloud/mondpanther/content/019cc8b0-8b5f-b143-36e9-f95ca7da3d9b/history'
-deployed_at = '2026-03-07T23:14:21Z'
-bundle_id = '019cca93-0158-1c1a-8743-23c4d8260bc3'
+deployed_at = '2026-03-08T13:08:50Z'
+bundle_id = '019ccd8d-e991-9e50-8a3f-d195b2cc52e7'
 files = [
   '.posit/publish/deployments/deployment-CPP4.toml',
   '.posit/publish/iseapp2-9GQ2.toml',
@@ -36,6 +36,7 @@ files = [
   'R/sysdata.rda',
   'R/themes.R',
   'R/ui.R',
+  'R/utils_download.R',
   'R/utils_url_restore.R',
   'app.R',
   'inst/config.yml',
@@ -123,7 +124,7 @@ version = '4.4.2'
 
 [renv]
 [renv.r]
-version = '4.5.0'
+version = '4.4.2'
 
 [[renv.r.repositories]]
 name = 'CRAN'
@@ -198,7 +199,7 @@ author = 'R Special Interest Group on Databases (R-SIG-DB) [aut], Hadley Wickham
 package = 'Formula'
 version = '1.2-5'
 source = 'Repository'
-repository = 'RSPM'
+repository = 'CRAN'
 depends = ['R (>= 2.0.0)', 'stats']
 hash = ''
 title = 'Extended Model Formulas'
@@ -206,7 +207,6 @@ title = 'Extended Model Formulas'
 maintainer = 'Achim Zeileis <Achim.Zeileis@R-project.org>'
 description = 'Infrastructure for extended formulas with multiple parts on the right-hand side and/or multiple responses on the left-hand side (see <doi:10.18637/jss.v034.i01>).'
 license = 'GPL-2 | GPL-3'
-encoding = 'UTF-8'
 needscompilation = 'no'
 author = 'Achim Zeileis [aut, cre] (<https://orcid.org/0000-0003-0918-3766>), Yves Croissant [aut]'
 
@@ -448,7 +448,7 @@ systemrequirements = 'libxml2 (>= 2.6.3)'
 package = 'abind'
 version = '1.4-8'
 source = 'Repository'
-repository = 'RSPM'
+repository = 'CRAN'
 depends = ['R (>= 1.5.0)']
 hash = ''
 title = 'Combine Multidimensional Arrays'
@@ -457,7 +457,6 @@ maintainer = 'Tony Plate <tplate@acm.org>'
 description = "Combine multidimensional arrays into a single array. This is a generalization of 'cbind' and 'rbind'.  Works with vectors, matrices, and higher-dimensional arrays (aka tensors). Also provides functions 'adrop', 'asub', and 'afill' for manipulating, extracting and replacing data in arrays."
 license = 'MIT + file LICENSE'
 imports = ['methods', 'utils']
-encoding = 'UTF-8'
 needscompilation = 'no'
 author = 'Tony Plate [aut, cre], Richard Heiberger [aut]'
 
@@ -547,7 +546,7 @@ author = 'Michel Lang [cre, aut] (<https://orcid.org/0000-0001-9754-0393>), Dunc
 package = 'base64enc'
 version = '0.1-3'
 source = 'Repository'
-repository = 'CRAN'
+repository = 'RSPM'
 depends = ['R (>= 2.9.0)']
 hash = ''
 title = 'Tools for base64 encoding'
@@ -555,6 +554,7 @@ maintainer = 'Simon Urbanek <Simon.Urbanek@r-project.org>'
 description = 'This package provides tools for handling base64 encoding. It is more flexible than the orphaned base64 package.'
 url = 'http://www.rforge.net/base64enc'
 license = 'GPL-2 | GPL-3'
+encoding = 'UTF-8'
 needscompilation = 'yes'
 author = 'Simon Urbanek <Simon.Urbanek@r-project.org>'
 
@@ -1360,7 +1360,7 @@ author = 'Hadley Wickham [aut, cre], Maximilian Girlich [aut], Edgar Ruiz [aut],
 package = 'deldir'
 version = '2.0-4'
 source = 'Repository'
-repository = 'RSPM'
+repository = 'CRAN'
 depends = ['R (>= 3.5.0)']
 hash = ''
 title = 'Delaunay Triangulation and Dirichlet (Voronoi) Tessellation'
@@ -1369,7 +1369,6 @@ description = "Calculates the Delaunay triangulation and the Dirichlet or Vorono
 license = 'GPL (>= 2)'
 imports = ['graphics', 'grDevices']
 suggests = ['polyclip']
-encoding = 'UTF-8'
 needscompilation = 'yes'
 author = 'Rolf Turner'
 
@@ -1583,7 +1582,7 @@ systemrequirements = 'xz (for building from source)'
 package = 'e1071'
 version = '1.7-16'
 source = 'Repository'
-repository = 'CRAN'
+repository = 'RSPM'
 hash = ''
 title = 'Misc Functions of the Department of Statistics, Probability Theory Group (Formerly: E1071), TU Wien'
 'authors@r' = 'c(person(given = "David", family = "Meyer", role = c("aut", "cre"), email = "David.Meyer@R-project.org", comment = c(ORCID = "0000-0002-5196-3048")),     person(given = "Evgenia", family = "Dimitriadou", role = c("aut","cph")), person(given = "Kurt", family = "Hornik", role = "aut", email = "Kurt.Hornik@R-project.org", comment = c(ORCID = "0000-0003-4198-9911")), person(given = "Andreas", family = "Weingessel", role = "aut"), person(given = "Friedrich", family = "Leisch", role = "aut"), person(given = "Chih-Chung", family = "Chang", role = c("ctb","cph"), comment = "libsvm C++-code"), person(given = "Chih-Chen", family = "Lin", role = c("ctb","cph"), comment = "libsvm C++-code"))'
@@ -1592,6 +1591,7 @@ description = 'Functions for latent class analysis, short time Fourier transform
 license = 'GPL-2 | GPL-3'
 imports = ['graphics', 'grDevices', 'class', 'stats', 'methods', 'utils', 'proxy']
 suggests = ['cluster', 'mlbench', 'nnet', 'randomForest', 'rpart', 'SparseM', 'xtable', 'Matrix', 'MASS', 'slam']
+encoding = 'UTF-8'
 needscompilation = 'yes'
 author = 'David Meyer [aut, cre] (<https://orcid.org/0000-0002-5196-3048>), Evgenia Dimitriadou [aut, cph], Kurt Hornik [aut] (<https://orcid.org/0000-0003-4198-9911>), Andreas Weingessel [aut], Friedrich Leisch [aut], Chih-Chung Chang [ctb, cph] (libsvm C++-code), Chih-Chen Lin [ctb, cph] (libsvm C++-code)'
 
@@ -2110,7 +2110,7 @@ author = 'David Cooley [aut, cre]'
 package = 'geosphere'
 version = '1.5-20'
 source = 'Repository'
-repository = 'CRAN'
+repository = 'RSPM'
 depends = ['R (>= 3.0.0)']
 hash = ''
 type = 'Package'
@@ -2123,6 +2123,7 @@ license = 'GPL (>= 3)'
 imports = ['Rcpp', 'sp']
 suggests = ['methods', 'raster', 'terra']
 linkingto = ['Rcpp']
+encoding = 'UTF-8'
 needscompilation = 'yes'
 author = 'Robert J. Hijmans [cre, aut], Charles Karney [ctb] (GeographicLib), Ed Williams [ctb], Chris Vennes [ctb]'
 
@@ -2703,7 +2704,7 @@ author = 'Hadley Wickham [aut, cre], Posit Software, PBC [cph, fnd], Maximilian 
 package = 'ids'
 version = '1.0.1'
 source = 'Repository'
-repository = 'RSPM'
+repository = 'CRAN'
 hash = ''
 title = 'Generate Random Identifiers'
 'authors@r' = 'person("Rich", "FitzJohn", role = c("aut", "cre"), email = "rich.fitzjohn@gmail.com")'
@@ -2716,7 +2717,6 @@ imports = ['openssl', 'uuid']
 suggests = ['knitr', 'rcorpora', 'rmarkdown', 'testthat']
 vignettebuilder = 'knitr'
 roxygennote = '6.0.1'
-encoding = 'UTF-8'
 needscompilation = 'no'
 author = 'Rich FitzJohn [aut, cre]'
 
@@ -2861,7 +2861,7 @@ author = 'Jeroen Ooms [aut, cre] (<https://orcid.org/0000-0002-4035-0289>)'
 package = 'jpeg'
 version = '0.1-11'
 source = 'Repository'
-repository = 'RSPM'
+repository = 'CRAN'
 depends = ['R (>= 2.9.0)']
 hash = ''
 title = 'Read and write JPEG images'
@@ -2871,7 +2871,6 @@ description = 'This package provides an easy and simple way to read, write and d
 url = 'https://www.rforge.net/jpeg/'
 bugreports = 'https://github.com/s-u/jpeg/issues'
 license = 'GPL-2 | GPL-3'
-encoding = 'UTF-8'
 needscompilation = 'yes'
 author = 'Simon Urbanek [aut, cre, cph] (https://urbanek.org, <https://orcid.org/0000-0003-2297-1732>)'
 systemrequirements = 'libjpeg'
@@ -3005,7 +3004,7 @@ author = 'Winston Chang [aut, cre], Joe Cheng [aut], Charlie Gao [aut] (<https:/
 package = 'lattice'
 version = '0.22-6'
 source = 'Repository'
-repository = 'RSPM'
+repository = 'CRAN'
 depends = ['R (>= 4.0.0)']
 hash = ''
 title = 'Trellis Graphics for R'
@@ -3017,7 +3016,6 @@ bugreports = 'https://github.com/deepayan/lattice/issues'
 license = 'GPL (>= 2)'
 imports = ['grid', 'grDevices', 'graphics', 'stats', 'utils']
 suggests = ['KernSmooth', 'MASS', 'latticeExtra', 'colorspace']
-encoding = 'UTF-8'
 needscompilation = 'yes'
 author = 'Deepayan Sarkar [aut, cre] (<https://orcid.org/0000-0003-4107-1553>), Felix Andrews [ctb], Kevin Wright [ctb] (documentation), Neil Klepeis [ctb], Johan Larsson [ctb] (miscellaneous improvements), Zhijian (Jason) Wen [cph] (filled contour code), Paul Murrell [ctb], Stefan Eng [ctb] (violin plot improvements), Achim Zeileis [ctb] (modern colors), Alexandre Courtiol [ctb] (generics for larrows, lpolygon, lrect and lsegments)'
 
@@ -3749,7 +3747,7 @@ author = 'Hadley Wickham [aut, cre]'
 package = 'png'
 version = '0.1-8'
 source = 'Repository'
-repository = 'RSPM'
+repository = 'CRAN'
 depends = ['R (>= 2.9.0)']
 hash = ''
 title = 'Read and write PNG images'
@@ -3757,7 +3755,6 @@ maintainer = 'Simon Urbanek <Simon.Urbanek@r-project.org>'
 description = 'This package provides an easy and simple way to read, write and display bitmap images stored in the PNG format. It can read and write both files and in-memory raw vectors.'
 url = 'http://www.rforge.net/png/'
 license = 'GPL-2 | GPL-3'
-encoding = 'UTF-8'
 needscompilation = 'yes'
 author = 'Simon Urbanek <Simon.Urbanek@r-project.org>'
 systemrequirements = 'libpng'
@@ -3957,7 +3954,7 @@ author = 'Etienne Bacher [aut, cre, cph]'
 package = 'proxy'
 version = '0.4-27'
 source = 'Repository'
-repository = 'CRAN'
+repository = 'RSPM'
 depends = ['R (>= 3.4.0)']
 hash = ''
 type = 'Package'
@@ -3968,6 +3965,7 @@ description = 'Provides an extensible framework for the efficient calculation of
 license = 'GPL-2'
 imports = ['stats', 'utils']
 suggests = ['cba']
+encoding = 'UTF-8'
 needscompilation = 'yes'
 author = 'David Meyer [aut, cre], Christian Buchta [aut]'
 
@@ -4529,9 +4527,9 @@ author = 'Kirill Müller [aut, cre] (ORCID: <https://orcid.org/0000-0002-1416-34
 
 [renv.packages.rsconnect]
 package = 'rsconnect'
-version = '1.5.1'
+version = '1.7.0'
 source = 'Repository'
-repository = 'RSPM'
+repository = 'CRAN'
 depends = ['R (>= 3.5.0)']
 hash = ''
 type = 'Package'
@@ -4545,7 +4543,7 @@ license = 'GPL-2'
 imports = ['cli', 'curl', 'digest', 'jsonlite', 'lifecycle', 'openssl (>= 2.0.0)', 'PKI', 'packrat (>= 0.6)', 'renv (>= 1.0.0)', 'rlang (>= 1.0.0)', 'rstudioapi (>= 0.5)', 'snowflakeauth', 'tools', 'yaml (>= 2.1.5)', 'utils']
 suggests = ['Biobase', 'BiocManager', 'foreign', 'knitr', 'MASS', 'plumber (>= 0.3.2)', 'quarto', 'RCurl', 'reticulate', 'rmarkdown (>= 1.1)', 'shiny', 'testthat (>= 3.1.9)', 'webfakes', 'withr']
 vignettebuilder = 'knitr, rmarkdown'
-roxygennote = '7.3.2'
+roxygennote = '7.3.3'
 encoding = 'UTF-8'
 needscompilation = 'no'
 author = 'Aron Atkins [aut, cre], Toph Allen [aut], Hadley Wickham [aut], Jonathan McPherson [aut], JJ Allaire [aut], Posit Software, PBC [cph, fnd]'
@@ -4968,7 +4966,7 @@ author = 'Kevin Ushey'
 package = 'sp'
 version = '2.2-0'
 source = 'Repository'
-repository = 'CRAN'
+repository = 'RSPM'
 depends = ['R (>= 3.5.0)', 'methods']
 hash = ''
 title = 'Classes and Methods for Spatial Data'
@@ -4981,6 +4979,7 @@ license = 'GPL (>= 2)'
 imports = ['utils', 'stats', 'graphics', 'grDevices', 'lattice', 'grid']
 suggests = ['RColorBrewer', 'gstat', 'deldir', 'knitr', 'maps', 'mapview', 'rmarkdown', 'sf', 'terra', 'raster']
 vignettebuilder = 'knitr'
+encoding = 'UTF-8'
 needscompilation = 'yes'
 author = "Edzer Pebesma [aut, cre], Roger Bivand [aut], Barry Rowlingson [ctb], Virgilio Gomez-Rubio [ctb], Robert Hijmans [ctb], Michael Sumner [ctb], Don MacQueen [ctb], Jim Lemon [ctb], Finn Lindgren [ctb], Josh O'Brien [ctb], Joseph O'Rourke [ctb], Patrick Hausmann [ctb]"
 
@@ -5168,6 +5167,32 @@ needscompilation = 'no'
 author = 'Hadley Wickham [aut, cre, cph], Posit Software, PBC [cph, fnd]'
 'config/testthat/edition' = '3'
 'config/needs/website' = 'tidyverse/tidytemplate'
+
+[renv.packages.svglite]
+package = 'svglite'
+version = '2.2.2'
+source = 'Repository'
+repository = 'CRAN'
+depends = ['R (>= 4.1)']
+hash = ''
+title = "An 'SVG' Graphics Device"
+'authors@r' = 'c( person("Hadley", "Wickham", , "hadley@posit.co", role = "aut"), person("Lionel", "Henry", , "lionel@posit.co", role = "aut"), person("Thomas Lin", "Pedersen", , "thomas.pedersen@posit.co", role = c("cre", "aut"), comment = c(ORCID = "0000-0002-5147-4711")), person("T Jake", "Luciani", , "jake@apache.org", role = "aut"), person("Matthieu", "Decorde", , "matthieu.decorde@ens-lyon.fr", role = "aut"), person("Vaudor", "Lise", , "lise.vaudor@ens-lyon.fr", role = "aut"), person("Tony", "Plate", role = "ctb", comment = "Early line dashing code"), person("David", "Gohel", role = "ctb", comment = "Line dashing code and early raster code"), person("Yixuan", "Qiu", role = "ctb", comment = "Improved styles; polypath implementation"), person("Håkon", "Malmedal", role = "ctb", comment = "Opacity code"), person("Posit Software, PBC", role = c("cph", "fnd"), comment = c(ROR = "03wc8by49")) )'
+maintainer = 'Thomas Lin Pedersen <thomas.pedersen@posit.co>'
+description = "A graphics device for R that produces 'Scalable Vector Graphics'. 'svglite' is a fork of the older 'RSvgDevice' package."
+url = 'https://svglite.r-lib.org, https://github.com/r-lib/svglite'
+bugreports = 'https://github.com/r-lib/svglite/issues'
+license = 'GPL (>= 2)'
+imports = ['base64enc', 'cli', 'lifecycle', 'rlang (>= 1.1.0)', 'systemfonts (>= 1.3.0)', 'textshaping (>= 0.3.0)']
+suggests = ['covr', 'fontquiver (>= 0.2.0)', 'htmltools', 'knitr', 'rmarkdown', 'testthat (>= 3.0.0)', 'xml2 (>= 1.0.0)']
+linkingto = ['cpp11', 'systemfonts', 'textshaping']
+vignettebuilder = 'knitr'
+roxygennote = '7.3.2'
+encoding = 'UTF-8'
+needscompilation = 'yes'
+author = 'Hadley Wickham [aut], Lionel Henry [aut], Thomas Lin Pedersen [cre, aut] (ORCID: <https://orcid.org/0000-0002-5147-4711>), T Jake Luciani [aut], Matthieu Decorde [aut], Vaudor Lise [aut], Tony Plate [ctb] (Early line dashing code), David Gohel [ctb] (Line dashing code and early raster code), Yixuan Qiu [ctb] (Improved styles; polypath implementation), Håkon Malmedal [ctb] (Opacity code), Posit Software, PBC [cph, fnd] (ROR: <https://ror.org/03wc8by49>)'
+'config/testthat/edition' = '3'
+'config/needs/website' = 'tidyverse/tidytemplate'
+systemrequirements = 'libpng'
 
 [renv.packages.sys]
 package = 'sys'
@@ -5987,7 +6012,7 @@ author = 'Gábor Csárdi [aut, cre], Fathi Boudra [aut], Rex Dieter [aut], Kevin
 package = 'xtable'
 version = '1.8-4'
 source = 'Repository'
-repository = 'CRAN'
+repository = 'RSPM'
 depends = ['R (>= 2.10.0)']
 hash = ''
 title = 'Export Tables to LaTeX or HTML'
@@ -5999,6 +6024,7 @@ license = 'GPL (>= 2)'
 imports = ['stats', 'utils']
 suggests = ['knitr', 'plm', 'zoo', 'survival']
 vignettebuilder = 'knitr'
+encoding = 'UTF-8'
 needscompilation = 'no'
 author = 'David B. Dahl [aut], David Scott [aut, cre], Charles Roosen [aut], Arni Magnusson [aut], Jonathan Swinton [aut], Ajay Shah [ctb], Arne Henningsen [ctb], Benno Puetz [ctb], Bernhard Pfaff [ctb], Claudio Agostinelli [ctb], Claudius Loehnert [ctb], David Mitchell [ctb], David Whiting [ctb], Fernando da Rosa [ctb], Guido Gay [ctb], Guido Schulz [ctb], Ian Fellows [ctb], Jeff Laake [ctb], John Walker [ctb], Jun Yan [ctb], Liviu Andronic [ctb], Markus Loecher [ctb], Martin Gubri [ctb], Matthieu Stigler [ctb], Robert Castelo [ctb], Seth Falcon [ctb], Stefan Edwards [ctb], Sven Garbade [ctb], Uwe Ligges [ctb]'
 
@@ -6028,7 +6054,7 @@ author = 'Jeffrey A. Ryan [aut, cph], Joshua M. Ulrich [cre, aut], Ross Bennett 
 package = 'yaml'
 version = '2.3.10'
 source = 'Repository'
-repository = 'CRAN'
+repository = 'RSPM'
 hash = ''
 type = 'Package'
 title = 'Methods to Convert R Data to YAML and Back'
@@ -6038,6 +6064,7 @@ url = 'https://github.com/vubiostat/r-yaml/'
 bugreports = 'https://github.com/vubiostat/r-yaml/issues'
 license = 'BSD_3_clause + file LICENSE'
 suggests = ['RUnit']
+encoding = 'UTF-8'
 needscompilation = 'yes'
 author = "Shawn P Garbett [aut], Jeremy Stephens [aut, cre], Kirill Simonov [aut], Yihui Xie [ctb], Zhuoer Dong [ctb], Hadley Wickham [ctb], Jeffrey Horner [ctb], reikoch [ctb], Will Beasley [ctb], Brendan O'Connor [ctb], Gregory R. Warnes [ctb], Michael Quinn [ctb], Zhian N. Kamvar [ctb], Charlie Gao [ctb]"
 

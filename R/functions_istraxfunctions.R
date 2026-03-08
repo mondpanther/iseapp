@@ -737,8 +737,7 @@ plot_avstrax_by_country <- function(
   # cat("Time for ggplot construction:", round(difftime(Sys.time(), plot_start, units = "secs"), 2), "secs\n")
 
   # Create girafe object
-  # girafe_start <- Sys.time()
-  result <- ggiraph::girafe(
+  g <- ggiraph::girafe(
     ggobj = p,
     width_svg = width_svg,
     height_svg = height_svg,
@@ -749,13 +748,8 @@ plot_avstrax_by_country <- function(
         opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
       )
     )
-  # cat("Time for girafe rendering:", round(difftime(Sys.time(), girafe_start, units = "secs"), 2), "secs\n")
-  
-  # total_time <- difftime(Sys.time(), start_time, units = "secs")
-  # cat("TOTAL plot_avstrax_by_country time:", round(total_time, 2), "secs\n")
-  # cat("======================================\n\n")
-  
-  return(result)
+
+  return(list(girafe = g, ggplot = p, plot_data = avstrax))
 }
 
 compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
@@ -1296,7 +1290,7 @@ Main: ", paste(technologies, collapse = ", "),
     )
 
   # Return girafe object for Shiny girafeOutput compatibility
-  return(girafe(ggobj = p,
+  g <- girafe(ggobj = p,
                 width_svg = width_svg,
                 height_svg = height_svg,
                 options = list(
@@ -1304,7 +1298,9 @@ Main: ", paste(technologies, collapse = ", "),
                   opts_hover(css = "cursor:pointer;fill:yellow;"),
                   opts_selection(type = "none"),
                   opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
-                )))
+                ))
+
+  return(list(girafe = g, ggplot = p, plot_data = avstrax))
 }
 
 
@@ -1546,7 +1542,7 @@ plot_avstrax_rta <- function(pdata, classes,
     )
 
   # Return girafe object
-  return(girafe(ggobj = p,
+  g <- girafe(ggobj = p,
                 width_svg = width_svg,
                 height_svg = height_svg,
                 options = list(
@@ -1554,7 +1550,9 @@ plot_avstrax_rta <- function(pdata, classes,
                   opts_hover(css = "cursor:pointer;fill:yellow;"),
                   opts_selection(type = "none"),
                   opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
-                )))
+                ))
+
+  return(list(girafe = g, ggplot = p, plot_data = avstrax_filtered))
 }
 
 
@@ -1735,7 +1733,7 @@ plot_rta_returns_scatter <- function(avstrax_data,
     theme(plot.caption = element_text(hjust = 1, size = 9, color = "gray"))
 
   # Return girafe object
-  return(girafe(ggobj = p,
+  g <- girafe(ggobj = p,
                 width_svg = width_svg,
                 height_svg = height_svg,
                 options = list(
@@ -1743,7 +1741,9 @@ plot_rta_returns_scatter <- function(avstrax_data,
                   opts_hover(css = "cursor:pointer;opacity:1;"),
                   opts_selection(type = "none"),
                   opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;font-size:12px;")
-                )))
+                ))
+
+  return(list(girafe = g, ggplot = p, plot_data = scatter_data))
 }
 
 
@@ -1948,7 +1948,7 @@ plot_rta_gdp_scatter <- function(avstrax_data,
     theme(plot.caption = element_text(hjust = 1, size = 9, color = "gray"))
 
   # Return girafe object
-  return(girafe(ggobj = p,
+  g <- girafe(ggobj = p,
                 width_svg = width_svg,
                 height_svg = height_svg,
                 options = list(
@@ -1956,7 +1956,9 @@ plot_rta_gdp_scatter <- function(avstrax_data,
                   opts_hover(css = "cursor:pointer;opacity:1;"),
                   opts_selection(type = "none"),
                   opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;font-size:12px;")
-                )))
+                ))
+
+  return(list(girafe = g, ggplot = p, plot_data = scatter_data))
 }
 
 
@@ -2486,6 +2488,197 @@ plot_uk_regions_map <- function(avstrax_data,
 }
 
 
+
+
+# ============================================
+# Static Map Functions (for PDF export)
+# ============================================
+
+#' Create static ggplot world map for PDF/vector export
+#'
+#' @param data Pre-computed dataframe with ctry_code, country_name, value columns
+#' @param value_col Column name for values (default "mean")
+#' @param plot_title Title
+#' @param is_return Logical
+#' @return A ggplot2 object
+#' @export
+plot_world_map_gg <- function(data,
+                               value_col = "mean",
+                               plot_title = "Returns by Country",
+                               is_return = TRUE) {
+  library(countrycode)
+
+  tryCatch({
+    map_data <- data[data$ctry_code != "All", ]
+    map_data$map_value <- as.numeric(map_data[[value_col]])
+
+    # Add country_name if missing
+    if (!"country_name" %in% names(map_data)) {
+      map_data$country_name <- countrycode(map_data$ctry_code, origin = "iso2c",
+                                            destination = "country.name.en", warn = FALSE)
+    }
+    map_data <- map_data[!is.na(map_data$country_name) & !is.na(map_data$map_value), ]
+
+    if (nrow(map_data) == 0) {
+      return(ggplot() + annotate("text", x = 0, y = 0, label = "No data available") + theme_void())
+    }
+
+    is_rta <- value_col == "RTA"
+
+    world_poly <- ggplot2::map_data("world")
+
+    map_data$region <- countrycode(map_data$ctry_code, origin = "iso2c", destination = "country.name",
+                                    custom_match = c(
+                                      "US" = "USA", "GB" = "UK", "RU" = "Russia",
+                                      "KR" = "South Korea", "KP" = "North Korea",
+                                      "CZ" = "Czech Republic", "SK" = "Slovakia",
+                                      "TW" = "Taiwan", "CD" = "Democratic Republic of the Congo",
+                                      "CG" = "Republic of Congo", "CI" = "Ivory Coast",
+                                      "TT" = "Trinidad", "VN" = "Vietnam",
+                                      "MM" = "Myanmar", "LA" = "Laos",
+                                      "SY" = "Syria", "IR" = "Iran",
+                                      "BO" = "Bolivia", "VE" = "Venezuela",
+                                      "TZ" = "Tanzania", "MK" = "North Macedonia",
+                                      "PS" = "Palestine", "BN" = "Brunei",
+                                      "SZ" = "Eswatini", "VA" = "Vatican"
+                                    ))
+
+    world_merged <- merge(world_poly, map_data[, c("region", "map_value")],
+                          by = "region", all.x = TRUE)
+
+    if (is_rta) {
+      max_dev <- max(abs(max(map_data$map_value, na.rm = TRUE) - 1),
+                     abs(1 - min(map_data$map_value, na.rm = TRUE)))
+      p <- ggplot(world_merged, aes(x = long, y = lat, group = group)) +
+        geom_polygon(aes(fill = map_value), color = "white", linewidth = 0.15) +
+        scale_fill_gradient2(low = "#08306B", mid = "#FFFFFF", high = "#B2182B",
+                             midpoint = 1, na.value = "lightgray", name = "RTA",
+                             limits = c(1 - max_dev, 1 + max_dev))
+    } else {
+      p <- ggplot(world_merged, aes(x = long, y = lat, group = group)) +
+        geom_polygon(aes(fill = map_value), color = "white", linewidth = 0.15) +
+        scale_fill_viridis_c(na.value = "lightgray",
+                             name = if (is_return) "Return (%)" else "Value ($M)")
+    }
+
+    p <- p + coord_fixed(1.3) + labs(title = plot_title) +
+      theme_minimal() +
+      theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+            legend.position = "right",
+            panel.grid.major = element_line(color = "grey90"),
+            axis.text = element_blank(), axis.title = element_blank(), axis.ticks = element_blank())
+
+    return(p)
+  }, error = function(e) {
+    message("plot_world_map_gg error: ", e$message)
+    return(NULL)
+  })
+}
+
+
+#' Create static ggplot UK regions map for PDF/vector export
+#'
+#' @param data Pre-computed dataframe with ctry_code (NUTS1), value columns
+#' @param value_col Column name (default "mean")
+#' @param plot_title Title
+#' @param is_return Logical
+#' @return A ggplot2 object
+#' @export
+plot_uk_regions_map_gg <- function(data,
+                                    value_col = "mean",
+                                    plot_title = "Returns by UK Region",
+                                    is_return = TRUE) {
+  library(sf)
+
+  tryCatch({
+    uk_regions_names <- c(
+      "UKC" = "North East England", "UKD" = "North West England",
+      "UKE" = "Yorkshire and The Humber", "UKF" = "East Midlands",
+      "UKG" = "West Midlands", "UKH" = "East of England",
+      "UKI" = "London", "UKJ" = "South East England",
+      "UKK" = "South West England", "UKL" = "Wales",
+      "UKM" = "Scotland", "UKN" = "Northern Ireland"
+    )
+
+    if (!exists(".uk_nuts1_sf", envir = .GlobalEnv)) {
+      return(ggplot() + annotate("text", x = 0, y = 0, label = "Region boundaries not loaded") + theme_void())
+    }
+    uk_sf <- get(".uk_nuts1_sf", envir = .GlobalEnv)
+    if (is.null(uk_sf)) {
+      return(ggplot() + annotate("text", x = 0, y = 0, label = "Region boundaries not available") + theme_void())
+    }
+    if (!value_col %in% names(data)) {
+      return(ggplot() + annotate("text", x = 0, y = 0, label = paste0("Column '", value_col, "' not found")) + theme_void())
+    }
+
+    map_data <- data[data$ctry_code != "All" & data$ctry_code %in% names(uk_regions_names), ]
+    map_data$region_name <- uk_regions_names[map_data$ctry_code]
+    map_data$map_value <- as.numeric(map_data[[value_col]])
+    map_data <- map_data[!is.na(map_data$map_value), ]
+
+    if (nrow(map_data) == 0) {
+      return(ggplot() + annotate("text", x = 0, y = 0, label = "No data available for UK regions") + theme_void())
+    }
+
+    is_rta <- value_col == "RTA"
+    nuts_col <- if ("NUTS121CD" %in% names(uk_sf)) "NUTS121CD" else
+                if ("NUTS1CD" %in% names(uk_sf)) "NUTS1CD" else
+                names(uk_sf)[grepl("NUTS.*CD", names(uk_sf), ignore.case = TRUE)][1]
+
+    if (is.null(nuts_col)) {
+      return(ggplot() + annotate("text", x = 0, y = 0, label = "Could not identify NUTS code column") + theme_void())
+    }
+
+    uk_sf$nuts_code <- uk_sf[[nuts_col]]
+    uk_sf$feature_id <- seq_len(nrow(uk_sf))
+
+    uk_coords <- do.call(rbind, lapply(seq_len(nrow(uk_sf)), function(i) {
+      geom <- sf::st_geometry(uk_sf[i, ])[[1]]
+      nuts <- uk_sf$nuts_code[i]
+      fid <- uk_sf$feature_id[i]
+      if (inherits(geom, "MULTIPOLYGON")) polys <- geom else polys <- list(geom)
+      do.call(rbind, lapply(seq_along(polys), function(j) {
+        ring <- polys[[j]]
+        if (is.list(ring)) ring <- ring[[1]]
+        coords <- as.data.frame(ring)
+        names(coords) <- c("long", "lat")
+        coords$nuts_code <- nuts
+        coords$group <- paste0(fid, ".", j)
+        coords$order <- seq_len(nrow(coords))
+        coords
+      }))
+    }))
+
+    uk_coords <- merge(uk_coords, map_data[, c("ctry_code", "region_name", "map_value")],
+                        by.x = "nuts_code", by.y = "ctry_code", all.x = TRUE)
+
+    if (is_rta) {
+      max_dev <- max(abs(max(map_data$map_value, na.rm = TRUE) - 1),
+                     abs(1 - min(map_data$map_value, na.rm = TRUE)))
+      p <- ggplot(uk_coords, aes(x = long, y = lat, group = group)) +
+        geom_polygon(aes(fill = map_value), color = "white", linewidth = 0.3) +
+        scale_fill_gradient2(low = "#08306B", mid = "#FFFFFF", high = "#B2182B",
+                             midpoint = 1, na.value = "#E0E0E0", name = "RTA",
+                             limits = c(1 - max_dev, 1 + max_dev))
+    } else {
+      p <- ggplot(uk_coords, aes(x = long, y = lat, group = group)) +
+        geom_polygon(aes(fill = map_value), color = "white", linewidth = 0.3) +
+        scale_fill_viridis_c(na.value = "#E0E0E0",
+                             name = if (is_return) "Return (%)" else "Value ($M)")
+    }
+
+    p + coord_fixed(1.3) + labs(title = plot_title) +
+      theme_minimal() +
+      theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+            legend.position = "right",
+            panel.grid.major = element_line(color = "grey90"),
+            axis.text = element_blank(), axis.title = element_blank(), axis.ticks = element_blank())
+
+  }, error = function(e) {
+    message("plot_uk_regions_map_gg error: ", e$message)
+    return(NULL)
+  })
+}
 
 
 # Function to detect local Dropbox path from Dropbox's config file

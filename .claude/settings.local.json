@@ -11,7 +11,10 @@
       "WebFetch(domain:github.com)",
       "Bash(where.exe python)",
       "Bash(where.exe python3)",
-      "Bash(python3 -c \":*)"
+      "Bash(python3 -c \":*)",
+      "Bash(git ls-tree main R/)",
+      "Bash(git ls-tree --name-only main -- R/)",
+      "Bash(git ls-tree -r main --name-only)"
     ]
   }
 }

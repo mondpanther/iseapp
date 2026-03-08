@@ -122,6 +122,26 @@ country_module_sidebar <- function(id) {
           min = 1
         )
       )
+    ),
+
+    shiny::div(
+      shiny::h5("RTA OPTIONS", style = "font-weight: 600; margin-bottom: 10px;"),
+      shiny::div(
+        class = "side_input",
+        shiny::numericInput(ns("topn_rta"), "RTA: Show top n countries:", value = 20, min = 1, max = 200)
+      ),
+      shiny::div(
+        class = "side_input",
+        shiny::numericInput(ns("bottomn_rta"), "RTA: Show bottom n countries:", value = 0, min = 0, max = 200)
+      ),
+      shiny::div(
+        class = "side_input",
+        shiny::numericInput(ns("mininno_rta"), "RTA: Innovation count threshold:", value = 1, min = 1, max = 500)
+      ),
+      shiny::div(
+        class = "side_input",
+        shiny::numericInput(ns("minallinnos_rta"), "RTA: All innovation threshold:", value = 100, min = 1, max = 5000)
+      )
     )
   )
 }
@@ -135,7 +155,7 @@ country_module_sidebar <- function(id) {
 #' @keywords internal
 country_module_ui <- function(id) {
   ns <- shiny::NS(id)
-  
+
   bslib::layout_sidebar(
     sidebar = bslib::sidebar(
       id = ns("sidebar"),
@@ -143,29 +163,55 @@ country_module_ui <- function(id) {
       width = 330,
       country_module_sidebar(id)
     ),
-    
+
+    download_buttons_css(),
+
     # Main content with inner tabs
     bslib::navset_card_tab(
       id = ns("inner_tabs"),
-      
+
       bslib::nav_panel(
         "Returns by Technology",
         shiny::div(
-          ggiraph::girafeOutput(ns("avstrax_plot1"), width = "100%", height = "auto")
+          ggiraph::girafeOutput(ns("avstrax_plot1"), width = "100%", height = "auto"),
+          plot_download_buttons(ns, "avstrax_plot1")
         )
       ),
 
       bslib::nav_panel(
         "Returns by Country",
         shiny::div(
-          ggiraph::girafeOutput(ns("avstrax_plot2"), width = "100%", height = "auto")
+          ggiraph::girafeOutput(ns("avstrax_plot2"), width = "100%", height = "auto"),
+          plot_download_buttons(ns, "avstrax_plot2")
         )
       ),
-      
+
       bslib::nav_panel(
         "World Map",
         shiny::div(
-          plotly::plotlyOutput(ns("world_map"), width = "100%", height = "auto")
+          plotly::plotlyOutput(ns("world_map"), width = "100%", height = "auto"),
+          map_download_buttons(ns, "world_map")
+        )
+      ),
+
+      bslib::nav_panel(
+        "RTA",
+        shiny::div(
+          shiny::h3("RTA by Country"),
+          ggiraph::girafeOutput(ns("avstrax_plot2_rta"), width = "100%", height = "auto"),
+          plot_download_buttons(ns, "avstrax_plot2_rta"),
+          shiny::tags$br(),
+          shiny::h3("RTA vs Returns"),
+          ggiraph::girafeOutput(ns("rta_returns_scatter"), width = "100%", height = "auto"),
+          plot_download_buttons(ns, "rta_returns_scatter"),
+          shiny::tags$br(),
+          shiny::h3("RTA vs GDP per Capita"),
+          ggiraph::girafeOutput(ns("rta_gdp_scatter"), width = "100%", height = "auto"),
+          plot_download_buttons(ns, "rta_gdp_scatter"),
+          shiny::tags$br(),
+          shiny::h3("World Map: RTA"),
+          plotly::plotlyOutput(ns("world_map_rta"), width = "100%", height = "auto"),
+          map_download_buttons(ns, "world_map_rta")
         )
       )
     )
@@ -184,6 +230,9 @@ country_module_server <- function(id, parent_session, con) {
     id,
     function(input, output, session) {
       ns <- session$ns
+
+      # Reactive store for ggplot objects and data (for download handlers)
+      plot_store <- shiny::reactiveValues()
 
       # DuckDB query for Plot 1 (by-technology)
       fallback_by_tech <- shiny::reactive({
@@ -277,14 +326,14 @@ country_module_server <- function(id, parent_session, con) {
       
       # Chart 1: Main avstrax plot
       output$avstrax_plot1 <- ggiraph::renderGirafe({
-        req(input$country, input$toflow, input$tech_categories_plot1, 
+        req(input$country, input$toflow, input$tech_categories_plot1,
             input$widthscale, input$display_mode, !is.null(input$show_top3_ids))
 
         flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
         pdata      <- fallback_by_tech()
         if (is.null(pdata) || nrow(pdata) == 0) return(NULL)
 
-        plot_avstrax_by_country(
+        result <- plot_avstrax_by_country(
           pdata            = pdata,
           toflow           = input$toflow,
           custom_colors    = custom_colors,
@@ -295,6 +344,14 @@ country_module_server <- function(id, parent_session, con) {
           plot_title       = sub("^[^.]*\\.", "", flow_label),
           precomputed_data = pdata
         )
+
+        if (!is.null(result$ggplot)) {
+          plot_store$avstrax_plot1_gg   <- result$ggplot
+          plot_store$avstrax_plot1_data <- result$plot_data
+          result$girafe
+        } else {
+          result
+        }
       })
       
       # Chart 2: Returns by Country for Selected Technologies
@@ -303,12 +360,12 @@ country_module_server <- function(id, parent_session, con) {
             input$mininno, input$widthscale, input$display_mode,
             !is.null(input$show_top3_ids))
 
-        flow_label     <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
+        flow_label       <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
         precomputed_data <- fallback_by_country()
 
         if (is.null(precomputed_data) || nrow(precomputed_data) == 0) return(NULL)
 
-        plot_avstrax_by_technology(
+        result <- plot_avstrax_by_technology(
           pdata                   = data.frame(),
           classes                 = NULL,
           technologies            = input$techs,
@@ -323,6 +380,14 @@ country_module_server <- function(id, parent_session, con) {
           comparison_technologies = input$techs_comparison,
           precomputed_avstrax     = precomputed_data
         )
+
+        if (!is.null(result$ggplot)) {
+          plot_store$avstrax_plot2_gg   <- result$ggplot
+          plot_store$avstrax_plot2_data <- result$plot_data
+          result$girafe
+        } else {
+          result
+        }
       })
       
       # World Map
@@ -338,17 +403,199 @@ country_module_server <- function(id, parent_session, con) {
           dplyr::filter(ctry_code != "All", innos >= input$mininno)
 
         if (nrow(avstrax_data) == 0) return(NULL)
-        
+
         is_return <- grepl("^is", input$toflow)
+        map_title <- sub("^[^.]*\\.", "", flow_label)
+
+        # Store ggplot version and data for PDF/CSV downloads
+        plot_store$world_map_gg <- plot_world_map_gg(
+          data       = avstrax_data,
+          value_col  = "mean",
+          plot_title = map_title,
+          is_return  = is_return
+        )
+        plot_store$world_map_data <- avstrax_data
 
         plot_world_map(
           avstrax_data = avstrax_data,
           value_col    = "mean",
           color_scale  = "Viridis",
-          plot_title   = sub("^[^.]*\\.", "", flow_label),
+          plot_title   = map_title,
           is_return    = is_return
         )
       })
+
+      # ── RTA Plots ─────────────────────────────────────────────────────────
+
+      # RTA Bar Chart
+      output$avstrax_plot2_rta <- ggiraph::renderGirafe({
+        req(input$country, input$toflow, input$techs,
+            input$topn_rta, input$bottomn_rta,
+            input$mininno_rta, input$minallinnos_rta,
+            input$widthscale)
+
+        flow_label       <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
+        precomputed_data <- fallback_by_country()
+        if (is.null(precomputed_data) || nrow(precomputed_data) == 0) return(NULL)
+
+        tech_label <- paste(input$techs, collapse = ", ")
+
+        result <- plot_avstrax_rta(
+          pdata               = NULL,
+          classes             = NULL,
+          technologies        = input$techs,
+          toflow              = input$toflow,
+          custom_colors       = custom_colors,
+          topn                = input$topn_rta,
+          bottomn             = input$bottomn_rta,
+          mininno             = input$mininno_rta,
+          minallinnos         = input$minallinnos_rta,
+          widthscale          = input$widthscale,
+          x_label             = "Country",
+          plot_title          = paste0("RTA: ", tech_label, " - ", sub("^[^.]*\\.", "", flow_label)),
+          precomputed_avstrax = precomputed_data
+        )
+
+        if (!is.null(result$ggplot)) {
+          plot_store$avstrax_plot2_rta_gg   <- result$ggplot
+          plot_store$avstrax_plot2_rta_data <- result$plot_data
+          result$girafe
+        } else {
+          result
+        }
+      })
+
+      # RTA vs Returns Scatter
+      output$rta_returns_scatter <- ggiraph::renderGirafe({
+        req(input$country, input$toflow, input$techs,
+            input$mininno_rta, input$minallinnos_rta,
+            input$widthscale)
+
+        flow_label       <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
+        precomputed_data <- fallback_by_country()
+        if (is.null(precomputed_data) || nrow(precomputed_data) == 0) return(NULL)
+
+        tech_label <- paste(input$techs, collapse = ", ")
+
+        result <- plot_rta_returns_scatter(
+          avstrax_data = precomputed_data,
+          mininno      = input$mininno_rta,
+          minallinnos  = input$minallinnos_rta,
+          widthscale   = input$widthscale,
+          plot_title   = paste0("RTA vs Returns: ", tech_label, " - ", sub("^[^.]*\\.", "", flow_label)),
+          x_label      = "RTA",
+          y_label      = "Return (%)"
+        )
+
+        if (!is.null(result$ggplot)) {
+          plot_store$rta_returns_scatter_gg   <- result$ggplot
+          plot_store$rta_returns_scatter_data <- result$plot_data
+          result$girafe
+        } else {
+          result
+        }
+      })
+
+      # RTA vs GDP per Capita Scatter
+      output$rta_gdp_scatter <- ggiraph::renderGirafe({
+        req(input$country, input$toflow, input$techs,
+            input$mininno_rta, input$minallinnos_rta,
+            input$widthscale)
+
+        flow_label       <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
+        precomputed_data <- fallback_by_country()
+        if (is.null(precomputed_data) || nrow(precomputed_data) == 0) return(NULL)
+
+        tech_label <- paste(input$techs, collapse = ", ")
+
+        result <- plot_rta_gdp_scatter(
+          avstrax_data = precomputed_data,
+          mininno      = input$mininno_rta,
+          minallinnos  = input$minallinnos_rta,
+          widthscale   = input$widthscale,
+          plot_title   = paste0("RTA vs GDP per Capita: ", tech_label)
+        )
+
+        if (!is.null(result$ggplot)) {
+          plot_store$rta_gdp_scatter_gg   <- result$ggplot
+          plot_store$rta_gdp_scatter_data <- result$plot_data
+          result$girafe
+        } else {
+          result
+        }
+      })
+
+      # World Map: RTA
+      output$world_map_rta <- plotly::renderPlotly({
+        req(input$country, input$toflow, input$techs, input$mininno_rta)
+
+        avstrax_data <- fallback_by_country()
+        if (is.null(avstrax_data) || nrow(avstrax_data) == 0) return(NULL)
+
+        avstrax_data <- avstrax_data |>
+          dplyr::filter(ctry_code != "All", innos >= input$mininno_rta)
+
+        if (nrow(avstrax_data) == 0) return(NULL)
+
+        rta_title <- paste0("World Map: RTA - ", paste(input$techs, collapse = ", "))
+
+        # Store ggplot version and data for PDF/CSV downloads
+        plot_store$world_map_rta_gg <- plot_world_map_gg(
+          data       = avstrax_data,
+          value_col  = "RTA",
+          plot_title = rta_title,
+          is_return  = FALSE
+        )
+        plot_store$world_map_rta_data <- avstrax_data
+
+        plot_world_map(
+          avstrax_data = avstrax_data,
+          value_col    = "RTA",
+          color_scale  = "RdYlGn",
+          plot_title   = rta_title,
+          is_return    = FALSE
+        )
+      })
+
+      # ── Download handlers ──────────────────────────────────────────────────
+      # SVG + CSV for girafe plots
+      output$dl_svg_avstrax_plot1 <- make_svg_handler(
+        reactive(plot_store$avstrax_plot1_gg), "returns_by_technology")
+      output$dl_csv_avstrax_plot1 <- make_csv_handler(
+        reactive(plot_store$avstrax_plot1_data), "returns_by_technology")
+
+      output$dl_svg_avstrax_plot2 <- make_svg_handler(
+        reactive(plot_store$avstrax_plot2_gg), "returns_by_country")
+      output$dl_csv_avstrax_plot2 <- make_csv_handler(
+        reactive(plot_store$avstrax_plot2_data), "returns_by_country")
+
+      # PDF + CSV for world map
+      output$dl_pdf_world_map <- make_pdf_handler(
+        reactive(plot_store$world_map_gg), "world_map")
+      output$dl_csv_world_map <- make_csv_handler(
+        reactive(plot_store$world_map_data), "world_map")
+
+      # RTA plots: SVG + CSV
+      output$dl_svg_avstrax_plot2_rta <- make_svg_handler(
+        reactive(plot_store$avstrax_plot2_rta_gg), "rta_by_country")
+      output$dl_csv_avstrax_plot2_rta <- make_csv_handler(
+        reactive(plot_store$avstrax_plot2_rta_data), "rta_by_country")
+
+      output$dl_svg_rta_returns_scatter <- make_svg_handler(
+        reactive(plot_store$rta_returns_scatter_gg), "rta_vs_returns")
+      output$dl_csv_rta_returns_scatter <- make_csv_handler(
+        reactive(plot_store$rta_returns_scatter_data), "rta_vs_returns")
+
+      output$dl_svg_rta_gdp_scatter <- make_svg_handler(
+        reactive(plot_store$rta_gdp_scatter_gg), "rta_vs_gdp")
+      output$dl_csv_rta_gdp_scatter <- make_csv_handler(
+        reactive(plot_store$rta_gdp_scatter_data), "rta_vs_gdp")
+
+      # RTA world map: PDF + CSV
+      output$dl_pdf_world_map_rta <- make_pdf_handler(
+        reactive(plot_store$world_map_rta_gg), "world_map_rta")
+      output$dl_csv_world_map_rta <- make_csv_handler(
+        reactive(plot_store$world_map_rta_data), "world_map_rta")
 
     }
   )
