@@ -2153,79 +2153,82 @@ plot_uk_regions_map <- function(avstrax_data,
     "UKN" = "Northern Ireland"
   )
 
-  # Load UK NUTS1 GeoJSON - try local file first, then GitHub
-  # Try to load the GeoJSON, with caching
+  # Load UK NUTS1 GeoJSON (all 12 regions incl. Scotland & NI), with caching
   if (!exists(".uk_nuts1_sf", envir = .GlobalEnv)) {
     uk_sf <- NULL
 
-    # Option 1: Try local file first
-    local_geojson <- "uk_nuts1_boundaries.geojson"
-    if (file.exists(local_geojson)) {
+    # Option 1: Package-bundled file (inst/www/)
+    pkg_geojson <- system.file("www", "uk_nuts1_boundaries.geojson",
+                               package = "innovationStrategyExplorer")
+    if (pkg_geojson == "") {
+      # Fallback for dev mode (pkgload::load_all)
+      pkg_geojson <- file.path("inst", "www", "uk_nuts1_boundaries.geojson")
+    }
+    if (file.exists(pkg_geojson)) {
       tryCatch({
-        uk_sf <- sf::st_read(local_geojson, quiet = TRUE)
+        uk_sf <- sf::st_read(pkg_geojson, quiet = TRUE)
+        message("Loaded UK NUTS1 boundaries from package")
+      }, error = function(e) {
+        message("Could not load package GeoJSON: ", e$message)
+      })
+    }
+
+    # Option 2: Working-directory file (legacy / main branch compat)
+    if (is.null(uk_sf) && file.exists("uk_nuts1_boundaries.geojson")) {
+      tryCatch({
+        uk_sf <- sf::st_read("uk_nuts1_boundaries.geojson", quiet = TRUE)
         message("Loaded UK NUTS1 boundaries from local file")
       }, error = function(e) {
         message("Could not load local GeoJSON: ", e$message)
       })
     }
 
-    # Option 2: Try GitHub source (England & Wales)
+    # Option 3: GitHub source (England & Wales only) + GADM patch
     if (is.null(uk_sf)) {
       geojson_url <- "https://raw.githubusercontent.com/martinjc/UK-GeoJSON/master/json/eurostat/ew/nuts1.json"
       tryCatch({
         uk_sf <- sf::st_read(geojson_url, quiet = TRUE)
-        message("Loaded UK NUTS1 boundaries from GitHub")
+        message("Loaded UK NUTS1 boundaries from GitHub (E&W only)")
       }, error = function(e) {
         message("Could not load from GitHub: ", e$message)
       })
-    }
 
-    # Add Scotland and Northern Ireland from GADM file if missing
-    if (!is.null(uk_sf)) {
-      # Check which regions we have
-      nuts_col <- names(uk_sf)[grepl("NUTS.*CD", names(uk_sf), ignore.case = TRUE)][1]
-      if (!is.null(nuts_col)) {
-        existing_codes <- uk_sf[[nuts_col]]
-        name_col <- names(uk_sf)[grepl("NUTS.*NM", names(uk_sf), ignore.case = TRUE)][1]
-
-        # Try to load Scotland and NI from GADM file
-        gadm_file <- "gadm41_GBR_1.json"
-        if (file.exists(gadm_file) && (!"UKM" %in% existing_codes || !"UKN" %in% existing_codes)) {
-          tryCatch({
-            gadm_sf <- sf::st_read(gadm_file, quiet = TRUE)
-
-            # Add Scotland (UKM) if missing
-            if (!"UKM" %in% existing_codes) {
-              scotland_sf <- gadm_sf %>% filter(NAME_1 == "Scotland")
-              if (nrow(scotland_sf) > 0) {
-                scotland_sf <- scotland_sf %>%
-                  select(geometry) %>%
-                  mutate(!!nuts_col := "UKM")
-                if (!is.null(name_col)) scotland_sf[[name_col]] <- "Scotland"
-                uk_sf <- rbind(uk_sf, scotland_sf)
-                message("Added Scotland from GADM")
+      # Patch in Scotland & NI from GADM if available
+      if (!is.null(uk_sf)) {
+        nuts_col <- names(uk_sf)[grepl("NUTS.*CD", names(uk_sf), ignore.case = TRUE)][1]
+        if (!is.null(nuts_col)) {
+          existing_codes <- uk_sf[[nuts_col]]
+          name_col <- names(uk_sf)[grepl("NUTS.*NM", names(uk_sf), ignore.case = TRUE)][1]
+          gadm_file <- "gadm41_GBR_1.json"
+          if (file.exists(gadm_file) && (!"UKM" %in% existing_codes || !"UKN" %in% existing_codes)) {
+            tryCatch({
+              gadm_sf <- sf::st_read(gadm_file, quiet = TRUE)
+              if (!"UKM" %in% existing_codes) {
+                scotland_sf <- gadm_sf %>% filter(NAME_1 == "Scotland")
+                if (nrow(scotland_sf) > 0) {
+                  scotland_sf <- scotland_sf %>% select(geometry) %>% mutate(!!nuts_col := "UKM")
+                  if (!is.null(name_col)) scotland_sf[[name_col]] <- "Scotland"
+                  uk_sf <- rbind(uk_sf, scotland_sf)
+                  message("Added Scotland from GADM")
+                }
               }
-            }
-
-            # Add Northern Ireland (UKN) if missing
-            if (!"UKN" %in% existing_codes) {
-              ni_sf <- gadm_sf %>% filter(NAME_1 == "NorthernIreland")
-              if (nrow(ni_sf) > 0) {
-                ni_sf <- ni_sf %>%
-                  select(geometry) %>%
-                  mutate(!!nuts_col := "UKN")
-                if (!is.null(name_col)) ni_sf[[name_col]] <- "Northern Ireland"
-                uk_sf <- rbind(uk_sf, ni_sf)
-                message("Added Northern Ireland from GADM")
+              if (!"UKN" %in% existing_codes) {
+                ni_sf <- gadm_sf %>% filter(NAME_1 == "NorthernIreland")
+                if (nrow(ni_sf) > 0) {
+                  ni_sf <- ni_sf %>% select(geometry) %>% mutate(!!nuts_col := "UKN")
+                  if (!is.null(name_col)) ni_sf[[name_col]] <- "Northern Ireland"
+                  uk_sf <- rbind(uk_sf, ni_sf)
+                  message("Added Northern Ireland from GADM")
+                }
               }
-            }
-          }, error = function(e) {
-            message("Could not load GADM file: ", e$message)
-          })
+            }, error = function(e) message("Could not load GADM file: ", e$message))
+          }
         }
       }
+    }
 
-      # Standardize column names
+    # Standardize NUTS column name
+    if (!is.null(uk_sf)) {
       nuts_col <- names(uk_sf)[grepl("NUTS.*CD", names(uk_sf), ignore.case = TRUE)][1]
       if (!is.null(nuts_col) && !is.na(nuts_col) && nuts_col != "NUTS1CD") {
         uk_sf <- uk_sf %>% rename(NUTS1CD = !!sym(nuts_col))
