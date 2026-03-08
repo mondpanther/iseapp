@@ -2171,7 +2171,7 @@ plot_uk_regions_map <- function(avstrax_data,
 
     # Option 2: Try GitHub source (England & Wales)
     if (is.null(uk_sf)) {
-      geojson_url <- "https://raw.githubusercontent.com/martinjc/UK-GeoJSON/master/json/eurostat/ew/nuts1.json"
+      geojson_url <- "https://raw.githubusercontent.com/martinjc/UK-GeoJSON/master/json/eurostat/uk/nuts1.json"
       tryCatch({
         uk_sf <- sf::st_read(geojson_url, quiet = TRUE)
         message("Loaded UK NUTS1 boundaries from GitHub")
