@@ -206,6 +206,8 @@ compute_avstrax <- function(data, istrax_var, classes, colorings=NULL) {
     ) %>%
     distinct()
 
+   
+
   # Pre-compute scaled istrax
   avstrax$istrax_scaled <- avstrax$istrax * scaler
 
@@ -222,6 +224,7 @@ compute_avstrax <- function(data, istrax_var, classes, colorings=NULL) {
     ) %>%
     fungroup() %>%
     as.data.frame()
+
 
   # Calculate sem
   result$sem <- result$sd_val / sqrt(result$innos)
@@ -242,6 +245,18 @@ compute_avstrax <- function(data, istrax_var, classes, colorings=NULL) {
 
   # Merge extras with result
   result <- left_join(result, extras, by = "technology")
+
+  extras2 <- avstrax %>% distinct(docdb_family_id,istrax_scaled) %>%
+  fsummarize(
+      allmean = fmean(istrax_scaled, na.rm = TRUE),
+      allinnos = fnobs(istrax_scaled)) %>%
+    fungroup() %>%
+    as.data.frame()
+
+  # Merge extras with result
+  result <- left_join(result, extras2) 
+
+
 
   # Add compatibility columns
   result$top25 <- 0.25
@@ -325,12 +340,12 @@ plot_avstrax_by_country_hc <- function(
   is_return <- grepl("^is_", toflow)
   
   allmean <- avstrax |>
-    dplyr::pull(mean) |>
+    dplyr::pull(allmean) |>
     mean(x = _, na.rm = TRUE)
   
   total_innos <- avstrax |>
-    dplyr::pull(innos) |>
-    sum()
+    dplyr::pull(allinnos) |>
+    mean(x = _, na.rm = TRUE)
   
   if(!"All" %in% classlist) avstrax <- avstrax |> dplyr::filter(technology != "All")
   
@@ -583,15 +598,10 @@ plot_avstrax_by_country <- function(
 
   ylab <- ifelse(grepl("^is_", toflow), "Return in %", "Millions of $")
   
-  allmean <- avstrax |>
-    # filter(technology == "All") |>
-    dplyr::pull(mean) |>
-    mean(x = _, na.rm = TRUE)
-  
-  total_innos <- avstrax |>
-    # filter(technology == "All") |>
-    dplyr::pull(innos) |>
-    sum()
+  # allmean and allinnos are identical on every row (from CROSS JOIN),
+  # so just take the first value
+  allmean <- avstrax$allmean[1]
+  total_innos <- avstrax$allinnos[1]
 
   if(!"All" %in% classlist) {
     avstrax <- avstrax |>
@@ -867,6 +877,18 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
       as.data.frame()
 
     result <- left_join(result, extras, by = c("ctry_code", "country_name"))
+
+    extras2 <- avstrax %>% distinct(docdb_family_id,istrax_scaled) %>%
+    fsummarize(
+        allmean = fmean(istrax_scaled, na.rm = TRUE),
+        allinnos = fnobs(istrax_scaled)) %>%
+      fungroup() %>%
+      as.data.frame()
+
+    # Merge extras with result
+    result <- left_join(result, extras2) 
+
+
   } else {
     extras <- avstrax %>%
       group_by(ctry_code) %>%
@@ -881,6 +903,16 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
       as.data.frame()
 
     result <- left_join(result, extras, by = "ctry_code")
+      extras2 <- avstrax %>% distinct(docdb_family_id,istrax_scaled) %>%
+          fsummarize(
+              allmean = fmean(istrax_scaled, na.rm = TRUE),
+              allinnos = fnobs(istrax_scaled)) %>%
+            fungroup() %>%
+            as.data.frame()
+
+          # Merge extras with result
+          result <- left_join(result, extras2) 
+
   }
 
   # Add top25/top50 mean columns (kept for compatibility)

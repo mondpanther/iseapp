@@ -89,7 +89,7 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause) {
       ' else ''}
     {if (tech_bool != 'TRUE') tech_filter_sql else ''}
     {if (tech_bool != 'TRUE') '),' else 'WITH'}
-    
+
     {if (nchar(trimws(firm_clause)) > 0) '
     filtered_firm AS (
       SELECT DISTINCT docdb_family_id
@@ -104,14 +104,34 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause) {
         p.docdb_family_id,
         p.{toflow},
         ROW_NUMBER() OVER (PARTITION BY p.ctry_code ORDER BY p.{toflow} DESC) AS rnk_c,
-        COUNT(*)     OVER (PARTITION BY p.ctry_code) AS cnt_c,
-        ROW_NUMBER() OVER (ORDER BY p.{toflow} DESC) AS rnk_all,
-        COUNT(*)     OVER () AS cnt_all
+        COUNT(*)     OVER (PARTITION BY p.ctry_code)                          AS cnt_c
       FROM full_patent_database p
       {if (tech_bool != 'TRUE') 'INNER JOIN filtered_tech ft ON p.docdb_family_id = ft.docdb_family_id' else ''}
       {if (nchar(trimws(firm_clause)) > 0) 'INNER JOIN filtered_firm ff ON p.docdb_family_id = ff.docdb_family_id' else ''}
       WHERE p.ctry_code IN ({country_sql})
         AND p.{toflow} IS NOT NULL
+    ),
+
+    -- Deduplicate across countries: one row per distinct patent
+    deduped_all AS (
+      SELECT DISTINCT ON (docdb_family_id) docdb_family_id, {toflow}
+      FROM ranked
+    ),
+
+    deduped_all_ranked AS (
+      SELECT
+        docdb_family_id,
+        {toflow},
+        ROW_NUMBER() OVER (ORDER BY {toflow} DESC) AS rnk,
+        COUNT(*)     OVER ()                        AS cnt
+      FROM deduped_all
+    ),
+
+    overall_stats AS (
+      SELECT
+        AVG({toflow}) AS allmean,
+        COUNT(*)      AS overall_allinnos
+      FROM deduped_all
     ),
 
     summary AS (
@@ -128,9 +148,12 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause) {
         STRING_AGG(
           CASE WHEN rnk_c <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
           ', ' ORDER BY {toflow} DESC
-        ) AS top3_ids
+        ) AS top3_ids,
+        os.allmean,
+        os.overall_allinnos
       FROM ranked
-      GROUP BY ctry_code
+      CROSS JOIN overall_stats os
+      GROUP BY ctry_code, os.allmean, os.overall_allinnos
     ),
 
     overall AS (
@@ -142,14 +165,17 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause) {
         QUANTILE_CONT({toflow}, 0.25) AS q1,
         QUANTILE_CONT({toflow}, 0.50) AS q2,
         QUANTILE_CONT({toflow}, 0.75) AS q3,
-        AVG(CASE WHEN rnk_all <= CEIL(cnt_all * 0.25) THEN {toflow} END) AS top25_bin_mean,
-        AVG(CASE WHEN rnk_all <= CEIL(cnt_all * 0.50) THEN {toflow} END) AS top50_bin_mean,
+        AVG(CASE WHEN rnk <= CEIL(cnt * 0.25) THEN {toflow} END) AS top25_bin_mean,
+        AVG(CASE WHEN rnk <= CEIL(cnt * 0.50) THEN {toflow} END) AS top50_bin_mean,
         STRING_AGG(
-          CASE WHEN rnk_all <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
+          CASE WHEN rnk <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
           ', ' ORDER BY {toflow} DESC
-        ) AS top3_ids
-      FROM ranked
-      GROUP BY cnt_all
+        ) AS top3_ids,
+        os.allmean,
+        os.overall_allinnos
+      FROM deduped_all_ranked
+      CROSS JOIN overall_stats os
+      GROUP BY cnt, os.allmean, os.overall_allinnos
     )
 
     SELECT * FROM summary
@@ -174,14 +200,6 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
   filter_clauses <- unlist(tech_filters)
   filter_clauses <- filter_clauses[nchar(trimws(filter_clauses)) > 0]
 
-  # Build WHERE clause for tech filtering within the CTE
-  tech_filter_sql <- if (length(filter_clauses) == 0) {
-    ""
-  } else {
-    clauses <- gsub("^\\s*AND\\s*", "", filter_clauses)
-    paste0("WHERE ", paste(clauses, collapse = " OR "))
-  }
-  
   # Build WHERE clause for firm filtering within the CTE
   firm_filter_sql <- if (nchar(trimws(firm_clause)) == 0) {
     ""
@@ -190,14 +208,43 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
     paste0("WHERE ", firm_condition)
   }
 
-  glue::glue("
-    WITH filtered_tech AS (
-      SELECT DISTINCT t.docdb_family_id, tl.tech_group
+  firm_join <- if (nchar(trimws(firm_clause)) > 0) {
+    "INNER JOIN filtered_firm ff ON p.docdb_family_id = ff.docdb_family_id"
+  } else {
+    ""
+  }
+
+  # Build filtered_tech CTE:
+  # When "All" is selected, group by broad tech_group.
+  # When specific items are selected, use UNION ALL so each selected item
+  # gets its own bar (whether it's a broad tech_group or individual technology).
+  if (length(filter_clauses) == 0) {
+    # "All" selected - group by tech_group
+    filtered_tech_sql <- "
+      SELECT DISTINCT t.docdb_family_id, tl.tech_group AS technology
       FROM patents_x_tech t
       JOIN tech_lookup tl ON t.technology = tl.technology
-      {tech_filter_sql}
+    "
+  } else {
+    # Specific selections - UNION ALL per selection with selected label
+    selected_names <- names(tech_filters)
+    selected_names <- selected_names[selected_names != "All"]
+    parts <- vapply(selected_names, function(s) {
+      glue::glue("
+        SELECT DISTINCT t.docdb_family_id, '{s}' AS technology
+        FROM patents_x_tech t
+        JOIN tech_lookup tl ON t.technology = tl.technology
+        WHERE tl.tech_group = '{s}' OR t.technology = '{s}'
+      ")
+    }, character(1))
+    filtered_tech_sql <- paste(parts, collapse = "\nUNION ALL\n")
+  }
+
+  glue::glue("
+    WITH filtered_tech AS (
+      {filtered_tech_sql}
     ),
-    
+
     filtered_firm AS (
       SELECT DISTINCT docdb_family_id
       FROM patents_x_firm f
@@ -205,29 +252,42 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
     ),
 
     deduped AS (
-      SELECT
-        ft.tech_group,
+      SELECT DISTINCT ON (ft.technology, p.docdb_family_id)
+        ft.technology,
         p.docdb_family_id,
         p.{toflow}
       FROM full_patent_database p
       INNER JOIN filtered_tech ft ON p.docdb_family_id = ft.docdb_family_id
-      {if (nchar(trimws(firm_clause)) > 0) 'INNER JOIN filtered_firm ff ON p.docdb_family_id = ff.docdb_family_id' else ''}
+      {firm_join}
       WHERE p.ctry_code IN ({country_sql})
         AND p.{toflow} IS NOT NULL
     ),
 
     ranked AS (
       SELECT
-        tech_group,
+        technology,
         docdb_family_id,
         {toflow},
-        ROW_NUMBER() OVER (PARTITION BY tech_group ORDER BY {toflow} DESC) AS rnk,
-        COUNT(*)     OVER (PARTITION BY tech_group)                        AS cnt
+        ROW_NUMBER() OVER (PARTITION BY technology ORDER BY {toflow} DESC) AS rnk,
+        COUNT(*)     OVER (PARTITION BY technology)                        AS cnt
       FROM deduped
+    ),
+
+    overall_stats AS (
+      SELECT
+        AVG({toflow}) AS allmean,
+        COUNT(*)      AS allinnos
+      FROM (
+        SELECT DISTINCT ON (p.docdb_family_id) p.docdb_family_id, p.{toflow}
+        FROM full_patent_database p
+        {firm_join}
+        WHERE p.ctry_code IN ({country_sql})
+          AND p.{toflow} IS NOT NULL
+      ) t
     )
 
     SELECT
-      tech_group                                                             AS technology,
+      technology,
       AVG({toflow})                                                          AS mean,
       COUNT(*)                                                               AS innos,
       CASE WHEN COUNT(*) > 1 THEN STDDEV({toflow}) / SQRT(COUNT(*)) END     AS sem,
@@ -239,9 +299,12 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
       STRING_AGG(
         CASE WHEN rnk <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
         ', ' ORDER BY {toflow} DESC
-      )                                                                      AS top3_ids
+      )                                                                      AS top3_ids,
+      os.allmean,
+      os.allinnos
     FROM ranked
-    GROUP BY tech_group
+    CROSS JOIN overall_stats os
+    GROUP BY technology, os.allmean, os.allinnos
   ")
 }
 
@@ -286,7 +349,7 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause) {
       ' else ''}
     {if (tech_bool != 'TRUE') tech_filter_sql else ''}
     {if (tech_bool != 'TRUE') '),' else 'WITH'}
-    
+
     {if (nchar(trimws(firm_clause)) > 0) '
     filtered_firm AS (
       SELECT DISTINCT docdb_family_id
@@ -301,15 +364,36 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause) {
         p.docdb_family_id,
         p.{toflow},
         ROW_NUMBER() OVER (PARTITION BY r.region_code ORDER BY p.{toflow} DESC) AS rnk_c,
-        COUNT(*)     OVER (PARTITION BY r.region_code)                          AS cnt_c,
-        ROW_NUMBER() OVER (ORDER BY p.{toflow} DESC)                            AS rnk_all,
-        COUNT(*)     OVER ()                                                     AS cnt_all
+        COUNT(*)     OVER (PARTITION BY r.region_code)                          AS cnt_c
       FROM full_patent_database p
       INNER JOIN patents_x_region r ON p.docdb_family_id = r.docdb_family_id
       {if (tech_bool != 'TRUE') 'INNER JOIN filtered_tech ft ON p.docdb_family_id = ft.docdb_family_id' else ''}
       {if (nchar(trimws(firm_clause)) > 0) 'INNER JOIN filtered_firm ff ON p.docdb_family_id = ff.docdb_family_id' else ''}
       WHERE r.region_code IN ({region_sql})
+        AND p.ctry_code = 'GB'
         AND p.{toflow} IS NOT NULL
+    ),
+
+    -- Deduplicate across regions: one row per distinct patent
+    deduped_all AS (
+      SELECT DISTINCT ON (docdb_family_id) docdb_family_id, {toflow}
+      FROM ranked
+    ),
+
+    deduped_all_ranked AS (
+      SELECT
+        docdb_family_id,
+        {toflow},
+        ROW_NUMBER() OVER (ORDER BY {toflow} DESC) AS rnk,
+        COUNT(*)     OVER ()                        AS cnt
+      FROM deduped_all
+    ),
+
+    overall_stats AS (
+      SELECT
+        AVG({toflow}) AS allmean,
+        COUNT(*)      AS overall_allinnos
+      FROM deduped_all
     ),
 
     summary AS (
@@ -326,9 +410,12 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause) {
         STRING_AGG(
           CASE WHEN rnk_c <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
           ', ' ORDER BY {toflow} DESC
-        )                                                                          AS top3_ids
+        )                                                                          AS top3_ids,
+        os.allmean,
+        os.overall_allinnos
       FROM ranked
-      GROUP BY region_code
+      CROSS JOIN overall_stats os
+      GROUP BY region_code, os.allmean, os.overall_allinnos
     ),
 
     overall AS (
@@ -340,14 +427,17 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause) {
         QUANTILE_CONT({toflow}, 0.25)                                              AS q1,
         QUANTILE_CONT({toflow}, 0.50)                                              AS q2,
         QUANTILE_CONT({toflow}, 0.75)                                              AS q3,
-        AVG(CASE WHEN rnk_all <= CEIL(cnt_all * 0.25) THEN {toflow} END)          AS top25_bin_mean,
-        AVG(CASE WHEN rnk_all <= CEIL(cnt_all * 0.50) THEN {toflow} END)          AS top50_bin_mean,
+        AVG(CASE WHEN rnk <= CEIL(cnt * 0.25) THEN {toflow} END)                  AS top25_bin_mean,
+        AVG(CASE WHEN rnk <= CEIL(cnt * 0.50) THEN {toflow} END)                  AS top50_bin_mean,
         STRING_AGG(
-          CASE WHEN rnk_all <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
+          CASE WHEN rnk <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
           ', ' ORDER BY {toflow} DESC
-        )                                                                          AS top3_ids
-      FROM ranked
-      GROUP BY cnt_all
+        )                                                                          AS top3_ids,
+        os.allmean,
+        os.overall_allinnos
+      FROM deduped_all_ranked
+      CROSS JOIN overall_stats os
+      GROUP BY cnt, os.allmean, os.overall_allinnos
     )
 
     SELECT * FROM summary
@@ -372,14 +462,6 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
   filter_clauses <- unlist(tech_filters)
   filter_clauses <- filter_clauses[nchar(trimws(filter_clauses)) > 0]
 
-  # Build WHERE clause for tech filtering within the CTE
-  tech_filter_sql <- if (length(filter_clauses) == 0) {
-    ""
-  } else {
-    clauses <- gsub("^\\s*AND\\s*", "", filter_clauses)
-    paste0("WHERE ", paste(clauses, collapse = " OR "))
-  }
-  
   # Build WHERE clause for firm filtering within the CTE
   firm_filter_sql <- if (nchar(trimws(firm_clause)) == 0) {
     ""
@@ -388,14 +470,41 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
     paste0("WHERE ", firm_condition)
   }
 
-  glue::glue("
-    WITH filtered_tech AS (
-      SELECT DISTINCT t.docdb_family_id, tl.tech_group
+  firm_join <- if (nchar(trimws(firm_clause)) > 0) {
+    "INNER JOIN filtered_firm ff ON p.docdb_family_id = ff.docdb_family_id"
+  } else {
+    ""
+  }
+
+  # Build filtered_tech CTE:
+  # When "All" is selected, group by broad tech_group.
+  # When specific items are selected, use UNION ALL so each selected item
+  # gets its own bar (whether it's a broad tech_group or individual technology).
+  if (length(filter_clauses) == 0) {
+    filtered_tech_sql <- "
+      SELECT DISTINCT t.docdb_family_id, tl.tech_group AS technology
       FROM patents_x_tech t
       JOIN tech_lookup tl ON t.technology = tl.technology
-      {tech_filter_sql}
+    "
+  } else {
+    selected_names <- names(tech_filters)
+    selected_names <- selected_names[selected_names != "All"]
+    parts <- vapply(selected_names, function(s) {
+      glue::glue("
+        SELECT DISTINCT t.docdb_family_id, '{s}' AS technology
+        FROM patents_x_tech t
+        JOIN tech_lookup tl ON t.technology = tl.technology
+        WHERE tl.tech_group = '{s}' OR t.technology = '{s}'
+      ")
+    }, character(1))
+    filtered_tech_sql <- paste(parts, collapse = "\nUNION ALL\n")
+  }
+
+  glue::glue("
+    WITH filtered_tech AS (
+      {filtered_tech_sql}
     ),
-    
+
     filtered_firm AS (
       SELECT DISTINCT docdb_family_id
       FROM patents_x_firm f
@@ -403,30 +512,46 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
     ),
 
     deduped AS (
-      SELECT
-        ft.tech_group,
+      SELECT DISTINCT ON (ft.technology, p.docdb_family_id)
+        ft.technology,
         p.docdb_family_id,
         p.{toflow}
       FROM full_patent_database p
       INNER JOIN patents_x_region r ON p.docdb_family_id = r.docdb_family_id
       INNER JOIN filtered_tech ft ON p.docdb_family_id = ft.docdb_family_id
-      {if (nchar(trimws(firm_clause)) > 0) 'INNER JOIN filtered_firm ff ON p.docdb_family_id = ff.docdb_family_id' else ''}
+      {firm_join}
       WHERE r.region_code IN ({region_sql})
+        AND p.ctry_code = 'GB'
         AND p.{toflow} IS NOT NULL
     ),
 
     ranked AS (
       SELECT
-        tech_group,
+        technology,
         docdb_family_id,
         {toflow},
-        ROW_NUMBER() OVER (PARTITION BY tech_group ORDER BY {toflow} DESC) AS rnk,
-        COUNT(*)     OVER (PARTITION BY tech_group)                        AS cnt
+        ROW_NUMBER() OVER (PARTITION BY technology ORDER BY {toflow} DESC) AS rnk,
+        COUNT(*)     OVER (PARTITION BY technology)                        AS cnt
       FROM deduped
+    ),
+
+    overall_stats AS (
+      SELECT
+        AVG({toflow}) AS allmean,
+        COUNT(*)      AS allinnos
+      FROM (
+        SELECT DISTINCT ON (p.docdb_family_id) p.docdb_family_id, p.{toflow}
+        FROM full_patent_database p
+        INNER JOIN patents_x_region r ON p.docdb_family_id = r.docdb_family_id
+        {firm_join}
+        WHERE r.region_code IN ({region_sql})
+          AND p.ctry_code = 'GB'
+          AND p.{toflow} IS NOT NULL
+      ) t
     )
 
     SELECT
-      tech_group                                                             AS technology,
+      technology,
       AVG({toflow})                                                          AS mean,
       COUNT(*)                                                               AS innos,
       CASE WHEN COUNT(*) > 1 THEN STDDEV({toflow}) / SQRT(COUNT(*)) END     AS sem,
@@ -438,8 +563,11 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
       STRING_AGG(
         CASE WHEN rnk <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
         ', ' ORDER BY {toflow} DESC
-      )                                                                      AS top3_ids
+      )                                                                      AS top3_ids,
+      os.allmean,
+      os.allinnos
     FROM ranked
-    GROUP BY tech_group
+    CROSS JOIN overall_stats os
+    GROUP BY technology, os.allmean, os.allinnos
   ")
 }

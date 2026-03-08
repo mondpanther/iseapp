@@ -9,13 +9,17 @@ library(arrow)
 library(countrycode)
 library(stringr)
 
+# ---- Source data directory ----
+# Change this path if your Dropbox location differs
+data_dir <- "C:/Users/rmart/Dropbox/apps/iseapp"
+
 # 1. Load base maps
 cat("Loading base data...\n")
-countrymap <- read_fst("data-raw/big_files/countrymap.fst")
-regionmap <- read_fst("data-raw/big_files/regionmap.fst")
-techmap <- read_fst("data-raw/big_files/techmap.fst")
+countrymap <- read_fst(file.path(data_dir, "countrymap.fst"))
+regionmap <- read_fst(file.path(data_dir, "regionmap.fst"))
+techmap <- read_fst(file.path(data_dir, "techmap.fst"))
 
-top_companies <- arrow::read_parquet("data-raw/big_files/firmmap.parquet") |>
+top_companies <- arrow::read_parquet(file.path(data_dir, "firmmap.parquet")) |>
   dplyr::group_by(company_raw) |>
   dplyr::count() |>
   dplyr::arrange(desc(n)) |>
@@ -23,26 +27,26 @@ top_companies <- arrow::read_parquet("data-raw/big_files/firmmap.parquet") |>
   dplyr::slice_head(n = 100) |>
   dplyr::pull(company_raw)
 
-firmmap_top100 <- arrow::read_parquet("data-raw/big_files/firmmap.parquet") |>
+firmmap_top100 <- arrow::read_parquet(file.path(data_dir, "firmmap.parquet")) |>
   dplyr::filter(company_raw %in% top_companies) |>
   dplyr::rename(firm = company_raw) |>
   dplyr::select(docdb_family_id, firm)
 
 
-firmsectormap <- arrow::read_parquet("data-raw/big_files/firmsectormap.parquet") |>
+firmsectormap <- arrow::read_parquet(file.path(data_dir, "firmsectormap.parquet")) |>
   dplyr::select(firm = company_raw, firm_sector = sector)
 
 cat("  ✓ countrymap:", nrow(countrymap), "rows\n")
 cat("  ✓ regionmap:", nrow(regionmap), "rows\n")
 cat("  ✓ techmap:", nrow(techmap), "rows\n")
-cat("  ✓ firmmap:", nrow(arrow::read_parquet("data-raw/big_files/firmmap.parquet")), "rows\n")
+cat("  ✓ firmmap:", nrow(arrow::read_parquet(file.path(data_dir, "firmmap.parquet"))), "rows\n")
 cat("  ✓ firmmap top 100:", nrow(firmmap_top100), "rows\n\n")
 cat("  ✓ firmsectormap:", nrow(firmsectormap), "rows\n")
 
 # 2. Find all istrax files
 cat("Finding istrax files...\n")
 toflow_files <- list.files(
-  "data-raw/big_files/istraxes",
+  file.path(data_dir, "istraxes"),
   pattern = "\\.fst$",
   full.names = TRUE
 )
@@ -277,7 +281,7 @@ cat("  File size:", round(file_size, 2), "GB\n\n")
 cat("=== DONE ===\n")
 
 # 9 Load and convert the InGlobe data
-df_raw <- fst::read_fst("data-raw/big_files/long_final.fst")
+df_raw <- fst::read_fst(file.path(data_dir, "inglobe", "data", "long_final.fst"))
 
 df_processed <- df_raw |>
   dplyr::arrange(sce_country, tech_group, tech_subgroup, source_id, wave) |>
