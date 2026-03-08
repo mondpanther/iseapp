@@ -7,7 +7,7 @@ created_at = ''
 dismissed_at = ''
 type = 'r-shiny'
 configuration_name = 'iseapp2-9GQ2'
-deployed_at = '2026-03-08T15:21:23Z'
+deployed_at = '2026-03-08T15:54:21Z'
 
 [connect_cloud]
 account_name = 'mondpanther'
