@@ -273,6 +273,13 @@ country_module_server <- function(id, parent_session, con) {
             )
           )
 
+        # Scale percentage flows (is_*/av_*) from decimal to percent
+        if (grepl("^(is_|av_)", toflow)) {
+          pct_cols <- intersect(c("mean", "allmean", "sem", "q1", "q2", "q3",
+                                  "top25_bin_mean", "top50_bin_mean"), names(out))
+          out[pct_cols] <- out[pct_cols] * 100
+        }
+
         out
 
       }) |> shiny::bindCache(input$toflow, input$country, input$tech_categories_plot1, input$firm)
@@ -318,12 +325,20 @@ country_module_server <- function(id, parent_session, con) {
             share_c      = dplyr::if_else(ctry_code == "All", 1, innos / allinnos),
             share        = dplyr::if_else(ctry_code == "All", 1, sum(innos[ctry_code != "All"]) / sum_allinnos_val),
             RTA          = dplyr::if_else(ctry_code == "All", 1, 2 * share_c / (share_c + share))
-          )
+          ) |>
+          dplyr::rename(Allinnos = allinnos)
+
+        # Scale percentage flows (is_*/av_*) from decimal to percent
+        if (grepl("^(is_|av_)", toflow)) {
+          pct_cols <- intersect(c("mean", "allmean", "sem", "q1", "q2", "q3",
+                                  "top25_bin_mean", "top50_bin_mean"), names(out))
+          out[pct_cols] <- out[pct_cols] * 100
+        }
 
         out
 
       }) |> shiny::bindCache(input$toflow, input$country, input$techs, input$firm)
-      
+
       # Chart 1: Main avstrax plot
       output$avstrax_plot1 <- ggiraph::renderGirafe({
         req(input$country, input$toflow, input$tech_categories_plot1,
@@ -404,7 +419,7 @@ country_module_server <- function(id, parent_session, con) {
 
         if (nrow(avstrax_data) == 0) return(NULL)
 
-        is_return <- grepl("^is", input$toflow)
+        is_return <- grepl("^(is|av)", input$toflow)
         map_title <- sub("^[^.]*\\.", "", flow_label)
 
         # Store ggplot version and data for PDF/CSV downloads

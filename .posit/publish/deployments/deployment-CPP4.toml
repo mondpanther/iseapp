@@ -11,8 +11,8 @@ id = '019cc8b0-8b5f-b143-36e9-f95ca7da3d9b'
 dashboard_url = 'https://connect.posit.cloud/mondpanther/content/019cc8b0-8b5f-b143-36e9-f95ca7da3d9b'
 direct_url = 'https://019cc8b0-8b5f-b143-36e9-f95ca7da3d9b.share.connect.posit.cloud'
 logs_url = 'https://connect.posit.cloud/mondpanther/content/019cc8b0-8b5f-b143-36e9-f95ca7da3d9b/history'
-deployed_at = '2026-03-08T13:08:50Z'
-bundle_id = '019ccd8d-e991-9e50-8a3f-d195b2cc52e7'
+deployed_at = '2026-03-08T14:16:15Z'
+bundle_id = '019ccdcb-67fc-48dc-2570-36f0397d32ee'
 files = [
   '.posit/publish/deployments/deployment-CPP4.toml',
   '.posit/publish/iseapp2-9GQ2.toml',

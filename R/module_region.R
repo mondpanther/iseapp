@@ -288,12 +288,20 @@ region_module_server <- function(id, parent_session, con) {
             share        = dplyr::if_else(ctry_code == "All", 1, sum(innos[ctry_code != "All"]) / sum_allinnos_val),
             RTA          = dplyr::if_else(ctry_code == "All", 1, 2 * share_c / (share_c + share)),
             country_name = dplyr::if_else(ctry_code == "All", "All", uk_regions[ctry_code])
-          )
+          ) |>
+          dplyr::rename(Allinnos = allinnos)
+
+        # Scale percentage flows (is_*/av_*) from decimal to percent
+        if (grepl("^(is_|av_)", toflow)) {
+          pct_cols <- intersect(c("mean", "allmean", "sem", "q1", "q2", "q3",
+                                  "top25_bin_mean", "top50_bin_mean"), names(out))
+          out[pct_cols] <- out[pct_cols] * 100
+        }
 
         out
 
       }) |> shiny::bindCache(input$toflow_region, input$region, input$techs_region, input$firm)
-      
+
       fallback_by_tech_region <- shiny::reactive({
         shiny::req(input$toflow_region, input$region, input$tech_categories_plot1_region, input$firm)
 
@@ -330,6 +338,13 @@ region_module_server <- function(id, parent_session, con) {
               TRUE                                                      ~ "other"
             )
           )
+
+        # Scale percentage flows (is_*/av_*) from decimal to percent
+        if (grepl("^(is_|av_)", toflow)) {
+          pct_cols <- intersect(c("mean", "allmean", "sem", "q1", "q2", "q3",
+                                  "top25_bin_mean", "top50_bin_mean"), names(out))
+          out[pct_cols] <- out[pct_cols] * 100
+        }
 
         out
 
@@ -415,7 +430,7 @@ region_module_server <- function(id, parent_session, con) {
 
         if (nrow(map_data) == 0) return(NULL)
 
-        is_return  <- grepl("^is", input$toflow_region)
+        is_return  <- grepl("^(is|av)", input$toflow_region)
         map_title  <- paste0("Returns: ", paste(input$techs_region, collapse = ", "))
 
         # Store ggplot version and data for PDF/CSV downloads
