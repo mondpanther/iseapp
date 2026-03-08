@@ -20,4 +20,4 @@ The indicators developed here have been used in a series of policy reports. Incl
 - [Pathways to a productive and inclusive net zero](https://cep.lse.ac.uk/_NEW/PUBLICATIONS/abstract.asp?index=12029)
 - [Innovation in Green Technologies](https://www.ifc.org/en/insights-reports/2025/innovation-in-green-technologies)
 
-This tool has been built as part of the [PRINZ project](https://www.prinzproject.io/). <img width="1000" height="1000" alt="logo" src="https://github.com/user-attachments/assets/f4f21f12-58b4-474b-954f-814b363ab229" />
+This tool has been built as part of the [PRINZ project](https://www.prinzproject.io/). <img width="100" height="100" alt="logo" src="https://github.com/user-attachments/assets/f4f21f12-58b4-474b-954f-814b363ab229" />
