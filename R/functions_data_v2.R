@@ -102,6 +102,7 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause) {
       SELECT
         p.ctry_code,
         p.docdb_family_id,
+        p.appln_id,
         p.{toflow},
         ROW_NUMBER() OVER (PARTITION BY p.ctry_code ORDER BY p.{toflow} DESC) AS rnk_c,
         COUNT(*)     OVER (PARTITION BY p.ctry_code)                          AS cnt_c
@@ -114,13 +115,14 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause) {
 
     -- Deduplicate across countries: one row per distinct patent
     deduped_all AS (
-      SELECT DISTINCT ON (docdb_family_id) docdb_family_id, {toflow}
+      SELECT DISTINCT ON (docdb_family_id) docdb_family_id, appln_id, {toflow}
       FROM ranked
     ),
 
     deduped_all_ranked AS (
       SELECT
         docdb_family_id,
+        appln_id,
         {toflow},
         ROW_NUMBER() OVER (ORDER BY {toflow} DESC) AS rnk,
         COUNT(*)     OVER ()                        AS cnt
@@ -146,7 +148,7 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause) {
         AVG(CASE WHEN rnk_c <= CEIL(cnt_c * 0.25) THEN {toflow} END) AS top25_bin_mean,
         AVG(CASE WHEN rnk_c <= CEIL(cnt_c * 0.50) THEN {toflow} END) AS top50_bin_mean,
         STRING_AGG(
-          CASE WHEN rnk_c <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
+          CASE WHEN rnk_c <= 3 THEN appln_id END,
           ', ' ORDER BY {toflow} DESC
         ) AS top3_ids,
         os.allmean,
@@ -168,7 +170,7 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause) {
         AVG(CASE WHEN rnk <= CEIL(cnt * 0.25) THEN {toflow} END) AS top25_bin_mean,
         AVG(CASE WHEN rnk <= CEIL(cnt * 0.50) THEN {toflow} END) AS top50_bin_mean,
         STRING_AGG(
-          CASE WHEN rnk <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
+          CASE WHEN rnk <= 3 THEN appln_id END,
           ', ' ORDER BY {toflow} DESC
         ) AS top3_ids,
         os.allmean,
@@ -255,6 +257,7 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
       SELECT DISTINCT ON (ft.technology, p.docdb_family_id)
         ft.technology,
         p.docdb_family_id,
+        p.appln_id,
         p.{toflow}
       FROM full_patent_database p
       INNER JOIN filtered_tech ft ON p.docdb_family_id = ft.docdb_family_id
@@ -267,6 +270,7 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
       SELECT
         technology,
         docdb_family_id,
+        appln_id,
         {toflow},
         ROW_NUMBER() OVER (PARTITION BY technology ORDER BY {toflow} DESC) AS rnk,
         COUNT(*)     OVER (PARTITION BY technology)                        AS cnt
@@ -297,7 +301,7 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
       AVG(CASE WHEN rnk <= CEIL(cnt * 0.25) THEN {toflow} END)              AS top25_bin_mean,
       AVG(CASE WHEN rnk <= CEIL(cnt * 0.50) THEN {toflow} END)              AS top50_bin_mean,
       STRING_AGG(
-        CASE WHEN rnk <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
+        CASE WHEN rnk <= 3 THEN appln_id END,
         ', ' ORDER BY {toflow} DESC
       )                                                                      AS top3_ids,
       os.allmean,
@@ -362,6 +366,7 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause) {
       SELECT
         r.region_code,
         p.docdb_family_id,
+        p.appln_id,
         p.{toflow},
         ROW_NUMBER() OVER (PARTITION BY r.region_code ORDER BY p.{toflow} DESC) AS rnk_c,
         COUNT(*)     OVER (PARTITION BY r.region_code)                          AS cnt_c
@@ -376,13 +381,14 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause) {
 
     -- Deduplicate across regions: one row per distinct patent
     deduped_all AS (
-      SELECT DISTINCT ON (docdb_family_id) docdb_family_id, {toflow}
+      SELECT DISTINCT ON (docdb_family_id) docdb_family_id, appln_id, {toflow}
       FROM ranked
     ),
 
     deduped_all_ranked AS (
       SELECT
         docdb_family_id,
+        appln_id,
         {toflow},
         ROW_NUMBER() OVER (ORDER BY {toflow} DESC) AS rnk,
         COUNT(*)     OVER ()                        AS cnt
@@ -408,7 +414,7 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause) {
         AVG(CASE WHEN rnk_c <= CEIL(cnt_c * 0.25) THEN {toflow} END)              AS top25_bin_mean,
         AVG(CASE WHEN rnk_c <= CEIL(cnt_c * 0.50) THEN {toflow} END)              AS top50_bin_mean,
         STRING_AGG(
-          CASE WHEN rnk_c <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
+          CASE WHEN rnk_c <= 3 THEN appln_id END,
           ', ' ORDER BY {toflow} DESC
         )                                                                          AS top3_ids,
         os.allmean,
@@ -430,7 +436,7 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause) {
         AVG(CASE WHEN rnk <= CEIL(cnt * 0.25) THEN {toflow} END)                  AS top25_bin_mean,
         AVG(CASE WHEN rnk <= CEIL(cnt * 0.50) THEN {toflow} END)                  AS top50_bin_mean,
         STRING_AGG(
-          CASE WHEN rnk <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
+          CASE WHEN rnk <= 3 THEN appln_id END,
           ', ' ORDER BY {toflow} DESC
         )                                                                          AS top3_ids,
         os.allmean,
@@ -515,6 +521,7 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
       SELECT DISTINCT ON (ft.technology, p.docdb_family_id)
         ft.technology,
         p.docdb_family_id,
+        p.appln_id,
         p.{toflow}
       FROM full_patent_database p
       INNER JOIN patents_x_region r ON p.docdb_family_id = r.docdb_family_id
@@ -529,6 +536,7 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
       SELECT
         technology,
         docdb_family_id,
+        appln_id,
         {toflow},
         ROW_NUMBER() OVER (PARTITION BY technology ORDER BY {toflow} DESC) AS rnk,
         COUNT(*)     OVER (PARTITION BY technology)                        AS cnt
@@ -561,7 +569,7 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
       AVG(CASE WHEN rnk <= CEIL(cnt * 0.25) THEN {toflow} END)              AS top25_bin_mean,
       AVG(CASE WHEN rnk <= CEIL(cnt * 0.50) THEN {toflow} END)              AS top50_bin_mean,
       STRING_AGG(
-        CASE WHEN rnk <= 3 THEN CAST(docdb_family_id AS VARCHAR) END,
+        CASE WHEN rnk <= 3 THEN appln_id END,
         ', ' ORDER BY {toflow} DESC
       )                                                                      AS top3_ids,
       os.allmean,
