@@ -14,9 +14,9 @@ The Innovation Strategy Explorer is an interactive tool to tailor and visualise 
 - An estimate of the Average Return from R&D instments combining both private returns to innovators and benefits to other innovators via knowledge spillovers (Average Returns, in %)
 - An estimate of the marginal return from further investment in specific areas (Marginal Returns, in %)
 
-This builds on the paper ["Efficient industrial policy for innovation: Standing on the shoulders of hidden giants" by Guillard et al (2021)]([url](https://cep.lse.ac.uk/_NEW/publications/abstract.asp?index=8614))
+This builds on the paper ["Efficient industrial policy for innovation: Standing on the shoulders of hidden giants" by Guillard et al (2021)](https://cep.lse.ac.uk/_NEW/publications/abstract.asp?index=8614)
 
 The indicators developed here have been used in a series of policy reports. Including
-- [Pathways to a productive and inclusive net zero]([url](https://cep.lse.ac.uk/_NEW/PUBLICATIONS/abstract.asp?index=12029))
-- [Innovation in Green Technologies]([url](https://www.ifc.org/en/insights-reports/2025/innovation-in-green-technologies))
-- 
+- [Pathways to a productive and inclusive net zero](https://cep.lse.ac.uk/_NEW/PUBLICATIONS/abstract.asp?index=12029)
+- [Innovation in Green Technologies](https://www.ifc.org/en/insights-reports/2025/innovation-in-green-technologies)
+
