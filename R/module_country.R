@@ -196,22 +196,35 @@ country_module_ui <- function(id) {
 
       bslib::nav_panel(
         "RTA",
-        shiny::div(
-          shiny::h3("RTA by Country"),
-          ggiraph::girafeOutput(ns("avstrax_plot2_rta"), width = "100%", height = "auto"),
-          plot_download_buttons(ns, "avstrax_plot2_rta"),
-          shiny::tags$br(),
-          shiny::h3("RTA vs Returns"),
-          ggiraph::girafeOutput(ns("rta_returns_scatter"), width = "100%", height = "auto"),
-          plot_download_buttons(ns, "rta_returns_scatter"),
-          shiny::tags$br(),
-          shiny::h3("RTA vs GDP per Capita"),
-          ggiraph::girafeOutput(ns("rta_gdp_scatter"), width = "100%", height = "auto"),
-          plot_download_buttons(ns, "rta_gdp_scatter"),
-          shiny::tags$br(),
-          shiny::h3("World Map: RTA"),
-          plotly::plotlyOutput(ns("world_map_rta"), width = "100%", height = "auto"),
-          map_download_buttons(ns, "world_map_rta")
+        bslib::navset_tab(
+          bslib::nav_panel(
+            "RTA by Country",
+            shiny::div(
+              ggiraph::girafeOutput(ns("avstrax_plot2_rta"), width = "100%", height = "auto"),
+              plot_download_buttons(ns, "avstrax_plot2_rta")
+            )
+          ),
+          bslib::nav_panel(
+            "RTA vs Returns",
+            shiny::div(
+              ggiraph::girafeOutput(ns("rta_returns_scatter"), width = "100%", height = "auto"),
+              plot_download_buttons(ns, "rta_returns_scatter")
+            )
+          ),
+          bslib::nav_panel(
+            "RTA vs GDP",
+            shiny::div(
+              ggiraph::girafeOutput(ns("rta_gdp_scatter"), width = "100%", height = "auto"),
+              plot_download_buttons(ns, "rta_gdp_scatter")
+            )
+          ),
+          bslib::nav_panel(
+            "World Map: RTA",
+            shiny::div(
+              plotly::plotlyOutput(ns("world_map_rta"), width = "100%", height = "auto"),
+              map_download_buttons(ns, "world_map_rta")
+            )
+          )
         )
       )
     )

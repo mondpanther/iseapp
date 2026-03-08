@@ -195,18 +195,28 @@ region_module_ui <- function(id) {
 
       bslib::nav_panel(
         "RTA",
-        shiny::div(
-          shiny::h3("RTA by Region"),
-          ggiraph::girafeOutput(ns("avstrax_plot2_region_rta"), width = "100%", height = "auto"),
-          plot_download_buttons(ns, "avstrax_plot2_region_rta"),
-          shiny::tags$br(),
-          shiny::h3("RTA vs Returns"),
-          ggiraph::girafeOutput(ns("rta_returns_scatter_region"), width = "100%", height = "auto"),
-          plot_download_buttons(ns, "rta_returns_scatter_region"),
-          shiny::tags$br(),
-          shiny::h3("RTA by Region Map"),
-          leaflet::leafletOutput(ns("uk_regions_map_rta"), width = "100%", height = "500px"),
-          map_download_buttons(ns, "uk_regions_map_rta")
+        bslib::navset_tab(
+          bslib::nav_panel(
+            "RTA by Region",
+            shiny::div(
+              ggiraph::girafeOutput(ns("avstrax_plot2_region_rta"), width = "100%", height = "auto"),
+              plot_download_buttons(ns, "avstrax_plot2_region_rta")
+            )
+          ),
+          bslib::nav_panel(
+            "RTA vs Returns",
+            shiny::div(
+              ggiraph::girafeOutput(ns("rta_returns_scatter_region"), width = "100%", height = "auto"),
+              plot_download_buttons(ns, "rta_returns_scatter_region")
+            )
+          ),
+          bslib::nav_panel(
+            "UK Map: RTA",
+            shiny::div(
+              leaflet::leafletOutput(ns("uk_regions_map_rta"), width = "100%", height = "500px"),
+              map_download_buttons(ns, "uk_regions_map_rta")
+            )
+          )
         )
       )
     )
