@@ -136,11 +136,11 @@ country_module_sidebar <- function(id) {
       ),
       shiny::div(
         class = "side_input",
-        shiny::numericInput(ns("mininno_rta"), "RTA: Innovation count threshold:", value = 1, min = 1, max = 500)
+        shiny::numericInput(ns("mininno_rta"), "RTA: Innovation count threshold:", value = 0, min = 0, max = 500)
       ),
       shiny::div(
         class = "side_input",
-        shiny::numericInput(ns("minallinnos_rta"), "RTA: All innovation threshold:", value = 100, min = 1, max = 5000)
+        shiny::numericInput(ns("minallinnos_rta"), "RTA: All innovation threshold:", value = 100, min = 0, max = 5000)
       )
     )
   )
