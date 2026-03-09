@@ -196,7 +196,8 @@ country_module_ui <- function(id) {
 
       bslib::nav_panel(
         "RTA",
-        bslib::navset_tab(
+        bslib::navset_pill_list(
+          widths = c(2, 10),
           bslib::nav_panel(
             "RTA by Country",
             shiny::div(
@@ -219,7 +220,7 @@ country_module_ui <- function(id) {
             )
           ),
           bslib::nav_panel(
-            "World Map: RTA",
+            "World Map",
             shiny::div(
               plotly::plotlyOutput(ns("world_map_rta"), width = "100%", height = "auto"),
               map_download_buttons(ns, "world_map_rta")

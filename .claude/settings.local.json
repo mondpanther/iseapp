@@ -15,7 +15,8 @@
       "Bash(git ls-tree main R/)",
       "Bash(git ls-tree --name-only main -- R/)",
       "Bash(git ls-tree -r main --name-only)",
-      "Bash(\"/c/Program Files/R/R-4.4.2/bin/Rscript.exe\" -e 'cat\\(paste\\(names\\(fst::read_fst\\(\"\"C:/Users/rmart/PRINZteam Dropbox/Ralf Martin/Apps/iseapp/countrymap.fst\"\", to=1\\)\\), collapse=\"\"\\\\n\"\"\\)\\)')"
+      "Bash(\"/c/Program Files/R/R-4.4.2/bin/Rscript.exe\" -e 'cat\\(paste\\(names\\(fst::read_fst\\(\"\"C:/Users/rmart/PRINZteam Dropbox/Ralf Martin/Apps/iseapp/countrymap.fst\"\", to=1\\)\\), collapse=\"\"\\\\n\"\"\\)\\)')",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

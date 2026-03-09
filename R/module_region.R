@@ -195,7 +195,8 @@ region_module_ui <- function(id) {
 
       bslib::nav_panel(
         "RTA",
-        bslib::navset_tab(
+        bslib::navset_pill_list(
+          widths = c(2, 10),
           bslib::nav_panel(
             "RTA by Region",
             shiny::div(
@@ -211,7 +212,7 @@ region_module_ui <- function(id) {
             )
           ),
           bslib::nav_panel(
-            "UK Map: RTA",
+            "UK Map",
             shiny::div(
               leaflet::leafletOutput(ns("uk_regions_map_rta"), width = "100%", height = "500px"),
               map_download_buttons(ns, "uk_regions_map_rta")
