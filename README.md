@@ -19,5 +19,7 @@ This builds on the paper ["Efficient industrial policy for innovation: Standing 
 The indicators developed here have been used in a series of policy reports. Including
 - [Pathways to a productive and inclusive net zero](https://cep.lse.ac.uk/_NEW/PUBLICATIONS/abstract.asp?index=12029)
 - [Innovation in Green Technologies](https://www.ifc.org/en/insights-reports/2025/innovation-in-green-technologies)
-
+- [The green industrial policy matrix: Informing an industrial strategy for clean energy technologies](https://cep.lse.ac.uk/_NEW/PUBLICATIONS/abstract.asp?index=11272)
+- [The UK must recognise its enduring economic strengths](https://blogs.lse.ac.uk/businessreview/2022/08/25/the-uk-must-recognise-its-enduring-economic-strengths/)
+  
 This tool has been built as part of the [PRINZ project](https://www.prinzproject.io/). <img width="100" height="100" alt="logo" src="https://github.com/user-attachments/assets/f4f21f12-58b4-474b-954f-814b363ab229" />
