@@ -278,6 +278,52 @@ cat("=== DONE ===\n")
 
 # 9 Load and convert the InGlobe data
 df_raw <- fst::read_fst("data-raw/big_files/long_final.fst")
+# names(df_raw)
+# glimpse(df_raw)
+# df_raw2 <- arrow::read_parquet("data-raw/big_files/citation_links_long_NEW_expanded_sampled.parquet")
+# names(df_raw2)
+# glimpse(df_raw2)
+
+# parquet_path <- normalizePath("inst/extdata/patent_database.parquet")
+
+# Open via DuckDB — same pattern as the app
+# con <- duckdb::dbConnect(duckdb::duckdb())
+# DBI::dbExecute(con, sprintf(
+#   "CREATE VIEW patent_database AS SELECT * FROM read_parquet('%s')",
+#   parquet_path
+# ))
+# main_patentIDs <- DBI::dbGetQuery(con,
+#   "SELECT DISTINCT docdb_family_id FROM patent_database"
+# ) |>
+#   dplyr::arrange() |>
+#   dplyr::pull(docdb_family_id)
+
+# inglobe_IDs_from <- df_raw2 |>
+#   dplyr::select(from_id) |>
+#   dplyr::distinct() |>
+#   dplyr::arrange() |>
+#   dplyr::pull(from_id)
+
+# inglobe_IDs_to <- df_raw2 |>
+#   dplyr::select(to_id) |>
+#   dplyr::distinct() |>
+#   dplyr::arrange() |>
+#   dplyr::pull(to_id)
+
+# cat("Count of distinct patent family IDs in main database")
+# length(main_patentIDs)
+# cat("Count of distinct IDs from_id column of new inglobe data")
+# length(inglobe_IDs_from)
+# cat("Count of distinct IDs to_id column of new inglobe data")
+# length(inglobe_IDs_to)
+
+# cat("IDs in new inglobe data from_id column NOT in main_patentIDs")
+# missing_from_main_1 <- dplyr::setdiff(inglobe_IDs_from, main_patentIDs)
+# length(missing_from_main_1)
+# cat("IDs in new inglobe data to_id column NOT in main_patentIDs")
+# missing_from_main_2 <- dplyr::setdiff(inglobe_IDs_to, main_patentIDs)
+# length(missing_from_main_2)
+
 
 df_processed <- df_raw |>
   dplyr::arrange(sce_country, tech_group, tech_subgroup, source_id, wave) |>
