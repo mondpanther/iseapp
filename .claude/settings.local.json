@@ -16,7 +16,15 @@
       "Bash(git ls-tree --name-only main -- R/)",
       "Bash(git ls-tree -r main --name-only)",
       "Bash(\"/c/Program Files/R/R-4.4.2/bin/Rscript.exe\" -e 'cat\\(paste\\(names\\(fst::read_fst\\(\"\"C:/Users/rmart/PRINZteam Dropbox/Ralf Martin/Apps/iseapp/countrymap.fst\"\", to=1\\)\\), collapse=\"\"\\\\n\"\"\\)\\)')",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(grep -n \"^ui\\\\|^server\" R/*.R)",
+      "WebFetch(domain:dreamrs.github.io)",
+      "WebSearch",
+      "Bash(where.exe R)",
+      "Read(//c/Program Files/R/**)",
+      "Bash(Rscript.exe --version)",
+      "Bash(\"C:/Program Files/R/R-4.5.2/bin/R.exe\" --version)",
+      "Bash(\"C:/Program Files/R/R-4.5.2/bin/Rscript.exe\" -e \"systemfonts::match_font\\(''Open Sans''\\)\")"
     ]
   }
 }

@@ -36,11 +36,18 @@ patents_x_firm    <- arrow::read_parquet("inst/extdata/patents_x_firm.parquet")
 firm_values       <- sort(unique(firm_lookup$firm))
 firm_sector_values <- sort(unique(na.omit(firm_lookup$firm_sector)))
 
-firm_choices <- c(
-  list("All Firms" = "All", "No Firm" = "None"),
-  setNames(as.list(firm_values), firm_values)
+# Build grouped choices for selectizeInput (sector -> firm hierarchy, like countries)
+firm_sector_groups <- firm_lookup |>
+  dplyr::select(firm_sector, firm) |>
+  dplyr::distinct() |>
+  dplyr::arrange(firm_sector, firm) |>
+  split(~firm_sector) |>
+  lapply(function(df) as.list(setNames(df$firm, df$firm)))
+
+firm_grouped_choices <- c(
+  list("Sector Groups" = as.list(setNames(firm_sector_values, firm_sector_values))),
+  firm_sector_groups
 )
-# firm_sector_choices <- setNames(firm_sector_values, firm_sector_values)
 
 cat("  ✓", length(firm_values), "firms\n")
 cat("  ✓", length(firm_sector_values), "firm sectors\n")
@@ -114,7 +121,8 @@ cat("  ✓", length(all_db_techs), "distinct technologies in database\n")
 
 # Umbrella labels that appear as top-level choices
 umbrella_labels <- c(
-  "All",
+  "All categories",
+  "All innovations",
   "Green Technology", "Battery Technology",
   "Hard to Abate Sector Decarbonization", "AI",
   "Any Agriculture & Food technology"
@@ -149,12 +157,16 @@ hard_to_abate_classes_d <- setdiff(hard_to_abate_classes, "Hard to Abate Sector 
 ai_classes_d <- setdiff(ai_classes, "AI")
 agrifood_classes_d <- setdiff(agrifood_classes, "Any Agriculture & Food technology")
 
-# Broad category = umbrella labels + anything novel from DB
+# Broad category = umbrella labels + anything novel from DB + CPC sections
 broad_techs <- unique(c(
   umbrella_labels,
   ai_classes_d,
-  novel_techs
+  novel_techs,
+  cpc_sections
 ))
+
+# "All categories" expands to every selectable broad tech (minus "All categories" itself)
+all_broad_techs <- setdiff(broad_techs, "All categories")
 
 grouped_techs <- list(
   "Broad Technology Categories" =
@@ -388,8 +400,8 @@ cat("\nSaving to R/sysdata.rda via usethis::use_data()...\n")
 
 usethis::use_data(
   # Firms
-  firm_choices,
-  # firm_sector_choices,
+  firm_grouped_choices,
+  firm_sector_groups,
   # Countries
   country_choices,
   group_definitions,
@@ -409,6 +421,7 @@ usethis::use_data(
   green_classes_d,      battery_classes_d, hard_to_abate_classes_d,
   ai_classes_d,         agrifood_classes_d,
   grouped_techs,
+  all_broad_techs,
   colorings,
   tech_umbrella_map,
   # Flow choices

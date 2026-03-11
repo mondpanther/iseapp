@@ -24,15 +24,20 @@ country_module_sidebar <- function(id) {
       ),
       shiny::div(
         class = "side_input",
-        shiny::selectizeInput(
-          ns("firm"),
-          "Firm Filter:",
-          choices = firm_choices,
-          selected = "All Firms",
-          multiple = FALSE,
-          options = list(
-            placeholder = 'Choose a firm...',
-            server = TRUE
+        shiny::checkboxInput(
+          ns("no_firm_filter"),
+          "No firm filter (all patents)",
+          value = TRUE
+        ),
+        shiny::conditionalPanel(
+          condition = paste0("!input['", ns("no_firm_filter"), "']"),
+          shiny::selectizeInput(
+            inputId = ns("firm"),
+            label = "Firm or Sector Group",
+            choices = firm_grouped_choices,
+            selected = NULL,
+            multiple = TRUE,
+            options = list(placeholder = 'Choose firms or sector groups...')
           )
         )
       ),
@@ -128,19 +133,19 @@ country_module_sidebar <- function(id) {
       shiny::h5("RTA OPTIONS", style = "font-weight: 600; margin-bottom: 10px;"),
       shiny::div(
         class = "side_input",
-        shiny::numericInput(ns("topn_rta"), "RTA: Show top n countries:", value = 20, min = 1, max = 200)
+        shiny::numericInput(ns("topn_rta"), "Show top n countries:", value = 20, min = 1, max = 200)
       ),
       shiny::div(
         class = "side_input",
-        shiny::numericInput(ns("bottomn_rta"), "RTA: Show bottom n countries:", value = 0, min = 0, max = 200)
+        shiny::numericInput(ns("bottomn_rta"), "Show bottom n countries:", value = 0, min = 0, max = 200)
       ),
       shiny::div(
         class = "side_input",
-        shiny::numericInput(ns("mininno_rta"), "RTA: Innovation count threshold:", value = 0, min = 0, max = 500)
+        shiny::numericInput(ns("mininno_rta"), "Innovation count threshold:", value = 50, min = 0, max = 500)
       ),
       shiny::div(
         class = "side_input",
-        shiny::numericInput(ns("minallinnos_rta"), "RTA: All innovation threshold:", value = 100, min = 0, max = 5000)
+        shiny::numericInput(ns("minallinnos_rta"), "All innovation threshold:", value = 100, min = 0, max = 5000)
       )
     )
   )
@@ -248,16 +253,37 @@ country_module_server <- function(id, parent_session, con) {
       # Reactive store for ggplot objects and data (for download handlers)
       plot_store <- shiny::reactiveValues()
 
+      # Expand "All categories" into all individual broad techs in the selectizeInput
+      shiny::observeEvent(input$tech_categories_plot1, {
+        if ("All categories" %in% input$tech_categories_plot1) {
+          new_sel <- unique(c(setdiff(input$tech_categories_plot1, "All categories"),
+                              all_broad_techs))
+          shiny::updateSelectizeInput(session, "tech_categories_plot1",
+                                     selected = new_sel)
+        }
+      })
+
+      shiny::observeEvent(input$techs, {
+        if ("All categories" %in% input$techs) {
+          new_sel <- unique(c(setdiff(input$techs, "All categories"),
+                              all_broad_techs))
+          shiny::updateSelectizeInput(session, "techs",
+                                     selected = new_sel)
+        }
+      })
+
       # DuckDB query for Plot 1 (by-technology)
       fallback_by_tech <- shiny::reactive({
-        shiny::req(input$toflow, input$country, input$tech_categories_plot1, input$firm)
+        shiny::req(input$toflow, input$country, input$tech_categories_plot1,
+                   !is.null(input$no_firm_filter))
 
         toflow             <- input$toflow
-        firm               <- input$firm
+        no_firm_filter     <- input$no_firm_filter
+        selected_firms     <- expand_firm_selection(input$firm)
         selected_countries <- expand_country_selection(input$country)
         country_sql        <- paste0("'", selected_countries, "'", collapse = ", ")
 
-        firm_clause  <- build_firm_clause_v2(firm)
+        firm_clause  <- build_firm_clause_v2(selected_firms, no_filter = no_firm_filter)
         tech_filters <- build_tech_filter_v2(input$tech_categories_plot1)
 
         sql <- sql_country_tech_combined_v2(toflow, country_sql, tech_filters, firm_clause)
@@ -296,33 +322,32 @@ country_module_server <- function(id, parent_session, con) {
 
         out
 
-      }) |> shiny::bindCache(input$toflow, input$country, input$tech_categories_plot1, input$firm)
+      }) |> shiny::bindCache(input$toflow, input$country, input$tech_categories_plot1,
+                             input$no_firm_filter, sort(input$firm))
 
       # DuckDB query for Plot 2 / World Map (by-country)
       fallback_by_country <- shiny::reactive({
-        shiny::req(input$toflow, input$country, input$techs, input$firm)
+        shiny::req(input$toflow, input$country, input$techs,
+                   !is.null(input$no_firm_filter))
 
         selected_countries <- expand_country_selection(input$country)
         toflow             <- input$toflow
-        firm               <- input$firm
+        no_firm_filter     <- input$no_firm_filter
+        selected_firms     <- expand_firm_selection(input$firm)
         techs              <- input$techs
         country_sql        <- paste0("'", selected_countries, "'", collapse = ", ")
 
-        firm_clause <- build_firm_clause_v2(firm)
-
-        tech_clause <- build_tech_clause_v2(techs)
+        firm_clause <- build_firm_clause_v2(selected_firms, no_filter = no_firm_filter)
 
         out <- DBI::dbGetQuery(con, sql_country_combined_v2(toflow, country_sql, techs, firm_clause))
 
         if (nrow(out) == 0) return(NULL)
-        
-        firm_input    <- firm
+
         allinnos_data <- allinnos_baseline |>
           dplyr::filter(ctry_code %in% selected_countries) |>
           dplyr::filter(
-            if (firm_input %in% c("All", "All Firms")) TRUE
-            else if (firm_input == "None") is.na(firm)
-            else firm == firm_input
+            if (no_firm_filter) TRUE
+            else firm %in% selected_firms
           ) |>
           dplyr::group_by(ctry_code) |>
           dplyr::summarise(allinnos = sum(allinnos), .groups = "drop")
@@ -351,7 +376,8 @@ country_module_server <- function(id, parent_session, con) {
 
         out
 
-      }) |> shiny::bindCache(input$toflow, input$country, input$techs, input$firm)
+      }) |> shiny::bindCache(input$toflow, input$country, input$techs,
+                             input$no_firm_filter, sort(input$firm))
 
       # Chart 1: Main avstrax plot
       output$avstrax_plot1 <- ggiraph::renderGirafe({
@@ -481,7 +507,7 @@ country_module_server <- function(id, parent_session, con) {
           minallinnos         = input$minallinnos_rta,
           widthscale          = input$widthscale,
           x_label             = "Country",
-          plot_title          = paste0("RTA: ", tech_label, " - ", sub("^[^.]*\\.", "", flow_label)),
+          plot_title          = paste0("RTA - ", tech_label),
           precomputed_avstrax = precomputed_data
         )
 
@@ -511,8 +537,8 @@ country_module_server <- function(id, parent_session, con) {
           mininno      = input$mininno_rta,
           minallinnos  = input$minallinnos_rta,
           widthscale   = input$widthscale,
-          plot_title   = paste0("RTA vs Returns: ", tech_label, " - ", sub("^[^.]*\\.", "", flow_label)),
-          x_label      = "RTA",
+          plot_title   = paste0("RTA vs Returns - ", tech_label),
+          x_label      = "Revealed Technological Advantage",
           y_label      = "Return (%)"
         )
 
@@ -556,7 +582,8 @@ country_module_server <- function(id, parent_session, con) {
 
       # World Map: RTA
       output$world_map_rta <- plotly::renderPlotly({
-        req(input$country, input$toflow, input$techs, input$mininno_rta)
+        req(input$country, input$toflow, input$techs,
+            input$mininno_rta, input$minallinnos_rta)
 
         avstrax_data <- fallback_by_country()
         if (is.null(avstrax_data) || nrow(avstrax_data) == 0) return(NULL)
@@ -564,9 +591,14 @@ country_module_server <- function(id, parent_session, con) {
         avstrax_data <- avstrax_data |>
           dplyr::filter(ctry_code != "All", innos >= input$mininno_rta)
 
+        if ("Allinnos" %in% names(avstrax_data) && input$minallinnos_rta > 0) {
+          avstrax_data <- avstrax_data |>
+            dplyr::filter(Allinnos >= input$minallinnos_rta)
+        }
+
         if (nrow(avstrax_data) == 0) return(NULL)
 
-        rta_title <- paste0("World Map: RTA - ", paste(input$techs, collapse = ", "))
+        rta_title <- paste0("RTA - ", paste(input$techs, collapse = ", "))
 
         # Store ggplot version and data for PDF/CSV downloads
         plot_store$world_map_rta_gg <- plot_world_map_gg(

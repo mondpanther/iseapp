@@ -33,6 +33,20 @@ expand_region_selection <- function(selected) {
   unique(expanded)
 }
 
+#' Expand a firm selection to individual firm names
+#'
+#' Converts sector group names to their constituent firm names.
+#' Individual firm names are passed through unchanged.
+#' @param selected Character vector of sector names or firm names.
+#' @return Character vector of unique firm names.
+#' @export
+expand_firm_selection <- function(selected) {
+  expanded <- unlist(lapply(selected, function(x) {
+    if (x %in% names(firm_sector_groups)) firm_sector_groups[[x]] else x
+  }))
+  unique(expanded)
+}
+
 #' Get display name for a NUTS1 region code
 #'
 #' @param code A NUTS1 region code (e.g. "UKI").

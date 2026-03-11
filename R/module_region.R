@@ -24,15 +24,20 @@ region_module_sidebar <- function(id) {
       ),
       shiny::div(
         class = "side_input",
-        shiny::selectizeInput(
-          ns("firm"),
-          "Firm Filter:",
-          choices  = firm_choices,
-          selected = "All Firms",
-          multiple = FALSE,
-          options  = list(
-            placeholder = 'Choose a firm...',
-            server      = TRUE
+        shiny::checkboxInput(
+          ns("no_firm_filter"),
+          "No firm filter (all patents)",
+          value = TRUE
+        ),
+        shiny::conditionalPanel(
+          condition = paste0("!input['", ns("no_firm_filter"), "']"),
+          shiny::selectizeInput(
+            inputId = ns("firm"),
+            label = "Firm or Sector Group",
+            choices = firm_grouped_choices,
+            selected = NULL,
+            multiple = TRUE,
+            options = list(placeholder = 'Choose firms or sector groups...')
           )
         )
       ),
@@ -125,19 +130,19 @@ region_module_sidebar <- function(id) {
       ),
       shiny::div(
         class = "side_input",
-        shiny::numericInput(ns("topn_rta_region"),    "RTA: Show top n regions:",        value = 12,  min = 1,  max = 50)
+        shiny::numericInput(ns("topn_rta_region"),    "Show top n regions:",        value = 12,  min = 1,  max = 50)
       ),
       shiny::div(
         class = "side_input",
-        shiny::numericInput(ns("bottomn_rta_region"), "RTA: Show bottom n regions:",     value = 0,   min = 0,  max = 50)
+        shiny::numericInput(ns("bottomn_rta_region"), "Show bottom n regions:",     value = 0,   min = 0,  max = 50)
       ),
       shiny::div(
         class = "side_input",
-        shiny::numericInput(ns("mininno_rta_region"),    "RTA: Innovation count threshold:", value = 0, min = 0, max = 500)
+        shiny::numericInput(ns("mininno_rta_region"),    "Innovation count threshold:", value = 50, min = 0, max = 500)
       ),
       shiny::div(
         class = "side_input",
-        shiny::numericInput(ns("minallinnos_rta_region"), "RTA: All innovation threshold:",  value = 100, min = 0, max = 5000)
+        shiny::numericInput(ns("minallinnos_rta_region"), "All innovation threshold:",  value = 100, min = 0, max = 5000)
       )
     )
   )
@@ -242,6 +247,25 @@ region_module_server <- function(id, parent_session, con) {
       # Reactive store for ggplot objects and data (for download handlers)
       plot_store <- shiny::reactiveValues()
 
+      # Expand "All categories" into all individual broad techs in the selectizeInput
+      shiny::observeEvent(input$tech_categories_plot1_region, {
+        if ("All categories" %in% input$tech_categories_plot1_region) {
+          new_sel <- unique(c(setdiff(input$tech_categories_plot1_region, "All categories"),
+                              all_broad_techs))
+          shiny::updateSelectizeInput(session, "tech_categories_plot1_region",
+                                     selected = new_sel)
+        }
+      })
+
+      shiny::observeEvent(input$techs_region, {
+        if ("All categories" %in% input$techs_region) {
+          new_sel <- unique(c(setdiff(input$techs_region, "All categories"),
+                              all_broad_techs))
+          shiny::updateSelectizeInput(session, "techs_region",
+                                     selected = new_sel)
+        }
+      })
+
       # Update URL when subtab changes
       shiny::observeEvent(input$inner_tabs, {
         query <- shiny::parseQueryString(parent_session$clientData$url_search)
@@ -254,15 +278,16 @@ region_module_server <- function(id, parent_session, con) {
       }, ignoreInit = TRUE)
 
       fallback_by_region <- shiny::reactive({
-        shiny::req(input$toflow_region, input$region, input$techs_region, input$firm)
+        shiny::req(input$toflow_region, input$region, input$techs_region,
+                   !is.null(input$no_firm_filter))
 
         toflow           <- input$toflow_region
-        firm             <- input$firm
-        firm_input       <- firm
+        no_firm_filter   <- input$no_firm_filter
+        selected_firms   <- expand_firm_selection(input$firm)
         selected_regions <- expand_region_selection(input$region)
         region_sql       <- paste0("'", selected_regions, "'", collapse = ", ")
 
-        firm_clause <- build_firm_clause_v2(firm)
+        firm_clause <- build_firm_clause_v2(selected_firms, no_filter = no_firm_filter)
 
         out <- DBI::dbGetQuery(con, sql_region_combined_v2(toflow, region_sql, input$techs_region, firm_clause))
 
@@ -271,18 +296,16 @@ region_module_server <- function(id, parent_session, con) {
         allinnos_data <- allinnos_region_baseline |>
           dplyr::filter(region_code %in% selected_regions) |>
           dplyr::filter(
-            if (firm_input %in% c("All", "All Firms")) TRUE
-            else if (firm_input == "None") is.na(firm)
-            else firm == firm_input
+            if (no_firm_filter) TRUE
+            else firm %in% selected_firms
           ) |>
           dplyr::group_by(region_code) |>
           dplyr::summarise(allinnos = sum(allinnos), .groups = "drop")
 
         sum_allinnos_val <- sum_allinnos_region_firm_baseline |>
           dplyr::filter(
-            if (firm_input %in% c("All", "All Firms")) TRUE
-            else if (firm_input == "None") is.na(firm)
-            else firm == firm_input
+            if (no_firm_filter) TRUE
+            else firm %in% selected_firms
           ) |>
           dplyr::pull(sum_allinnos) |>
           sum()
@@ -311,17 +334,20 @@ region_module_server <- function(id, parent_session, con) {
 
         out
 
-      }) |> shiny::bindCache(input$toflow_region, input$region, input$techs_region, input$firm)
+      }) |> shiny::bindCache(input$toflow_region, input$region, input$techs_region,
+                             input$no_firm_filter, sort(input$firm))
 
       fallback_by_tech_region <- shiny::reactive({
-        shiny::req(input$toflow_region, input$region, input$tech_categories_plot1_region, input$firm)
+        shiny::req(input$toflow_region, input$region, input$tech_categories_plot1_region,
+                   !is.null(input$no_firm_filter))
 
         toflow             <- input$toflow_region
-        firm               <- input$firm
+        no_firm_filter     <- input$no_firm_filter
+        selected_firms     <- expand_firm_selection(input$firm)
         selected_regions   <- expand_region_selection(input$region)
         region_sql         <- paste0("'", selected_regions, "'", collapse = ", ")
 
-        firm_clause <- build_firm_clause_v2(firm)
+        firm_clause <- build_firm_clause_v2(selected_firms, no_filter = no_firm_filter)
 
         tech_filters <- build_tech_filter_v2(input$tech_categories_plot1_region)
 
@@ -359,7 +385,8 @@ region_module_server <- function(id, parent_session, con) {
 
         out
 
-      }) |> shiny::bindCache(input$toflow_region, input$region, input$tech_categories_plot1_region, input$firm)
+      }) |> shiny::bindCache(input$toflow_region, input$region, input$tech_categories_plot1_region,
+                             input$no_firm_filter, sort(input$firm))
       # ===== RENDER OUTPUTS =====
       
       # Plot 1: Returns by Technology
@@ -484,7 +511,7 @@ region_module_server <- function(id, parent_session, con) {
           minallinnos         = input$minallinnos_rta_region,
           widthscale          = input$widthscale_region,
           x_label             = "Region",
-          plot_title          = paste0("RTA: ", paste(input$techs_region, collapse = ", "), " - ", sub("^[^.]*\\.", "", flow_label)),
+          plot_title          = paste0("RTA - ", paste(input$techs_region, collapse = ", ")),
           precomputed_avstrax = precomputed_data
         )
 
@@ -512,8 +539,8 @@ region_module_server <- function(id, parent_session, con) {
           mininno      = input$mininno_rta_region,
           minallinnos  = input$minallinnos_rta_region,
           widthscale   = input$widthscale_region,
-          plot_title   = paste0("RTA vs Returns: ", paste(input$techs_region, collapse = ", "), " - ", sub("^[^.]*\\.", "", flow_label)),
-          x_label      = "RTA",
+          plot_title   = paste0("RTA vs Returns - ", paste(input$techs_region, collapse = ", ")),
+          x_label      = "Revealed Technological Advantage",
           y_label      = "Return (%)"
         )
 
@@ -528,7 +555,8 @@ region_module_server <- function(id, parent_session, con) {
       
       # UK Map: RTA
       output$uk_regions_map_rta <- leaflet::renderLeaflet({
-        shiny::req(input$region, input$toflow_region, input$techs_region, input$mininno_rta_region)
+        shiny::req(input$region, input$toflow_region, input$techs_region,
+                   input$mininno_rta_region, input$minallinnos_rta_region)
 
         avstrax_data <- fallback_by_region()
         if (is.null(avstrax_data) || nrow(avstrax_data) == 0) return(NULL)
@@ -536,9 +564,14 @@ region_module_server <- function(id, parent_session, con) {
         map_data <- avstrax_data |>
           dplyr::filter(ctry_code != "All", innos >= input$mininno_rta_region)
 
+        if ("Allinnos" %in% names(map_data) && input$minallinnos_rta_region > 0) {
+          map_data <- map_data |>
+            dplyr::filter(Allinnos >= input$minallinnos_rta_region)
+        }
+
         if (nrow(map_data) == 0) return(NULL)
 
-        rta_title <- paste0("RTA: ", paste(input$techs_region, collapse = ", "))
+        rta_title <- paste0("RTA - ", paste(input$techs_region, collapse = ", "))
 
         # Store ggplot version and data for PDF/CSV downloads
         plot_store$uk_regions_map_rta_gg <- plot_uk_regions_map_gg(

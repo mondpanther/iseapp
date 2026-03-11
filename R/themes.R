@@ -13,13 +13,13 @@ theme_istrax_titles <- function(title_size = 14, subtitle_size = 12, title_color
       color = title_color,
       face = "bold",
       hjust = 0.5,
-      family = "Open Sans"
+      family = "Arial"
     ),
     plot.subtitle = ggplot2::element_text(
       size = subtitle_size,
       color = title_color,
       hjust = 0.5,
-      family = "Open Sans"
+      family = "Arial"
     )
   )
 }
@@ -36,7 +36,7 @@ plotly_title_style <- function(title_size = 24, title_color = "#4b4b4b") {
     font = list(
       size = title_size,
       color = title_color,
-      family = "Open Sans",
+      family = "Arial",
       weight = 800
     ),
     xanchor = "center",

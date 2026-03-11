@@ -707,21 +707,21 @@ plot_avstrax_by_country <- function(
       fill = "Technology"
     ) +
     ggplot2::guides(color = "none") +
-    ggplot2::theme_minimal(base_family = "Open Sans") +
+    ggplot2::theme_minimal(base_family = "Arial") +
     theme_istrax_titles() +
     ggplot2::theme(
       axis.title.x = ggplot2::element_text(size = 14),
       axis.title.y = ggplot2::element_text(size = 14),
       axis.text.x = ggplot2::element_text(size = 12),
       axis.text.y = ggplot2::element_text(size = 12),
-      text = ggplot2::element_text(family = "Open Sans"),
-      axis.text = ggplot2::element_text(family = "Open Sans"),
-      axis.title = ggplot2::element_text(family = "Open Sans")
+      text = ggplot2::element_text(family = "Arial"),
+      axis.text = ggplot2::element_text(family = "Arial"),
+      axis.title = ggplot2::element_text(family = "Arial")
     ) +
     ggplot2::geom_hline(yintercept = allmean, linetype = "dashed", color = "black", linewidth = 1) +
     ggplot2::annotate("text", y = allmean, x = max(avstrax$x_pos) + 0.4,
              label = "Average", angle = -90, vjust = 1.5, size = 4,
-             family = "Open Sans", color = "black") +
+             family = "Arial", color = "black") +
     ggplot2::coord_flip()
 
   p <- p + 
@@ -1251,16 +1251,16 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
       x = x_label,
       y = ylab
     ) +
-    theme_minimal(base_family = "Open Sans") +
+    theme_minimal(base_family = "Arial") +
     theme_istrax_titles() +
     theme(
       axis.title.x = element_text(size = 14),
       axis.title.y = element_text(size = 14),
       axis.text.x = element_text(size = 12),
       axis.text.y = element_text(size = 12),
-      text = element_text(family = "Open Sans"),
-      axis.text = element_text(family = "Open Sans"),
-      axis.title = element_text(family = "Open Sans"),
+      text = element_text(family = "Arial"),
+      axis.text = element_text(family = "Arial"),
+      axis.title = element_text(family = "Arial"),
       legend.position = if (has_comp_data) "bottom" else "none",
       legend.title = element_text(size = 12),
       legend.text = element_text(size = 11),
@@ -1270,7 +1270,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
     geom_hline(yintercept = allmean, linetype = "dashed", color = "black", linewidth = 1) +
     annotate("text", y = allmean, x = max(avstrax$x_pos) - 0.6,
              label = "Average", angle = -90, vjust = 1.5, size = 4,
-             family = "Open Sans", color = "black") +
+             family = "Arial", color = "black") +
     coord_flip()
 
   # Build subtitle with legend info
@@ -1510,9 +1510,9 @@ plot_avstrax_rta <- function(pdata, classes,
     labs(
       title = plot_title,
       x = x_label,
-      y = "RTA Index"
+      y = "Revealed Technological Advantage"
     ) +
-    theme_minimal(base_family = "Open Sans") +
+    theme_minimal(base_family = "Arial") +
     theme_istrax_titles() +
     theme(
       # plot.title = element_text(size = 14, hjust = 0.5),
@@ -1520,15 +1520,15 @@ plot_avstrax_rta <- function(pdata, classes,
       axis.title.y = element_text(size = 14),
       axis.text.x = element_text(size = 12),
       axis.text.y = element_text(size = 12),
-      text = element_text(family = "Open Sans"),
-      axis.text = element_text(family = "Open Sans"),
-      axis.title = element_text(family = "Open Sans"),
+      text = element_text(family = "Arial"),
+      axis.text = element_text(family = "Arial"),
+      axis.title = element_text(family = "Arial"),
       legend.position = "none"
     ) +
     geom_hline(yintercept = global_rta, linetype = "dashed", color = "black", linewidth = 1) +
     annotate("text", y = global_rta, x = max(avstrax$x_pos) - 0.6,
              label = "RTA = 1", angle = -90, vjust = 1.5, size = 3.5,
-             family = "Open Sans", color = "black") +
+             family = "Arial", color = "black") +
     coord_flip()
 
   # Add subtitle and caption
@@ -1574,7 +1574,7 @@ plot_rta_returns_scatter <- function(avstrax_data,
                                       width_svg = 8,
                                       height_svg = 6,
                                       plot_title = "RTA vs Returns",
-                                      x_label = "RTA",
+                                      x_label = "Revealed Technological Advantage",
                                       y_label = "Return (%)") {
 
   library(dplyr)
@@ -1702,14 +1702,14 @@ plot_rta_returns_scatter <- function(avstrax_data,
       x = x_label,
       y = y_label
     ) +
-    theme_minimal(base_family = "Open Sans") +
+    theme_minimal(base_family = "Arial") +
     theme_istrax_titles() +
     theme(
       axis.title.x = element_text(size = 14),
       axis.title.y = element_text(size = 14),
       axis.text.x = element_text(size = 12),
       axis.text.y = element_text(size = 12),
-      text = element_text(family = "Open Sans"),
+      text = element_text(family = "Arial"),
       legend.position = "right",
       legend.title = element_text(size = 11),
       legend.text = element_text(size = 10),
@@ -1717,7 +1717,7 @@ plot_rta_returns_scatter <- function(avstrax_data,
     ) +
     annotate("text", x = 1, y = max(scatter_data$mean, na.rm = TRUE) * 0.95,
              label = "RTA = 1", hjust = -0.1, size = 3.5,
-             family = "Open Sans", color = "gray40")
+             family = "Arial", color = "gray40")
 
   # Add horizontal dashed line for average return (from "All" row)
   if (!is.null(all_mean)) {
@@ -1725,7 +1725,7 @@ plot_rta_returns_scatter <- function(avstrax_data,
       geom_hline(yintercept = all_mean, linetype = "dashed", color = "#3498db", linewidth = 0.8) +
       annotate("text", x = max(scatter_data$RTA, na.rm = TRUE) * 0.95, y = all_mean,
                label = paste0("Avg: ", round(all_mean, 1), "%"), vjust = -0.5, size = 3.5,
-               family = "Open Sans", color = "#3498db")
+               family = "Arial", color = "#3498db")
   }
 
   # Add caption
@@ -1923,17 +1923,17 @@ plot_rta_gdp_scatter <- function(avstrax_data,
     scale_size_identity() +
     labs(
       title = plot_title,
-      x = "RTA",
+      x = "Revealed Technological Advantage",
       y = "GDP per capita (log)"
     ) +
-    theme_minimal(base_family = "Open Sans") +
+    theme_minimal(base_family = "Arial") +
     theme_istrax_titles() +
     theme(
       axis.title.x = element_text(size = 14),
       axis.title.y = element_text(size = 14),
       axis.text.x = element_text(size = 12),
       axis.text.y = element_text(size = 12),
-      text = element_text(family = "Open Sans"),
+      text = element_text(family = "Arial"),
       legend.position = "right",
       legend.title = element_text(size = 11),
       legend.text = element_text(size = 10),
@@ -1941,7 +1941,7 @@ plot_rta_gdp_scatter <- function(avstrax_data,
     ) +
     annotate("text", x = 1, y = max(scatter_data$log_gdp_pc, na.rm = TRUE) * 0.98,
              label = "RTA = 1", hjust = -0.1, size = 3.5,
-             family = "Open Sans", color = "gray40")
+             family = "Arial", color = "gray40")
 
   # Add caption
   p <- p + labs(caption = "GDP PPP data: World Bank (2015, constant 2017 intl $) | © 2025 Innovation Strategy Explorer") +
@@ -2565,7 +2565,7 @@ plot_world_map_gg <- function(data,
     }
 
     p <- p + coord_fixed(1.3) + labs(title = plot_title) +
-      theme_minimal() +
+      theme_minimal(base_family = "Arial") +
       theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
             legend.position = "right",
             panel.grid.major = element_line(color = "grey90"),
@@ -2671,7 +2671,7 @@ plot_uk_regions_map_gg <- function(data,
     }
 
     p + coord_fixed(1.3) + labs(title = plot_title) +
-      theme_minimal() +
+      theme_minimal(base_family = "Arial") +
       theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
             legend.position = "right",
             panel.grid.major = element_line(color = "grey90"),

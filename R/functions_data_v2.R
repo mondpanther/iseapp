@@ -17,9 +17,15 @@ build_tech_clause_v2 <- function(selected) {
 #' @param selected Character vector of technology names from the UI.
 #' @return Named list of SQL AND clause fragments, one per selection.
 build_tech_filter_v2 <- function(selected) {
-  if ("All" %in% selected || length(selected) == 0) return(list("All" = ""))
+  # Strip "All categories" — it's a UI-only shortcut expanded by the server
+  selected <- setdiff(selected, "All categories")
 
+  if (length(selected) == 0) return(list("All innovations" = ""))
+
+  # "All innovations" is just another selection alongside others
+  # It gets an empty filter clause (handled specially in the SQL builder)
   lapply(setNames(selected, selected), function(t) {
+    if (t == "All innovations") return("")
     glue::glue(
       "AND (tl.tech_group = '{t}' OR t.technology = '{t}')"
     )
@@ -32,22 +38,23 @@ build_tech_filter_v2 <- function(selected) {
 #' @param selected Character vector of technology names from the UI.
 #' @return Character. Boolean SQL expression string.
 build_tech_bool_v2 <- function(selected) {
-  if ("All" %in% selected || length(selected) == 0) return("TRUE")
+  selected <- setdiff(selected, "All categories")
+  if ("All innovations" %in% selected || length(selected) == 0) return("TRUE")
   tech_sql <- paste0("'", selected, "'", collapse = ", ")
   glue::glue("tl.tech_group IN ({tech_sql})")
 }
 
 #' Build a SQL firm WHERE clause with table alias (v2)
 #'
-#' References f.firm from the patents_x_firm bridge JOIN (LEFT JOIN,
-#' so f.firm is NULL when no match). "All Firms" and "No Firm Filter"
-#' both return an empty string — all rows pass.
-#' @param firm Character. Firm selection from the UI.
+#' Accepts a character vector of firm names and generates an IN clause.
+#' When no_filter is TRUE or firms is empty, returns empty string (no filtering).
+#' @param firms Character vector. Firm names from the treeInput.
+#' @param no_filter Logical. If TRUE, skip firm filtering entirely.
 #' @return Character. SQL AND clause fragment, or empty string.
-build_firm_clause_v2 <- function(firm) {
-  if (is.null(firm) || firm %in% c("All Firms", "All", "No Firm")) return("")
-  if (firm == "None") return("AND f.firm IS NULL")
-  glue::glue("AND f.firm = '{firm}'")
+build_firm_clause_v2 <- function(firms, no_filter = TRUE) {
+  if (no_filter || is.null(firms) || length(firms) == 0) return("")
+  firms_sql <- paste0("'", gsub("'", "''", firms), "'", collapse = ", ")
+  glue::glue("AND f.firm IN ({firms_sql})")
 }
 
 #' Generate SQL combined query for country aggregation (v2)
@@ -217,21 +224,28 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
   }
 
   # Build filtered_tech CTE:
-  # When "All" is selected, group by broad tech_group.
-  # When specific items are selected, use UNION ALL so each selected item
-  # gets its own bar (whether it's a broad tech_group or individual technology).
-  if (length(filter_clauses) == 0) {
-    # "All" selected - group by tech_group
-    filtered_tech_sql <- "
-      SELECT DISTINCT t.docdb_family_id, tl.tech_group AS technology
-      FROM patents_x_tech t
-      JOIN tech_lookup tl ON t.technology = tl.technology
-    "
-  } else {
-    # Specific selections - UNION ALL per selection with selected label
-    selected_names <- names(tech_filters)
-    selected_names <- selected_names[selected_names != "All"]
-    parts <- vapply(selected_names, function(s) {
+  # "All innovations" = all patents regardless of tech mapping (single bar)
+  # Specific selections = UNION ALL so each gets its own bar
+  has_all_innovations <- "All innovations" %in% names(tech_filters)
+
+  # Collect parts for specific technology selections
+  selected_names <- names(tech_filters)
+  selected_names <- selected_names[!selected_names %in% c("All categories", "All innovations")]
+
+  parts <- character(0)
+
+  # "All innovations" part: all docdb_family_ids, no tech join
+
+  if (has_all_innovations) {
+    parts <- c(parts, "
+      SELECT DISTINCT docdb_family_id, 'All innovations' AS technology
+      FROM full_patent_database
+    ")
+  }
+
+  # Individual technology parts
+  if (length(selected_names) > 0) {
+    tech_parts <- vapply(selected_names, function(s) {
       glue::glue("
         SELECT DISTINCT t.docdb_family_id, '{s}' AS technology
         FROM patents_x_tech t
@@ -239,8 +253,19 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
         WHERE tl.tech_group = '{s}' OR t.technology = '{s}'
       ")
     }, character(1))
-    filtered_tech_sql <- paste(parts, collapse = "\nUNION ALL\n")
+    parts <- c(parts, tech_parts)
   }
+
+  # Fallback: no specific selections and no All innovations (shouldn't happen)
+  if (length(parts) == 0) {
+    parts <- "
+      SELECT DISTINCT t.docdb_family_id, tl.tech_group AS technology
+      FROM patents_x_tech t
+      JOIN tech_lookup tl ON t.technology = tl.technology
+    "
+  }
+
+  filtered_tech_sql <- paste(parts, collapse = "\nUNION ALL\n")
 
   glue::glue("
     WITH filtered_tech AS (
@@ -483,19 +508,24 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
   }
 
   # Build filtered_tech CTE:
-  # When "All" is selected, group by broad tech_group.
-  # When specific items are selected, use UNION ALL so each selected item
-  # gets its own bar (whether it's a broad tech_group or individual technology).
-  if (length(filter_clauses) == 0) {
-    filtered_tech_sql <- "
-      SELECT DISTINCT t.docdb_family_id, tl.tech_group AS technology
-      FROM patents_x_tech t
-      JOIN tech_lookup tl ON t.technology = tl.technology
-    "
-  } else {
-    selected_names <- names(tech_filters)
-    selected_names <- selected_names[selected_names != "All"]
-    parts <- vapply(selected_names, function(s) {
+  # "All innovations" = all patents regardless of tech mapping (single bar)
+  # Specific selections = UNION ALL so each gets its own bar
+  has_all_innovations <- "All innovations" %in% names(tech_filters)
+
+  selected_names <- names(tech_filters)
+  selected_names <- selected_names[!selected_names %in% c("All categories", "All innovations")]
+
+  parts <- character(0)
+
+  if (has_all_innovations) {
+    parts <- c(parts, "
+      SELECT DISTINCT docdb_family_id, 'All innovations' AS technology
+      FROM full_patent_database
+    ")
+  }
+
+  if (length(selected_names) > 0) {
+    tech_parts <- vapply(selected_names, function(s) {
       glue::glue("
         SELECT DISTINCT t.docdb_family_id, '{s}' AS technology
         FROM patents_x_tech t
@@ -503,8 +533,18 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
         WHERE tl.tech_group = '{s}' OR t.technology = '{s}'
       ")
     }, character(1))
-    filtered_tech_sql <- paste(parts, collapse = "\nUNION ALL\n")
+    parts <- c(parts, tech_parts)
   }
+
+  if (length(parts) == 0) {
+    parts <- "
+      SELECT DISTINCT t.docdb_family_id, tl.tech_group AS technology
+      FROM patents_x_tech t
+      JOIN tech_lookup tl ON t.technology = tl.technology
+    "
+  }
+
+  filtered_tech_sql <- paste(parts, collapse = "\nUNION ALL\n")
 
   glue::glue("
     WITH filtered_tech AS (

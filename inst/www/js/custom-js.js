@@ -5,3 +5,4 @@ $(document).on("shiny:connected", () => {
 $(document).on("shiny:sessioninitialized", () => {
   console.log("Custom JS Script loaded...(Session Initialized)");
 });
+
