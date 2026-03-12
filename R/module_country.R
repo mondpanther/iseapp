@@ -24,21 +24,13 @@ country_module_sidebar <- function(id) {
       ),
       shiny::div(
         class = "side_input",
-        shiny::checkboxInput(
-          ns("no_firm_filter"),
-          "No firm filter (all patents)",
-          value = TRUE
-        ),
-        shiny::conditionalPanel(
-          condition = paste0("!input['", ns("no_firm_filter"), "']"),
-          shiny::selectizeInput(
-            inputId = ns("firm"),
-            label = "Firm or Sector Group",
-            choices = firm_grouped_choices,
-            selected = NULL,
-            multiple = TRUE,
-            options = list(placeholder = 'Choose firms or sector groups...')
-          )
+        shiny::selectizeInput(
+          inputId = ns("firm"),
+          label = "Firm or Sector Group",
+          choices = firm_grouped_choices,
+          selected = "No firm filter",
+          multiple = TRUE,
+          options = list(placeholder = 'Choose firms or sector groups...')
         )
       ),
       shiny::div(
@@ -89,10 +81,10 @@ country_module_sidebar <- function(id) {
       ),
       shiny::div(
         class = "side_input",
-        shiny::checkboxInput(
-          ns("show_top3_ids"),
-          "Show Top Patent IDs",
-          value = TRUE
+        shiny::numericInput(
+          ns("top_n_ids"),
+          "Number of Top Patent IDs shown",
+          value = 10, min = 0, max = 50
         )
       )
     ),
@@ -185,17 +177,22 @@ country_module_ui <- function(id) {
 
       bslib::nav_panel(
         "Returns by Country",
-        shiny::div(
-          ggiraph::girafeOutput(ns("avstrax_plot2"), width = "100%", height = "auto"),
-          plot_download_buttons(ns, "avstrax_plot2")
-        )
-      ),
-
-      bslib::nav_panel(
-        "World Map",
-        shiny::div(
-          plotly::plotlyOutput(ns("world_map"), width = "100%", height = "auto"),
-          map_download_buttons(ns, "world_map")
+        bslib::navset_pill_list(
+          widths = c(2, 10),
+          bslib::nav_panel(
+            "Bar Chart",
+            shiny::div(
+              ggiraph::girafeOutput(ns("avstrax_plot2"), width = "100%", height = "auto"),
+              plot_download_buttons(ns, "avstrax_plot2")
+            )
+          ),
+          bslib::nav_panel(
+            "World Map",
+            shiny::div(
+              plotly::plotlyOutput(ns("world_map"), width = "100%", height = "auto"),
+              map_download_buttons(ns, "world_map")
+            )
+          )
         )
       ),
 
@@ -204,7 +201,7 @@ country_module_ui <- function(id) {
         bslib::navset_pill_list(
           widths = c(2, 10),
           bslib::nav_panel(
-            "RTA by Country",
+            "Bar Chart",
             shiny::div(
               ggiraph::girafeOutput(ns("avstrax_plot2_rta"), width = "100%", height = "auto"),
               plot_download_buttons(ns, "avstrax_plot2_rta")
@@ -272,21 +269,31 @@ country_module_server <- function(id, parent_session, con) {
         }
       })
 
+      # When "No firm filter" is selected alongside other firms, keep only "No firm filter"
+      # When a firm/sector is selected alongside "No firm filter", drop "No firm filter"
+      shiny::observeEvent(input$firm, {
+        sel <- input$firm
+        if ("No firm filter" %in% sel && length(sel) > 1) {
+          # User just added something else — drop "No firm filter"
+          new_sel <- setdiff(sel, "No firm filter")
+          shiny::updateSelectizeInput(session, "firm", selected = new_sel)
+        }
+      })
+
       # DuckDB query for Plot 1 (by-technology)
       fallback_by_tech <- shiny::reactive({
-        shiny::req(input$toflow, input$country, input$tech_categories_plot1,
-                   !is.null(input$no_firm_filter))
+        shiny::req(input$toflow, input$country, input$tech_categories_plot1)
 
         toflow             <- input$toflow
-        no_firm_filter     <- input$no_firm_filter
-        selected_firms     <- expand_firm_selection(input$firm)
+        no_firm_filter     <- "No firm filter" %in% input$firm || length(input$firm) == 0
+        selected_firms     <- expand_firm_selection(setdiff(input$firm, "No firm filter"))
         selected_countries <- expand_country_selection(input$country)
         country_sql        <- paste0("'", selected_countries, "'", collapse = ", ")
 
         firm_clause  <- build_firm_clause_v2(selected_firms, no_filter = no_firm_filter)
         tech_filters <- build_tech_filter_v2(input$tech_categories_plot1)
 
-        sql <- sql_country_tech_combined_v2(toflow, country_sql, tech_filters, firm_clause)
+        sql <- sql_country_tech_combined_v2(toflow, country_sql, tech_filters, firm_clause, top_n_ids = input$top_n_ids)
 
         out <- DBI::dbGetQuery(con, sql)
 
@@ -323,23 +330,22 @@ country_module_server <- function(id, parent_session, con) {
         out
 
       }) |> shiny::bindCache(input$toflow, input$country, input$tech_categories_plot1,
-                             input$no_firm_filter, sort(input$firm))
+                             sort(input$firm))
 
       # DuckDB query for Plot 2 / World Map (by-country)
       fallback_by_country <- shiny::reactive({
-        shiny::req(input$toflow, input$country, input$techs,
-                   !is.null(input$no_firm_filter))
+        shiny::req(input$toflow, input$country, input$techs)
 
         selected_countries <- expand_country_selection(input$country)
         toflow             <- input$toflow
-        no_firm_filter     <- input$no_firm_filter
-        selected_firms     <- expand_firm_selection(input$firm)
+        no_firm_filter     <- "No firm filter" %in% input$firm || length(input$firm) == 0
+        selected_firms     <- expand_firm_selection(setdiff(input$firm, "No firm filter"))
         techs              <- input$techs
         country_sql        <- paste0("'", selected_countries, "'", collapse = ", ")
 
         firm_clause <- build_firm_clause_v2(selected_firms, no_filter = no_firm_filter)
 
-        out <- DBI::dbGetQuery(con, sql_country_combined_v2(toflow, country_sql, techs, firm_clause))
+        out <- DBI::dbGetQuery(con, sql_country_combined_v2(toflow, country_sql, techs, firm_clause, top_n_ids = input$top_n_ids))
 
         if (nrow(out) == 0) return(NULL)
 
@@ -377,12 +383,12 @@ country_module_server <- function(id, parent_session, con) {
         out
 
       }) |> shiny::bindCache(input$toflow, input$country, input$techs,
-                             input$no_firm_filter, sort(input$firm))
+                             sort(input$firm))
 
       # Chart 1: Main avstrax plot
       output$avstrax_plot1 <- ggiraph::renderGirafe({
         req(input$country, input$toflow, input$tech_categories_plot1,
-            input$widthscale, input$display_mode, !is.null(input$show_top3_ids))
+            input$widthscale, input$display_mode, !is.null(input$top_n_ids))
 
         flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
         pdata      <- fallback_by_tech()
@@ -395,7 +401,7 @@ country_module_server <- function(id, parent_session, con) {
           colorings        = colorings,
           widthscale       = input$widthscale,
           display_mode     = input$display_mode,
-          show_top3_ids    = input$show_top3_ids,
+          top_n_ids        = input$top_n_ids,
           plot_title       = sub("^[^.]*\\.", "", flow_label),
           precomputed_data = pdata
         )
@@ -413,7 +419,7 @@ country_module_server <- function(id, parent_session, con) {
       output$avstrax_plot2 <- ggiraph::renderGirafe({
         req(input$country, input$toflow, input$techs, input$topn,
             input$mininno, input$widthscale, input$display_mode,
-            !is.null(input$show_top3_ids))
+            !is.null(input$top_n_ids))
 
         flow_label       <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
         precomputed_data <- fallback_by_country()
@@ -430,7 +436,7 @@ country_module_server <- function(id, parent_session, con) {
           mininno                 = input$mininno,
           widthscale              = input$widthscale,
           display_mode            = input$display_mode,
-          show_top3_ids           = input$show_top3_ids,
+          top_n_ids               = input$top_n_ids,
           plot_title              = sub("^[^.]*\\.", "", flow_label),
           comparison_technologies = input$techs_comparison,
           precomputed_avstrax     = precomputed_data

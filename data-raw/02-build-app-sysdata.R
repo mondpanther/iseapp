@@ -45,6 +45,7 @@ firm_sector_groups <- firm_lookup |>
   lapply(function(df) as.list(setNames(df$firm, df$firm)))
 
 firm_grouped_choices <- c(
+  list("Filter Options" = list("No firm filter" = "No firm filter")),
   list("Sector Groups" = as.list(setNames(firm_sector_values, firm_sector_values))),
   firm_sector_groups
 )

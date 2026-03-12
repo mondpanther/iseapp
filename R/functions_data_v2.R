@@ -68,7 +68,7 @@ build_firm_clause_v2 <- function(firms, no_filter = TRUE) {
 #' @param firm_clause Character. AND clause for firm filtering (may be empty string)
 #'
 #' @return Character. SQL query string
-sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause) {
+sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause, top_n_ids = 10) {
 
   tech_bool <- build_tech_bool_v2(techs)
 
@@ -155,7 +155,7 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause) {
         AVG(CASE WHEN rnk_c <= CEIL(cnt_c * 0.25) THEN {toflow} END) AS top25_bin_mean,
         AVG(CASE WHEN rnk_c <= CEIL(cnt_c * 0.50) THEN {toflow} END) AS top50_bin_mean,
         STRING_AGG(
-          CASE WHEN rnk_c <= 3 THEN appln_id END,
+          CASE WHEN rnk_c <= {top_n_ids} THEN appln_id END,
           ', ' ORDER BY {toflow} DESC
         ) AS top3_ids,
         os.allmean,
@@ -177,7 +177,7 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause) {
         AVG(CASE WHEN rnk <= CEIL(cnt * 0.25) THEN {toflow} END) AS top25_bin_mean,
         AVG(CASE WHEN rnk <= CEIL(cnt * 0.50) THEN {toflow} END) AS top50_bin_mean,
         STRING_AGG(
-          CASE WHEN rnk <= 3 THEN appln_id END,
+          CASE WHEN rnk <= {top_n_ids} THEN appln_id END,
           ', ' ORDER BY {toflow} DESC
         ) AS top3_ids,
         os.allmean,
@@ -204,7 +204,7 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause) {
 #' @param firm_clause Character. AND clause for firm filtering (may be empty string)
 #'
 #' @return Character. SQL query string
-sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm_clause) {
+sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm_clause, top_n_ids = 10) {
 
   filter_clauses <- unlist(tech_filters)
   filter_clauses <- filter_clauses[nchar(trimws(filter_clauses)) > 0]
@@ -326,7 +326,7 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
       AVG(CASE WHEN rnk <= CEIL(cnt * 0.25) THEN {toflow} END)              AS top25_bin_mean,
       AVG(CASE WHEN rnk <= CEIL(cnt * 0.50) THEN {toflow} END)              AS top50_bin_mean,
       STRING_AGG(
-        CASE WHEN rnk <= 3 THEN appln_id END,
+        CASE WHEN rnk <= {top_n_ids} THEN appln_id END,
         ', ' ORDER BY {toflow} DESC
       )                                                                      AS top3_ids,
       os.allmean,
@@ -350,7 +350,7 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
 #' @param techs Character vector. Technology selection from the UI.
 #' @param firm_clause Character. AND clause from build_firm_clause_v2().
 #' @return Character. SQL query string.
-sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause) {
+sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause, top_n_ids = 10) {
 
   tech_bool <- build_tech_bool_v2(techs)
 
@@ -439,7 +439,7 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause) {
         AVG(CASE WHEN rnk_c <= CEIL(cnt_c * 0.25) THEN {toflow} END)              AS top25_bin_mean,
         AVG(CASE WHEN rnk_c <= CEIL(cnt_c * 0.50) THEN {toflow} END)              AS top50_bin_mean,
         STRING_AGG(
-          CASE WHEN rnk_c <= 3 THEN appln_id END,
+          CASE WHEN rnk_c <= {top_n_ids} THEN appln_id END,
           ', ' ORDER BY {toflow} DESC
         )                                                                          AS top3_ids,
         os.allmean,
@@ -461,7 +461,7 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause) {
         AVG(CASE WHEN rnk <= CEIL(cnt * 0.25) THEN {toflow} END)                  AS top25_bin_mean,
         AVG(CASE WHEN rnk <= CEIL(cnt * 0.50) THEN {toflow} END)                  AS top50_bin_mean,
         STRING_AGG(
-          CASE WHEN rnk <= 3 THEN appln_id END,
+          CASE WHEN rnk <= {top_n_ids} THEN appln_id END,
           ', ' ORDER BY {toflow} DESC
         )                                                                          AS top3_ids,
         os.allmean,
@@ -488,7 +488,7 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause) {
 #' @param tech_filters Named list from build_tech_filter_v2().
 #' @param firm_clause Character. AND clause from build_firm_clause_v2().
 #' @return Character. SQL query string.
-sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_clause) {
+sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_clause, top_n_ids = 10) {
 
   filter_clauses <- unlist(tech_filters)
   filter_clauses <- filter_clauses[nchar(trimws(filter_clauses)) > 0]
@@ -609,7 +609,7 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
       AVG(CASE WHEN rnk <= CEIL(cnt * 0.25) THEN {toflow} END)              AS top25_bin_mean,
       AVG(CASE WHEN rnk <= CEIL(cnt * 0.50) THEN {toflow} END)              AS top50_bin_mean,
       STRING_AGG(
-        CASE WHEN rnk <= 3 THEN appln_id END,
+        CASE WHEN rnk <= {top_n_ids} THEN appln_id END,
         ', ' ORDER BY {toflow} DESC
       )                                                                      AS top3_ids,
       os.allmean,

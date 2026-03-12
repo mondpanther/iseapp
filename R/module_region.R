@@ -24,21 +24,13 @@ region_module_sidebar <- function(id) {
       ),
       shiny::div(
         class = "side_input",
-        shiny::checkboxInput(
-          ns("no_firm_filter"),
-          "No firm filter (all patents)",
-          value = TRUE
-        ),
-        shiny::conditionalPanel(
-          condition = paste0("!input['", ns("no_firm_filter"), "']"),
-          shiny::selectizeInput(
-            inputId = ns("firm"),
-            label = "Firm or Sector Group",
-            choices = firm_grouped_choices,
-            selected = NULL,
-            multiple = TRUE,
-            options = list(placeholder = 'Choose firms or sector groups...')
-          )
+        shiny::selectizeInput(
+          inputId = ns("firm"),
+          label = "Firm or Sector Group",
+          choices = firm_grouped_choices,
+          selected = "No firm filter",
+          multiple = TRUE,
+          options = list(placeholder = 'Choose firms or sector groups...')
         )
       ),
       shiny::div(
@@ -88,10 +80,10 @@ region_module_sidebar <- function(id) {
       ),
       shiny::div(
         class = "side_input",
-        shiny::checkboxInput(
-          ns("show_top3_ids_region"),
-          "Show top patent IDs",
-          value = TRUE
+        shiny::numericInput(
+          ns("top_n_ids_region"),
+          "Number of Top Patent IDs shown",
+          value = 10, min = 0, max = 50
         )
       )
     ),
@@ -184,17 +176,22 @@ region_module_ui <- function(id) {
 
       bslib::nav_panel(
         "Returns by Region",
-        shiny::div(
-          ggiraph::girafeOutput(ns("avstrax_plot2_region"), width = "100%", height = "auto"),
-          plot_download_buttons(ns, "avstrax_plot2_region")
-        )
-      ),
-
-      bslib::nav_panel(
-        "UK Map",
-        shiny::div(
-          leaflet::leafletOutput(ns("uk_regions_map"), width = "100%", height = "500px"),
-          map_download_buttons(ns, "uk_regions_map")
+        bslib::navset_pill_list(
+          widths = c(2, 10),
+          bslib::nav_panel(
+            "Bar Chart",
+            shiny::div(
+              ggiraph::girafeOutput(ns("avstrax_plot2_region"), width = "100%", height = "auto"),
+              plot_download_buttons(ns, "avstrax_plot2_region")
+            )
+          ),
+          bslib::nav_panel(
+            "UK Map",
+            shiny::div(
+              leaflet::leafletOutput(ns("uk_regions_map"), width = "100%", height = "500px"),
+              map_download_buttons(ns, "uk_regions_map")
+            )
+          )
         )
       ),
 
@@ -203,7 +200,7 @@ region_module_ui <- function(id) {
         bslib::navset_pill_list(
           widths = c(2, 10),
           bslib::nav_panel(
-            "RTA by Region",
+            "Bar Chart",
             shiny::div(
               ggiraph::girafeOutput(ns("avstrax_plot2_region_rta"), width = "100%", height = "auto"),
               plot_download_buttons(ns, "avstrax_plot2_region_rta")
@@ -266,6 +263,15 @@ region_module_server <- function(id, parent_session, con) {
         }
       })
 
+      # When "No firm filter" is selected alongside other firms, drop "No firm filter"
+      shiny::observeEvent(input$firm, {
+        sel <- input$firm
+        if ("No firm filter" %in% sel && length(sel) > 1) {
+          new_sel <- setdiff(sel, "No firm filter")
+          shiny::updateSelectizeInput(session, "firm", selected = new_sel)
+        }
+      })
+
       # Update URL when subtab changes
       shiny::observeEvent(input$inner_tabs, {
         query <- shiny::parseQueryString(parent_session$clientData$url_search)
@@ -278,18 +284,17 @@ region_module_server <- function(id, parent_session, con) {
       }, ignoreInit = TRUE)
 
       fallback_by_region <- shiny::reactive({
-        shiny::req(input$toflow_region, input$region, input$techs_region,
-                   !is.null(input$no_firm_filter))
+        shiny::req(input$toflow_region, input$region, input$techs_region)
 
         toflow           <- input$toflow_region
-        no_firm_filter   <- input$no_firm_filter
-        selected_firms   <- expand_firm_selection(input$firm)
+        no_firm_filter   <- "No firm filter" %in% input$firm || length(input$firm) == 0
+        selected_firms   <- expand_firm_selection(setdiff(input$firm, "No firm filter"))
         selected_regions <- expand_region_selection(input$region)
         region_sql       <- paste0("'", selected_regions, "'", collapse = ", ")
 
         firm_clause <- build_firm_clause_v2(selected_firms, no_filter = no_firm_filter)
 
-        out <- DBI::dbGetQuery(con, sql_region_combined_v2(toflow, region_sql, input$techs_region, firm_clause))
+        out <- DBI::dbGetQuery(con, sql_region_combined_v2(toflow, region_sql, input$techs_region, firm_clause, top_n_ids = input$top_n_ids_region))
 
         if (nrow(out) == 0) return(NULL)
 
@@ -335,15 +340,14 @@ region_module_server <- function(id, parent_session, con) {
         out
 
       }) |> shiny::bindCache(input$toflow_region, input$region, input$techs_region,
-                             input$no_firm_filter, sort(input$firm))
+                             sort(input$firm))
 
       fallback_by_tech_region <- shiny::reactive({
-        shiny::req(input$toflow_region, input$region, input$tech_categories_plot1_region,
-                   !is.null(input$no_firm_filter))
+        shiny::req(input$toflow_region, input$region, input$tech_categories_plot1_region)
 
         toflow             <- input$toflow_region
-        no_firm_filter     <- input$no_firm_filter
-        selected_firms     <- expand_firm_selection(input$firm)
+        no_firm_filter     <- "No firm filter" %in% input$firm || length(input$firm) == 0
+        selected_firms     <- expand_firm_selection(setdiff(input$firm, "No firm filter"))
         selected_regions   <- expand_region_selection(input$region)
         region_sql         <- paste0("'", selected_regions, "'", collapse = ", ")
 
@@ -353,7 +357,7 @@ region_module_server <- function(id, parent_session, con) {
 
         use_tech_group_labels <- length(tech_filters) == 1 && names(tech_filters) == "All"
 
-        out <- DBI::dbGetQuery(con, sql_region_tech_combined_v2(toflow, region_sql, tech_filters, firm_clause))
+        out <- DBI::dbGetQuery(con, sql_region_tech_combined_v2(toflow, region_sql, tech_filters, firm_clause, top_n_ids = input$top_n_ids_region))
 
         if (nrow(out) == 0) return(NULL)
 
@@ -386,13 +390,13 @@ region_module_server <- function(id, parent_session, con) {
         out
 
       }) |> shiny::bindCache(input$toflow_region, input$region, input$tech_categories_plot1_region,
-                             input$no_firm_filter, sort(input$firm))
+                             sort(input$firm))
       # ===== RENDER OUTPUTS =====
       
       # Plot 1: Returns by Technology
       output$avstrax_plot1_region <- ggiraph::renderGirafe({
         shiny::req(input$region, input$toflow_region, input$tech_categories_plot1_region,
-                  input$widthscale_region, input$display_mode_region, !is.null(input$show_top3_ids_region))
+                  input$widthscale_region, input$display_mode_region, !is.null(input$top_n_ids_region))
 
         flow_label <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow_region]
         pdata      <- fallback_by_tech_region()
@@ -405,7 +409,7 @@ region_module_server <- function(id, parent_session, con) {
           colorings        = colorings,
           widthscale       = input$widthscale_region,
           display_mode     = input$display_mode_region,
-          show_top3_ids    = input$show_top3_ids_region,
+          top_n_ids        = input$top_n_ids_region,
           plot_title       = sub("^[^.]*\\.", "", flow_label),
           precomputed_data = pdata
         )
@@ -424,7 +428,7 @@ region_module_server <- function(id, parent_session, con) {
         shiny::req(input$region, input$toflow_region, input$techs_region,
                   input$topn_region, input$mininno_region,
                   input$widthscale_region, input$display_mode_region,
-                  !is.null(input$show_top3_ids_region))
+                  !is.null(input$top_n_ids_region))
 
         flow_label       <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow_region]
         precomputed_data <- fallback_by_region()
@@ -440,7 +444,7 @@ region_module_server <- function(id, parent_session, con) {
           mininno                 = input$mininno_region,
           widthscale              = input$widthscale_region,
           display_mode            = input$display_mode_region,
-          show_top3_ids           = input$show_top3_ids_region,
+          top_n_ids               = input$top_n_ids_region,
           x_label                 = "Region",
           plot_title              = sub("^[^.]*\\.", "", flow_label),
           comparison_technologies = input$techs_comparison_region,

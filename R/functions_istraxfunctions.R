@@ -286,7 +286,7 @@ compute_avstrax <- function(data, istrax_var, classes, colorings=NULL) {
 #' @param colorings Named list mapping technology types to categories
 #' @param widthscale Bar width scale: "log" or "proportional"
 #' @param display_mode Display mode: "confidence" or "quartiles"
-#' @param show_top3_ids Whether to show top patent IDs in tooltips
+#' @param top_n_ids Number of top patent IDs to show in tooltips
 #' @param plot_title Chart title
 #' @param precomputed_data Optional pre-computed aggregated data
 #' @return A highchart object
@@ -299,7 +299,7 @@ plot_avstrax_by_country_hc <- function(
   colorings = NULL,
   widthscale = "log",
   display_mode = "confidence",
-  show_top3_ids = FALSE,
+  top_n_ids = 10,
   plot_title = "Spillover returns",
   precomputed_data = NULL
 ) {
@@ -381,7 +381,7 @@ plot_avstrax_by_country_hc <- function(
   avstrax <- avstrax |>
     dplyr::mutate(
       color = custom_colors[greenclass],
-      tooltip_text = if (show_top3_ids) {
+      tooltip_text = if (top_n_ids > 0) {
         paste0(
           "<b>", technology, "</b><br/>",
           value_label, "<br/>",
@@ -510,7 +510,7 @@ plot_avstrax_by_country_hc <- function(
   }
   
   # Add click events for patent IDs if enabled
-  if (show_top3_ids) {
+  if (top_n_ids > 0) {
     hc <- hc |>
       highcharter::hc_plotOptions(
         series = list(
@@ -548,7 +548,7 @@ plot_avstrax_by_country <- function(
   colorings=NULL,
   widthscale="log",
   display_mode="confidence",
-  show_top3_ids=FALSE,
+  top_n_ids=10,
   width_svg=10,
   height_svg=6,
   plot_title="Spillover returns",
@@ -639,7 +639,7 @@ plot_avstrax_by_country <- function(
 
   # Create the plot
   # plot_start <- Sys.time()
-  if (show_top3_ids) {
+  if (top_n_ids > 0) {
     p <- ggplot2::ggplot(avstrax) +
       ggiraph::geom_rect_interactive(
         ggplot2::aes(
@@ -937,7 +937,7 @@ compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
 plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
                                        technologies, toflow, custom_colors,topn=20,mininno=5,widthscale="log",
                                        display_mode="confidence",
-                                       show_top3_ids=FALSE,
+                                       top_n_ids=10,
                                        width_svg=10,
                                        height_svg=6,
                                        plot_title="Spillover returns",
@@ -1157,7 +1157,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
   comp_color <- "#888888"  # Grey for comparison
   comp_alpha <- 0.6  # Fainter comparison bars
 
-  # Use interactive bars if show_top3_ids is enabled
+  # Use interactive bars if top_n_ids is enabled
   # Add group column for legend
   avstrax$group <- "Main"
   if (has_comp_data) {
@@ -1169,7 +1169,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
     }
   }
 
-  if (show_top3_ids) {
+  if (top_n_ids > 0) {
     p <- ggplot() +
       geom_rect_interactive(data = avstrax,
                             aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
@@ -1327,7 +1327,7 @@ build_espacenet_search <- function(id_strings) {
 #' @param mininno Minimum innovation count threshold (for innos)
 #' @param minallinnos Minimum all innovation count threshold (for Allinnos)
 #' @param widthscale "log" or "proportional" for bar width scaling
-#' @param show_top3_ids Whether to show interactive top patent IDs
+#' @param top_n_ids Number of top patent IDs to show in tooltips
 #' @param width_svg SVG width in inches
 #' @param height_svg SVG height in inches
 #' @param plot_title Title for the plot
@@ -1336,7 +1336,7 @@ build_espacenet_search <- function(id_strings) {
 #' @return A girafe object
 plot_avstrax_rta <- function(pdata, classes,
                              technologies, toflow, custom_colors, topn = 20, bottomn = 0, mininno = 5, minallinnos = 0, widthscale = "log",
-                             show_top3_ids = FALSE,
+                             top_n_ids = 10,
                              width_svg = 10,
                              height_svg = 6,
                              plot_title = "Revealed Technological Advantage (RTA)",
@@ -1488,7 +1488,7 @@ plot_avstrax_rta <- function(pdata, classes,
   # Color based on RTA value (above/below 1)
   main_color <- "#e74c3c"  # Red for RTA plot to distinguish from mean plot
 
-  if (show_top3_ids) {
+  if (top_n_ids > 0) {
     p <- ggplot() +
       geom_rect_interactive(data = avstrax,
                             aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
@@ -1500,9 +1500,12 @@ plot_avstrax_rta <- function(pdata, classes,
                             fill = main_color)
   } else {
     p <- ggplot() +
-      geom_rect(data = avstrax,
-                aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
-                fill = main_color)
+      geom_rect_interactive(data = avstrax,
+                            aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax,
+                                data_id = country_name,
+                                tooltip = paste0(country_name, "\n", value_label,
+                                                 "\nInnovations: ", scales::comma(innos))),
+                            fill = main_color)
   }
 
   p <- p +
@@ -1532,7 +1535,7 @@ plot_avstrax_rta <- function(pdata, classes,
     coord_flip()
 
   # Add subtitle and caption
-  subtitle_text <- paste0(as.character(innos), " Innovations | RTA > 1 = Specialization advantage")
+  subtitle_text <- paste0(as.character(innos), " Innovations")
 
   p <- p + labs(subtitle = subtitle_text,
                 caption = "© 2025 Innovation Strategy Explorer") +
