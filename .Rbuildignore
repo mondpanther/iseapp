@@ -3,3 +3,5 @@
 ^data-raw$
 ^LICENSE\.md$
 [.]sass_cache_keys$
+^.*\.Rproj$
+^\.Rproj\.user$

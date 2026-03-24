@@ -16,17 +16,19 @@ library(dplyr)
 library(ggplot2)
 library(tidyr)
 library(scales)
+library(chromote)
 ```
 
 # How this works
 
-The [Innovation Strategy Explorer](https://019c97ee-12b9-7776-d9aa-ff62518c2622.share.connect.posit.cloud)
+The [Innovation Strategy Explorer](https://mondpanther-iseapp2.share.connect.posit.cloud)
 app uses Shiny URL bookmarking. Every filter state is encoded in the URL query
 string, so you can link directly to a specific view. This notebook:
 
-1. Generates a **hyperlink for every sector group** that pre-sets the app filters
-2. You visit each link and click the **"Data (CSV)"** download button
-3. The notebook reads all downloaded CSVs and combines them into a single bar chart
+1. Generates a **bookmarked URL for every sector group** that pre-sets the app filters
+2. Uses `chromote` (headless Chrome) to visit each URL and **automatically download**
+   the CSV via the app's download handler
+3. Reads all downloaded CSVs and combines them into a single bar chart
 
 ---
 
@@ -80,7 +82,7 @@ For a single-sector query with `tech_categories = "All innovations"`, the CSV ha
 ```{r build_urls}
 # ── Configuration ──────────────────────────────────────────────────────────
 # Set the base URL of the deployed app
-BASE_URL <- "https://019c97ee-12b9-7776-d9aa-ff62518c2622.share.connect.posit.cloud"
+BASE_URL <- "https://mondpanther-iseapp2.share.connect.posit.cloud"
 
 # The sector groups available in the app (from firm_lookup.parquet → firm_sector)
 # Run this once with database access to extract them, or copy from the app's
@@ -107,19 +109,54 @@ sector_groups <- c(
 )
 
 # ── Build one URL per sector ──────────────────────────────────────────────
-build_ise_url <- function(base_url, sector, toflow = "is_global") {
+build_ise_url <- function(base_url, sector, toflow = "ev_emdenocn",
+                          country = "High income countries") {
   # JSON-encode values the way Shiny bookmarking does
-  firm_json   <- paste0('["', sector, '"]')
   params <- paste0(
     "?_inputs_",
+    "&globe-render_map=0",
+    "&country-sidebar=true",
+    "&region-sidebar=true",
+    "&globe-sidebar=true",
     "&navbar_page=",                  URLencode('"Country Explorer"', reserved = TRUE),
-    "&country-country=",              URLencode('["All countries"]', reserved = TRUE),
-    "&country-firm=",                 URLencode(firm_json, reserved = TRUE),
-    "&country-toflow=",               URLencode(paste0('"', toflow, '"'), reserved = TRUE),
-    "&country-tech_categories_plot1=", URLencode('["All innovations"]', reserved = TRUE),
     "&country-inner_tabs=",           URLencode('"Returns by Technology"', reserved = TRUE),
+    "&region-inner_tabs=",            URLencode('"Returns by Technology"', reserved = TRUE),
+    "&country-country=",              URLencode(paste0('"', country, '"'), reserved = TRUE),
+    "&country-firm=",                 URLencode(paste0('"', sector, '"'), reserved = TRUE),
+    "&country-toflow=",               URLencode(paste0('"', toflow, '"'), reserved = TRUE),
+    "&country-tech_categories_plot1=", URLencode('"All innovations"', reserved = TRUE),
+    "&country-techs=",               URLencode('"Green Technology"', reserved = TRUE),
+    "&region-region=",                URLencode('"All UK regions"', reserved = TRUE),
+    "&region-firm=null",
+    "&region-toflow_region=",         URLencode('"is_global"', reserved = TRUE),
+    "&region-tech_categories_plot1_region=", URLencode('["Green Technology","AI"]', reserved = TRUE),
+    "&region-techs_region=",          URLencode('"Green Technology"', reserved = TRUE),
+    "&region-techs_comparison_region=null",
+    "&globe-sce_country=null",
+    "&globe-sce_tech_display=null",
+    "&globe-sample_size=",            URLencode('""', reserved = TRUE),
+    "&globe-max_wave=1",
     "&country-widthscale=",           URLencode('"log"', reserved = TRUE),
-    "&country-display_mode=",         URLencode('"confidence"', reserved = TRUE)
+    "&country-display_mode=",         URLencode('"confidence"', reserved = TRUE),
+    "&region-widthscale_region=",     URLencode('"log"', reserved = TRUE),
+    "&region-display_mode_region=",   URLencode('"confidence"', reserved = TRUE),
+    "&country-top_n_ids=10",
+    "&country-topn=20",
+    "&country-mininno=5",
+    "&country-topn_rta=20",
+    "&country-bottomn_rta=0",
+    "&country-mininno_rta=50",
+    "&country-minallinnos_rta=100",
+    "&region-top_n_ids_region=10",
+    "&region-topn_region=12",
+    "&region-mininno_region=100",
+    "&region-topn_rta_region=12",
+    "&region-bottomn_rta_region=0",
+    "&region-mininno_rta_region=50",
+    "&region-minallinnos_rta_region=100",
+    "&waiter_shown=true",
+    "&waiter_hidden=true",
+    "&country-avstrax_plot1_hovered=null"
   )
   paste0(base_url, params)
 }
@@ -130,52 +167,58 @@ sector_urls <- setNames(
 )
 ```
 
-## Clickable links
-
-Click each link below to open the app pre-filtered for that sector group.
-Then click **"Data (CSV)"** to download the bar chart data.
-
-```{r print_links, results='asis'}
-for (sector in sector_groups) {
-  cat(sprintf("- [%s](%s)\n", sector, sector_urls[sector]))
-}
-```
-
-> **Tip:** Save each downloaded CSV with the sector name, e.g.
-> `Aerospace & Defence.csv`, `Alternative Energy.csv`, etc.
-> Place them all in a single folder (e.g. `downloads/`).
-
 ---
 
-# 4. Read downloaded CSVs
+# 4. Fetch CSV data in memory
 
-```{r read_csvs}
-# ── Point this at your download folder ────────────────────────────────────
-csv_folder <- "downloads"
+This section uses `chromote` (headless Chrome) to open each sector's
+bookmarked URL, wait for the Shiny app to compute, then uses the browser's
+`fetch()` API to read the CSV download endpoint directly into R — no files
+are written to disk.
 
-if (!dir.exists(csv_folder)) {
-  message(
-    "Folder '", csv_folder, "' not found. ",
-    "Create it, download all CSVs into it, then re-knit."
-  )
-}
+```{r fetch_csvs, results='asis'}
+WAIT_APP <- 15   # seconds to wait for the Shiny app to render
 
-csv_files <- list.files(csv_folder, pattern = "\\.csv$", full.names = TRUE)
-cat("Found", length(csv_files), "CSV files\n")
-```
+# Launch a headless Chrome session
+b <- ChromoteSession$new()
 
-```{r parse_csvs}
 all_sectors <- list()
 
-for (f in csv_files) {
-  df <- read.csv(f, stringsAsFactors = FALSE)
+for (sector in sector_groups) {
+  cat("- **", sector, "** … ", sep = "")
 
-  # Derive sector name from the filename
-  sector_name <- tools::file_path_sans_ext(basename(f))
-  # Clean up common filename patterns (e.g. "returns_by_technology_2026-03-24")
-  sector_name <- gsub("_\\d{4}-\\d{2}-\\d{2}$", "", sector_name)
+  # Navigate to the bookmarked URL for this sector
+  b$Page$navigate(url = sector_urls[[sector]], wait_ = TRUE)
+  Sys.sleep(WAIT_APP)
 
-  # The CSV may have multiple rows (one per technology).
+  # Get the download button's href (set dynamically by Shiny once the
+  # session is established and the reactive data has been computed)
+  href_res <- b$Runtime$evaluate(
+    'var el = document.getElementById("country-dl_csv_avstrax_plot1");
+     el ? el.href : null;'
+  )
+  href <- href_res$result$value
+
+  if (is.null(href)) {
+    cat("**FAILED** (download link not found)\n")
+    next
+  }
+
+  # Use the browser's own fetch() to retrieve the CSV text — this
+  # automatically carries the Shiny session cookies / headers
+  csv_res <- b$Runtime$evaluate(
+    sprintf('fetch("%s").then(r => r.text())', href),
+    awaitPromise = TRUE
+  )
+  csv_text <- csv_res$result$value
+
+  if (is.null(csv_text) || nchar(csv_text) == 0) {
+    cat("**FAILED** (empty response)\n")
+    next
+  }
+
+  df <- read.csv(text = csv_text, stringsAsFactors = FALSE)
+
   # For the cross-sector comparison we want the "All innovations" row,
   # or if there is only one row, use that.
   if ("technology" %in% names(df)) {
@@ -185,14 +228,17 @@ for (f in csv_files) {
     summary_row <- df[1, , drop = FALSE]
   }
 
-  summary_row$sector <- sector_name
-  all_sectors[[sector_name]] <- summary_row
+  summary_row$sector <- sector
+  all_sectors[[sector]] <- summary_row
+  cat("OK\n")
 }
+
+tryCatch(b$close(), error = function(e) NULL)
 
 combined_df <- bind_rows(all_sectors)
 
 if (nrow(combined_df) > 0) {
-  cat("Combined", nrow(combined_df), "sectors\n\n")
+  cat("\nCombined **", nrow(combined_df), "** sectors\n\n", sep = "")
   knitr::kable(
     combined_df |>
       select(sector, mean, innos, sem, q1, q2, q3) |>
@@ -201,7 +247,7 @@ if (nrow(combined_df) > 0) {
     caption = "Marginal Global Returns by Sector Group"
   )
 } else {
-  message("No data yet — download the CSVs first.")
+  message("No data — check the log above for errors.")
 }
 ```
 
@@ -259,7 +305,7 @@ if (nrow(combined_df) > 0) {
 
   print(p)
 } else {
-  message("No data to plot — download the CSVs first.")
+  message("No data to plot — check the download log above for errors.")
 }
 ```
 
