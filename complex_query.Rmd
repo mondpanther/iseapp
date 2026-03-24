@@ -1,0 +1,301 @@
+---
+title: "Cross-Sector Innovation Returns Analysis"
+subtitle: "Building a combined sector chart from Innovation Strategy Explorer CSV downloads"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: cerulean
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 14, fig.height = 8)
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(scales)
+```
+
+# How this works
+
+The [Innovation Strategy Explorer](https://019c97ee-12b9-7776-d9aa-ff62518c2622.share.connect.posit.cloud)
+app uses Shiny URL bookmarking. Every filter state is encoded in the URL query
+string, so you can link directly to a specific view. This notebook:
+
+1. Generates a **hyperlink for every sector group** that pre-sets the app filters
+2. You visit each link and click the **"Data (CSV)"** download button
+3. The notebook reads all downloaded CSVs and combines them into a single bar chart
+
+---
+
+# 1. URL parameter format
+
+The app encodes inputs as Shiny bookmark parameters. The relevant ones are:
+
+| Parameter | Description | Example value |
+|-----------|-------------|---------------|
+| `_inputs_` | Required marker — always first | *(empty)* |
+| `navbar_page` | Main tab | `"Country Explorer"` |
+| `country-country` | Country selection | `["All countries"]` |
+| `country-firm` | Firm or sector group | `["Aerospace %26 Defence"]` |
+| `country-toflow` | Return flow measure | `"is_global"` |
+| `country-tech_categories_plot1` | Technologies (bar chart) | `["All innovations"]` |
+| `country-inner_tabs` | Which sub-tab | `"Returns by Technology"` |
+| `country-widthscale` | Bar width mode | `"log"` |
+| `country-display_mode` | Error bar style | `"confidence"` |
+
+Values are JSON-encoded, with special characters URL-encoded (`&` → `%26`, space → `%20`).
+
+---
+
+# 2. CSV download format
+
+When you click **"Data (CSV)"** on the "Returns by Technology" tab, the downloaded
+file contains one row per technology bar with these columns:
+
+| Column | Description |
+|--------|-------------|
+| `technology` | Technology label (e.g. "AI", "Green Technology", "All innovations") |
+| `mean` | Average return (in %, if `is_*` or `av_*` flow) |
+| `innos` | Number of innovations (patents) |
+| `sem` | Standard error of the mean |
+| `q1`, `q2`, `q3` | 25th, 50th, 75th percentile |
+| `top25_bin_mean` | Mean of top 25% of innovations |
+| `top50_bin_mean` | Mean of top 50% of innovations |
+| `allmean` | Overall mean across all innovations (the dashed reference line) |
+| `allinnos` | Total innovation count |
+| `top3_ids` | Top patent application IDs |
+| `greenclass` | Technology colour category |
+| `value_label` | Formatted display string (e.g. "4.2%") |
+
+For a single-sector query with `tech_categories = "All innovations"`, the CSV has
+**one row** — that row's `mean` is the sector's average return.
+
+---
+
+# 3. Generate hyperlinks for all sectors
+
+```{r build_urls}
+# ── Configuration ──────────────────────────────────────────────────────────
+# Set the base URL of the deployed app
+BASE_URL <- "https://019c97ee-12b9-7776-d9aa-ff62518c2622.share.connect.posit.cloud"
+
+# The sector groups available in the app (from firm_lookup.parquet → firm_sector)
+# Run this once with database access to extract them, or copy from the app's
+# "Firm or Sector Group" dropdown under "Sector Groups":
+sector_groups <- c(
+  "Aerospace & Defence",
+  "Alternative Energy",
+  "Automobiles & Parts",
+  "Chemicals",
+  "Construction & Materials",
+  "Electronic & Electrical Equipment",
+  "Fixed Line Telecommunications",
+  "Food & Drug Retailers",
+  "General Industrials",
+  "Health Care Equipment & Services",
+  "Industrial Engineering",
+  "Industrial Metals & Mining",
+  "Leisure Goods",
+  "Oil & Gas Producers",
+  "Personal Goods",
+  "Software & Computer Services",
+  "Technology Hardware & Equipment",
+  "Travel & Leisure"
+)
+
+# ── Build one URL per sector ──────────────────────────────────────────────
+build_ise_url <- function(base_url, sector, toflow = "is_global") {
+  # JSON-encode values the way Shiny bookmarking does
+  firm_json   <- paste0('["', sector, '"]')
+  params <- paste0(
+    "?_inputs_",
+    "&navbar_page=",                  URLencode('"Country Explorer"', reserved = TRUE),
+    "&country-country=",              URLencode('["All countries"]', reserved = TRUE),
+    "&country-firm=",                 URLencode(firm_json, reserved = TRUE),
+    "&country-toflow=",               URLencode(paste0('"', toflow, '"'), reserved = TRUE),
+    "&country-tech_categories_plot1=", URLencode('["All innovations"]', reserved = TRUE),
+    "&country-inner_tabs=",           URLencode('"Returns by Technology"', reserved = TRUE),
+    "&country-widthscale=",           URLencode('"log"', reserved = TRUE),
+    "&country-display_mode=",         URLencode('"confidence"', reserved = TRUE)
+  )
+  paste0(base_url, params)
+}
+
+sector_urls <- setNames(
+  sapply(sector_groups, function(s) build_ise_url(BASE_URL, s)),
+  sector_groups
+)
+```
+
+## Clickable links
+
+Click each link below to open the app pre-filtered for that sector group.
+Then click **"Data (CSV)"** to download the bar chart data.
+
+```{r print_links, results='asis'}
+for (sector in sector_groups) {
+  cat(sprintf("- [%s](%s)\n", sector, sector_urls[sector]))
+}
+```
+
+> **Tip:** Save each downloaded CSV with the sector name, e.g.
+> `Aerospace & Defence.csv`, `Alternative Energy.csv`, etc.
+> Place them all in a single folder (e.g. `downloads/`).
+
+---
+
+# 4. Read downloaded CSVs
+
+```{r read_csvs}
+# ── Point this at your download folder ────────────────────────────────────
+csv_folder <- "downloads"
+
+if (!dir.exists(csv_folder)) {
+  message(
+    "Folder '", csv_folder, "' not found. ",
+    "Create it, download all CSVs into it, then re-knit."
+  )
+}
+
+csv_files <- list.files(csv_folder, pattern = "\\.csv$", full.names = TRUE)
+cat("Found", length(csv_files), "CSV files\n")
+```
+
+```{r parse_csvs}
+all_sectors <- list()
+
+for (f in csv_files) {
+  df <- read.csv(f, stringsAsFactors = FALSE)
+
+  # Derive sector name from the filename
+  sector_name <- tools::file_path_sans_ext(basename(f))
+  # Clean up common filename patterns (e.g. "returns_by_technology_2026-03-24")
+  sector_name <- gsub("_\\d{4}-\\d{2}-\\d{2}$", "", sector_name)
+
+  # The CSV may have multiple rows (one per technology).
+  # For the cross-sector comparison we want the "All innovations" row,
+  # or if there is only one row, use that.
+  if ("technology" %in% names(df)) {
+    summary_row <- df |> filter(technology == "All innovations")
+    if (nrow(summary_row) == 0) summary_row <- df[1, , drop = FALSE]
+  } else {
+    summary_row <- df[1, , drop = FALSE]
+  }
+
+  summary_row$sector <- sector_name
+  all_sectors[[sector_name]] <- summary_row
+}
+
+combined_df <- bind_rows(all_sectors)
+
+if (nrow(combined_df) > 0) {
+  cat("Combined", nrow(combined_df), "sectors\n\n")
+  knitr::kable(
+    combined_df |>
+      select(sector, mean, innos, sem, q1, q2, q3) |>
+      arrange(desc(mean)),
+    digits = 3,
+    caption = "Marginal Global Returns by Sector Group"
+  )
+} else {
+  message("No data yet — download the CSVs first.")
+}
+```
+
+---
+
+# 5. Combined bar chart
+
+```{r combined_plot, fig.height=10, fig.width=12}
+if (nrow(combined_df) > 0) {
+  # Overall mean across all sectors (use the allmean from any row — it's the
+  # global average that the app shows as its dashed reference line)
+  global_mean <- if ("allmean" %in% names(combined_df)) {
+    mean(combined_df$allmean, na.rm = TRUE)
+  } else {
+    NA
+  }
+
+  p <- ggplot(combined_df, aes(x = reorder(sector, mean), y = mean)) +
+    geom_col(aes(fill = mean), width = 0.7) +
+    geom_errorbar(
+      aes(ymin = pmax(mean - 1.96 * sem, 0), ymax = mean + 1.96 * sem),
+      width = 0.25, linewidth = 0.4, alpha = 0.6
+    ) +
+    scale_fill_viridis_c(option = "C", name = "Return (%)") +
+    coord_flip() +
+    labs(
+      title = "Marginal Global Returns by Firm Sector Group",
+      subtitle = paste0("All innovations, All countries | ",
+                        nrow(combined_df), " sectors | ",
+                        scales::comma(sum(combined_df$innos, na.rm = TRUE)),
+                        " total innovations"),
+      x = NULL,
+      y = "Return in %",
+      caption = paste0("Source: Innovation Strategy Explorer CSV downloads\n",
+                       "Error bars = 95% confidence intervals")
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "right",
+      plot.title    = element_text(face = "bold", size = 14),
+      axis.text.y   = element_text(size = 10),
+      plot.caption  = element_text(hjust = 1, size = 9, color = "gray50")
+    )
+
+  # Add the app's reference line if available
+  if (!is.na(global_mean)) {
+    p <- p +
+      geom_hline(yintercept = global_mean, linetype = "dashed",
+                 color = "black", linewidth = 0.8) +
+      annotate("text", y = global_mean,
+               x = nrow(combined_df) + 0.4,
+               label = "Average", angle = -90,
+               vjust = 1.5, size = 3.5, color = "black")
+  }
+
+  print(p)
+} else {
+  message("No data to plot — download the CSVs first.")
+}
+```
+
+# 6. Innovation volume comparison
+
+```{r lollipop, fig.height=10, fig.width=12}
+if (nrow(combined_df) > 0) {
+  ggplot(combined_df, aes(x = reorder(sector, mean), y = mean)) +
+    geom_point(aes(size = innos, color = mean), alpha = 0.8) +
+    geom_segment(aes(xend = reorder(sector, mean), y = 0, yend = mean),
+                 color = "grey60", linewidth = 0.3) +
+    scale_size_continuous(name = "Innovations", labels = scales::comma,
+                          range = c(2, 12)) +
+    scale_color_viridis_c(option = "C", name = "Return (%)") +
+    coord_flip() +
+    labs(
+      title = "Returns vs Innovation Volume by Sector",
+      subtitle = "Bubble size proportional to number of innovations",
+      x = NULL,
+      y = "Marginal Global Return (%)"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(face = "bold", size = 14))
+}
+```
+
+# 7. Export combined dataset
+
+```{r export}
+if (nrow(combined_df) > 0) {
+  out_file <- "all_sectors_combined.csv"
+  write.csv(
+    combined_df |> select(sector, mean, innos, sem, q1, q2, q3,
+                           top25_bin_mean, top50_bin_mean, allmean, allinnos),
+    out_file, row.names = FALSE
+  )
+  cat("Saved combined data to:", out_file, "\n")
+}
+```

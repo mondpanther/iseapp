@@ -16,3 +16,6 @@ data_raw/big_files/*
 
 inst/extdata/*
 inst/config.yml
+
+.claude/
+.posit/
