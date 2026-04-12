@@ -5,10 +5,19 @@
 #' @keywords internal
 country_module_sidebar <- function(id) {
   ns <- shiny::NS(id)
-  
+
+  # JS conditions for conditional panels based on active inner tab
+  tab_id <- ns("inner_tabs")
+  is_tech    <- sprintf("input['%s'] == 'Value flows by Technology'", tab_id)
+  is_country <- sprintf("input['%s'] == 'Value flows by Country'", tab_id)
+  is_rta     <- sprintf("input['%s'] == 'Revealed Technological Advantage'", tab_id)
+  not_rta    <- sprintf("input['%s'] != 'Revealed Technological Advantage'", tab_id)
+  not_tech   <- sprintf("input['%s'] != 'Value flows by Technology'", tab_id)
+
   shiny::div(
     style = "display: flex; flex-direction: column; gap: 20px;",
-    
+
+    # --- Always visible: Country, Firm ---
     shiny::div(
       shiny::h5("GLOBAL FILTERS", style = "font-weight: 600; margin-bottom: 10px;"),
       shiny::div(
@@ -33,32 +42,43 @@ country_module_sidebar <- function(id) {
           options = list(placeholder = 'Choose firms or sector groups...')
         )
       ),
-      shiny::div(
-        class = "side_input",
-        shiny::selectizeInput(
-          inputId = ns("toflow"),
-          label = "Return flow",
-          choices = toflow_choices,
-          selected = "is_global",
-          multiple = FALSE,
-          width = "400px",
-          options = list(placeholder = 'Choose a return flow...')
+
+      # Return Flow: Tech + Country only
+      shiny::conditionalPanel(
+        condition = not_rta,
+        shiny::div(
+          class = "side_input",
+          shiny::selectizeInput(
+            inputId = ns("toflow"),
+            label = "Return flow",
+            choices = toflow_choices,
+            selected = "is_global",
+            multiple = FALSE,
+            width = "400px",
+            options = list(placeholder = 'Choose a return flow...')
+          )
         )
       ),
-      shiny::div(
-        class = "side_input",
-        shiny::selectizeInput(
-          inputId = ns("tech_categories_plot1"),
-          label = "Technology categories",
-          choices = grouped_techs,
-          selected = c("AI","Green Technology"),
-          multiple = TRUE,
-          width = "200%",
-          options = list(placeholder = 'Choose one or more technology categories...')
+
+      # Technology Categories: Tech only
+      shiny::conditionalPanel(
+        condition = is_tech,
+        shiny::div(
+          class = "side_input",
+          shiny::selectizeInput(
+            inputId = ns("tech_categories_plot1"),
+            label = "Technology categories",
+            choices = grouped_techs,
+            selected = c("AI","Green Technology"),
+            multiple = TRUE,
+            width = "200%",
+            options = list(placeholder = 'Choose one or more technology categories...')
+          )
         )
       )
     ),
-    
+
+    # --- Chart options ---
     shiny::div(
       shiny::h5("CHART OPTIONS", style = "font-weight: 600; margin-bottom: 10px;"),
       shiny::div(
@@ -70,15 +90,21 @@ country_module_sidebar <- function(id) {
           selected = "log"
         )
       ),
-      shiny::div(
-        class = "side_input",
-        shiny::radioButtons(
-          inputId = ns("display_mode"),
-          label = "Display mode",
-          choices = c("Confidence bands" = "confidence", "Returns for the top 25 and top 50 percent" = "quartiles"),
-          selected = "confidence"
+
+      # Display mode: Tech + Country only
+      shiny::conditionalPanel(
+        condition = not_rta,
+        shiny::div(
+          class = "side_input",
+          shiny::radioButtons(
+            inputId = ns("display_mode"),
+            label = "Display mode",
+            choices = c("Confidence bands" = "confidence", "Returns for the top 25 and top 50 percent" = "quartiles"),
+            selected = "confidence"
+          )
         )
       ),
+
       shiny::div(
         class = "side_input",
         shiny::numericInput(
@@ -88,7 +114,10 @@ country_module_sidebar <- function(id) {
         )
       )
     ),
-    shiny::div(
+
+    # --- Country/RTA inputs (not Tech) ---
+    shiny::conditionalPanel(
+      condition = not_tech,
       shiny::div(
         class = "side_input",
         shiny::selectizeInput(
@@ -99,7 +128,12 @@ country_module_sidebar <- function(id) {
           multiple = TRUE,
           options = list(placeholder = 'Choose technologies...')
         )
-      ),
+      )
+    ),
+
+    # Top N countries + Minimum innovations: Country only
+    shiny::conditionalPanel(
+      condition = is_country,
       shiny::div(
         class = "side_input",
         shiny::numericInput(
@@ -121,23 +155,27 @@ country_module_sidebar <- function(id) {
       )
     ),
 
-    shiny::div(
-      shiny::h5("RTA OPTIONS", style = "font-weight: 600; margin-bottom: 10px;"),
+    # --- RTA OPTIONS: RTA only ---
+    shiny::conditionalPanel(
+      condition = is_rta,
       shiny::div(
-        class = "side_input",
-        shiny::numericInput(ns("topn_rta"), "Show top n countries:", value = 20, min = 1, max = 200)
-      ),
-      shiny::div(
-        class = "side_input",
-        shiny::numericInput(ns("bottomn_rta"), "Show bottom n countries:", value = 0, min = 0, max = 200)
-      ),
-      shiny::div(
-        class = "side_input",
-        shiny::numericInput(ns("mininno_rta"), "Innovation count threshold:", value = 50, min = 0, max = 500)
-      ),
-      shiny::div(
-        class = "side_input",
-        shiny::numericInput(ns("minallinnos_rta"), "All innovation threshold:", value = 100, min = 0, max = 5000)
+        shiny::h5("RTA OPTIONS", style = "font-weight: 600; margin-bottom: 10px;"),
+        shiny::div(
+          class = "side_input",
+          shiny::numericInput(ns("topn_rta"), "Show top n countries:", value = 20, min = 1, max = 200)
+        ),
+        shiny::div(
+          class = "side_input",
+          shiny::numericInput(ns("bottomn_rta"), "Show bottom n countries:", value = 0, min = 0, max = 200)
+        ),
+        shiny::div(
+          class = "side_input",
+          shiny::numericInput(ns("mininno_rta"), "Innovation count threshold:", value = 50, min = 0, max = 500)
+        ),
+        shiny::div(
+          class = "side_input",
+          shiny::numericInput(ns("minallinnos_rta"), "All innovation threshold:", value = 100, min = 0, max = 5000)
+        )
       )
     )
   )
@@ -168,7 +206,7 @@ country_module_ui <- function(id) {
       id = ns("inner_tabs"),
 
       bslib::nav_panel(
-        "Returns by Technology",
+        "Value flows by Technology",
         shiny::div(
           ggiraph::girafeOutput(ns("avstrax_plot1"), width = "100%", height = "auto"),
           plot_download_buttons(ns, "avstrax_plot1")
@@ -176,7 +214,7 @@ country_module_ui <- function(id) {
       ),
 
       bslib::nav_panel(
-        "Returns by Country",
+        "Value flows by Country",
         bslib::navset_pill_list(
           widths = c(2, 10),
           bslib::nav_panel(
@@ -197,7 +235,7 @@ country_module_ui <- function(id) {
       ),
 
       bslib::nav_panel(
-        "RTA",
+        "Revealed Technological Advantage",
         bslib::navset_pill_list(
           widths = c(2, 10),
           bslib::nav_panel(

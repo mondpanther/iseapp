@@ -44,7 +44,7 @@ The app encodes inputs as Shiny bookmark parameters. The relevant ones are:
 | `country-firm` | Firm or sector group | `["Aerospace %26 Defence"]` |
 | `country-toflow` | Return flow measure | `"is_global"` |
 | `country-tech_categories_plot1` | Technologies (bar chart) | `["All innovations"]` |
-| `country-inner_tabs` | Which sub-tab | `"Returns by Technology"` |
+| `country-inner_tabs` | Which sub-tab | `"Value flows by Technology"` |
 | `country-widthscale` | Bar width mode | `"log"` |
 | `country-display_mode` | Error bar style | `"confidence"` |
 
@@ -54,7 +54,7 @@ Values are JSON-encoded, with special characters URL-encoded (`&` → `%26`, spa
 
 # 2. CSV download format
 
-When you click **"Data (CSV)"** on the "Returns by Technology" tab, the downloaded
+When you click **"Data (CSV)"** on the "Value flows by Technology" tab, the downloaded
 file contains one row per technology bar with these columns:
 
 | Column | Description |
@@ -119,8 +119,8 @@ build_ise_url <- function(base_url, sector, toflow = "ev_emdenocn",
     "&region-sidebar=true",
     "&globe-sidebar=true",
     "&navbar_page=",                  URLencode('"Country Explorer"', reserved = TRUE),
-    "&country-inner_tabs=",           URLencode('"Returns by Technology"', reserved = TRUE),
-    "&region-inner_tabs=",            URLencode('"Returns by Technology"', reserved = TRUE),
+    "&country-inner_tabs=",           URLencode('"Value flows by Technology"', reserved = TRUE),
+    "&region-inner_tabs=",            URLencode('"Value flows by Technology"', reserved = TRUE),
     "&country-country=",              URLencode(paste0('"', country, '"'), reserved = TRUE),
     "&country-firm=",                 URLencode(paste0('"', sector, '"'), reserved = TRUE),
     "&country-toflow=",               URLencode(paste0('"', toflow, '"'), reserved = TRUE),
