@@ -41,7 +41,7 @@ build_tech_bool_v2 <- function(selected) {
   selected <- setdiff(selected, "All categories")
   if ("All innovations" %in% selected || length(selected) == 0) return("TRUE")
   tech_sql <- paste0("'", selected, "'", collapse = ", ")
-  glue::glue("tl.tech_group IN ({tech_sql})")
+  glue::glue("(tl.tech_group IN ({tech_sql}) OR t.technology IN ({tech_sql}))")
 }
 
 #' Build a SQL firm WHERE clause with table alias (v2)

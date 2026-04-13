@@ -43,30 +43,37 @@ region_module_sidebar <- function(id) {
         )
       ),
 
-      # Return Flow: Tech + Region only
-      shiny::conditionalPanel(
-        condition = not_rta,
+    ),
+
+    # --- Value Flow: Tech + Region only ---
+    shiny::conditionalPanel(
+      condition = not_rta,
+      shiny::div(
+        shiny::h5("VALUE FLOW", style = "font-weight: 600; margin-bottom: 10px;"),
         shiny::div(
           class = "side_input",
           shiny::selectizeInput(
             ns("toflow_region"),
-            "Return Flow:",
+            label = NULL,
             choices  = toflow_choices,
             selected = "is_global",
             multiple = FALSE,
-            options  = list(placeholder = 'Choose a return flow...')
+            options  = list(placeholder = 'Choose a value flow...')
           )
         )
-      ),
+      )
+    ),
 
-      # Technology Categories: Tech only
-      shiny::conditionalPanel(
-        condition = is_tech,
+    # --- Technology Categories: Tech only ---
+    shiny::conditionalPanel(
+      condition = is_tech,
+      shiny::div(
+        shiny::h5("TECHNOLOGY CATEGORIES", style = "font-weight: 600; margin-bottom: 10px;"),
         shiny::div(
           class = "side_input",
           shiny::selectizeInput(
             ns("tech_categories_plot1_region"),
-            "Technology Categories:",
+            label = NULL,
             choices  = grouped_techs,
             selected = c("AI", "Green Technology"),
             multiple = TRUE,
@@ -380,7 +387,7 @@ region_module_server <- function(id, parent_session, con) {
         out
 
       }) |> shiny::bindCache(input$toflow_region, input$region, input$techs_region,
-                             sort(input$firm))
+                             sort(input$firm), input$top_n_ids_region)
 
       fallback_by_tech_region <- shiny::reactive({
         shiny::req(input$toflow_region, input$region, input$tech_categories_plot1_region)
@@ -430,7 +437,7 @@ region_module_server <- function(id, parent_session, con) {
         out
 
       }) |> shiny::bindCache(input$toflow_region, input$region, input$tech_categories_plot1_region,
-                             sort(input$firm))
+                             sort(input$firm), input$top_n_ids_region)
       # ===== RENDER OUTPUTS =====
       
       # Plot 1: Returns by Technology

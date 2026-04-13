@@ -43,31 +43,38 @@ country_module_sidebar <- function(id) {
         )
       ),
 
-      # Return Flow: Tech + Country only
-      shiny::conditionalPanel(
-        condition = not_rta,
+    ),
+
+    # --- Value Flow: Tech + Country only ---
+    shiny::conditionalPanel(
+      condition = not_rta,
+      shiny::div(
+        shiny::h5("VALUE FLOW", style = "font-weight: 600; margin-bottom: 10px;"),
         shiny::div(
           class = "side_input",
           shiny::selectizeInput(
             inputId = ns("toflow"),
-            label = "Return flow",
+            label = NULL,
             choices = toflow_choices,
             selected = "is_global",
             multiple = FALSE,
             width = "400px",
-            options = list(placeholder = 'Choose a return flow...')
+            options = list(placeholder = 'Choose a value flow...')
           )
         )
-      ),
+      )
+    ),
 
-      # Technology Categories: Tech only
-      shiny::conditionalPanel(
-        condition = is_tech,
+    # --- Technology Categories: Tech only ---
+    shiny::conditionalPanel(
+      condition = is_tech,
+      shiny::div(
+        shiny::h5("TECHNOLOGY CATEGORIES", style = "font-weight: 600; margin-bottom: 10px;"),
         shiny::div(
           class = "side_input",
           shiny::selectizeInput(
             inputId = ns("tech_categories_plot1"),
-            label = "Technology categories",
+            label = NULL,
             choices = grouped_techs,
             selected = c("AI","Green Technology"),
             multiple = TRUE,
@@ -368,7 +375,7 @@ country_module_server <- function(id, parent_session, con) {
         out
 
       }) |> shiny::bindCache(input$toflow, input$country, input$tech_categories_plot1,
-                             sort(input$firm))
+                             sort(input$firm), input$top_n_ids)
 
       # DuckDB query for Plot 2 / World Map (by-country)
       fallback_by_country <- shiny::reactive({
@@ -421,7 +428,7 @@ country_module_server <- function(id, parent_session, con) {
         out
 
       }) |> shiny::bindCache(input$toflow, input$country, input$techs,
-                             sort(input$firm))
+                             sort(input$firm), input$top_n_ids)
 
       # Chart 1: Main avstrax plot
       output$avstrax_plot1 <- ggiraph::renderGirafe({

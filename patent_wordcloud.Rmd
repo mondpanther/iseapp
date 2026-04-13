@@ -1,0 +1,398 @@
+---
+title: "Patent Abstracts — Bigram Word Cloud"
+output:
+  html_document:
+    df_print: paged
+---
+
+This notebook fetches patent abstracts from the EPO Open Patent Services (OPS)
+API for a set of application numbers sourced from an Espacenet search, then
+draws a word cloud of the most frequent bigrams.
+
+## 0 — Setup
+
+```{r setup, message=FALSE, warning=FALSE}
+# Install any missing packages
+pkgs <- c("httr2", "xml2", "dplyr", "tidyr", "tidytext", "stringr",
+           "ggplot2", "ggwordcloud", "purrr", "tibble")
+install.packages(setdiff(pkgs, rownames(installed.packages())), quiet = TRUE)
+
+library(httr2)
+library(xml2)
+library(dplyr)
+library(tidyr)
+library(tidytext)
+library(stringr)
+library(ggplot2)
+library(ggwordcloud)
+library(purrr)
+library(tibble)
+```
+
+## 1 — Application numbers
+
+Extracted from the Espacenet search URL:
+
+```{r app_numbers}
+app_numbers <- c(
+ "CN201810134850", "PT12858932",      "US89428710",       "US201414220990",
+ "ARP120101066",   "EP09305250",      "CA3117920",        "SG11201506775V",
+ "EP11833120",     "KR20207024776",   "AU2011349446",     "US201213679498",
+ "BR112013025572", "KR20127020023",   "CN201380028604",   "US59260509",
+ "US201114008192", "US76340110",      "MX2014002289",     "WO2011039386",
+ "WO2011021301",   "HUE16193906",     "WO2009007269",     "US201414293546",
+ "US201113107352", "US201314425505",  "SG10201504187Y",   "US60981509",
+ "US201615193033", "WO2010003130",    "PL13159003",       "BRPI1002602",
+ "WO2015033929",   "BRPI1102284",     "AU2015314826",     "US86898910",
+ "BR112017009050", "WO2011038946",    "KR20147016656",    "CN201080049139",
+ "PL11858867",     "AU2013360086",    "ES11728509",       "WO2010000938",
+ "US48126009",     "EP13762719",      "US201313920673",   "NZ61861310",
+ "MX2011003856",   "ARP110104677"
+)
+
+cat(length(app_numbers), "application numbers to process\n")
+```
+
+## 2 — Helper: parse an application number into country + doc-number
+
+The OPS API expects the EPODOC format `CC.number` (country code dot number).
+
+```{r parse_appnum}
+parse_app_number <- function(x) {
+  # Match leading 2-letter country code (some have 4-letter like BRPI)
+  m <- str_match(x, "^([A-Z]{2,4})(\\d.*)$")
+  tibble(raw = x, country = m[, 2], docnumber = m[, 3])
+}
+
+parsed <- bind_rows(lapply(app_numbers, parse_app_number))
+parsed
+```
+
+## 3 — Authenticate with EPO OPS
+
+The OPS API requires **free** developer credentials.
+Register at <https://developers.epo.org/> to get a Consumer Key and Consumer
+Secret, then paste them below.
+
+```{r ops_auth}
+# -------------------------------------------------------------------
+# PASTE YOUR OPS CREDENTIALS HERE (or set as environment variables)
+# -------------------------------------------------------------------
+ops_key    <- Sys.getenv("OPS_CONSUMER_KEY",    unset = "YOUR_KEY_HERE")
+ops_secret <- Sys.getenv("OPS_CONSUMER_SECRET", unset = "YOUR_SECRET_HERE")
+
+stopifnot("Set your OPS credentials above or via env vars OPS_CONSUMER_KEY / OPS_CONSUMER_SECRET" =
+            ops_key != "YOUR_KEY_HERE")
+
+# OAuth2 client-credentials token
+token_resp <- request("https://ops.epo.org/3.2/auth/accesstoken") |>
+  req_auth_basic(ops_key, ops_secret) |>
+  req_body_form(grant_type = "client_credentials") |>
+  req_perform()
+
+access_token <- resp_body_json(token_resp)$access_token
+cat("OPS access token obtained.\n")
+```
+
+## 4a — Debug: inspect raw XML for one patent
+
+Let's see what OPS actually returns so we can write the right XPath.
+
+```{r debug_xml, message=TRUE}
+# Pick one that returned "no abstract" — e.g. EP.09305250
+test_url <- paste0(
+  "https://ops.epo.org/3.2/rest-services/published-data/application/epodoc/",
+  "EP.09305250/abstract"
+)
+test_resp <- request(test_url) |>
+  req_headers(Authorization = paste("Bearer", access_token),
+              Accept        = "application/xml") |>
+  req_error(is_error = \(resp) FALSE) |>
+  req_perform()
+
+cat("Status:", resp_status(test_resp), "\n\n")
+if (resp_status(test_resp) < 400) {
+  raw_xml <- resp_body_string(test_resp)
+  cat(raw_xml)
+}
+```
+
+## 4b — Fetch abstracts from OPS
+
+We query the *published-data* endpoint one patent at a time.
+OPS anonymous throttle is ~4 req/s; we add a small delay to be polite.
+
+```{r fetch_abstracts, message=TRUE, warning=TRUE}
+ns <- c(ex = "http://www.epo.org/exchange", ops = "http://ops.epo.org")
+
+extract_en_abstract <- function(doc) {
+  abs_nodes <- xml_find_all(doc, ".//ex:abstract", ns)
+  langs <- xml_attr(abs_nodes, "lang")
+  en <- abs_nodes[!is.na(langs) & langs == "en"]
+  node <- if (length(en) > 0) en[[1]] else NULL
+  if (is.null(node)) return(NA_character_)
+
+  p_nodes <- xml_find_all(node, ".//ex:p", ns)
+  text <- if (length(p_nodes) > 0) paste(xml_text(p_nodes), collapse = " ") else xml_text(node)
+  text <- str_squish(text)
+  if (nchar(text) < 10) NA_character_ else text
+}
+
+extract_en_title <- function(doc) {
+  title_nodes <- xml_find_all(doc, ".//ex:invention-title", ns)
+  langs <- xml_attr(title_nodes, "lang")
+  en <- title_nodes[!is.na(langs) & langs == "en"]
+  node <- if (length(en) > 0) en[[1]] else NULL
+  if (is.null(node)) return(NA_character_)
+  str_squish(xml_text(node))
+}
+
+fetch_patent <- function(country, docnumber, token) {
+  epodoc <- paste0(country, ".", docnumber)
+  abstract <- NA_character_
+  title    <- NA_character_
+
+  # Helper to try one URL and extract abstract + title
+  try_endpoint <- function(url) {
+    resp <- request(url) |>
+      req_headers(Authorization = paste("Bearer", token),
+                  Accept        = "application/xml") |>
+      req_error(is_error = \(resp) FALSE) |>
+      req_perform()
+    if (resp_status(resp) >= 400) return(NULL)
+    resp_body_xml(resp)
+  }
+
+  # --- Step 1: direct application endpoint (biblio for title + abstract) ---
+  tryCatch({
+    doc <- try_endpoint(paste0(
+      "https://ops.epo.org/3.2/rest-services/published-data/application/epodoc/",
+      epodoc, "/biblio,abstract"
+    ))
+    if (!is.null(doc)) {
+      abstract <- extract_en_abstract(doc)
+      title    <- extract_en_title(doc)
+    }
+  }, error = function(e) NULL)
+
+  # --- Step 2: family fallback if no English abstract ---
+  if (is.na(abstract)) {
+    tryCatch({
+      Sys.sleep(0.3)
+      doc <- try_endpoint(paste0(
+        "https://ops.epo.org/3.2/rest-services/family/application/epodoc/",
+        epodoc, "/biblio,abstract"
+      ))
+      if (!is.null(doc)) {
+        abstract <- extract_en_abstract(doc)
+        if (is.na(title)) title <- extract_en_title(doc)
+      }
+    }, error = function(e) NULL)
+  }
+
+  src <- if (!is.na(abstract)) "OK" else "miss"
+  message("  [", src, "] ", epodoc,
+          if (!is.na(title)) paste0(" — ", str_trunc(title, 60)) else "")
+
+  tibble(title = title, abstract = abstract)
+}
+
+results <- parsed |>
+  mutate(data = map2(country, docnumber, \(cc, dn) {
+    Sys.sleep(0.3)
+    fetch_patent(cc, dn, access_token)
+  })) |>
+  unnest(data)
+
+cat("\nFetched", sum(!is.na(results$abstract)), "abstracts and",
+    sum(!is.na(results$title)), "titles out of",
+    nrow(results), "applications\n")
+
+# Keep backward-compatible name for downstream chunks
+abstracts <- results
+```
+
+## 5 — AI-derived innovation labels
+
+For each patent we ask OpenAI to produce a short n-gram (2–5 words) that
+captures the core innovation, using both the title and the abstract.
+
+```{r ai_labels, message=TRUE}
+openai_key <- Sys.getenv("OPENAI_API_KEY", unset = "")
+stopifnot("Set OPENAI_API_KEY in your .Renviron" = nchar(openai_key) > 0)
+
+# Build a batch prompt — send all patents in one call for speed & cost
+patent_block <- abstracts |>
+  filter(!is.na(abstract) | !is.na(title)) |>
+  mutate(entry = paste0(
+    "[", row_number(), "] ",
+    if_else(!is.na(title), paste0("Title: ", title, ". "), ""),
+    if_else(!is.na(abstract), paste0("Abstract: ", str_trunc(abstract, 500)), "")
+  )) |>
+  pull(entry) |>
+  paste(collapse = "\n\n")
+
+label_prompt <- paste0(
+ "Below are patents, each with a number in brackets, a title and/or abstract.\n\n",
+  patent_block,
+  "\n\n---\n",
+  "For EACH patent, produce a short descriptive n-gram (2 to 5 words, lowercase) ",
+  "that captures the core innovation or technology. ",
+  "Do NOT use generic phrases like 'novel method' or 'improved system'. ",
+  "Be specific and technical, e.g. 'antibody fc region engineering', ",
+  "'lithium battery cathode recycling', 'crispr gene editing delivery'.\n\n",
+  "Return ONLY a JSON array of objects with keys \"id\" (the bracket number) ",
+  "and \"label\" (the n-gram). No other text."
+)
+
+label_resp <- request("https://api.openai.com/v1/chat/completions") |>
+  req_headers(Authorization = paste("Bearer", openai_key),
+              `Content-Type` = "application/json") |>
+  req_body_json(list(
+    model    = "gpt-4o-mini",
+    messages = list(list(role = "user", content = label_prompt)),
+    temperature = 0.2,
+    max_tokens  = 2000
+  )) |>
+  req_perform()
+
+raw_json <- resp_body_json(label_resp)$choices[[1]]$message$content
+
+# Strip markdown code fences if present
+raw_json <- str_remove_all(raw_json, "```json\\s*|```\\s*")
+
+labels_df <- jsonlite::fromJSON(raw_json) |>
+  as_tibble() |>
+  mutate(id = as.integer(id),
+         label = str_to_lower(str_squish(label)))
+
+# Attach back to the abstracts that were sent
+sent <- abstracts |>
+  filter(!is.na(abstract) | !is.na(title)) |>
+  mutate(id = row_number())
+
+labelled <- sent |>
+  left_join(labels_df, by = "id")
+
+cat("Labelled", sum(!is.na(labelled$label)), "patents\n")
+labelled |> select(raw, label) |> print(n = 60)
+```
+
+## 6 — AI-label word cloud
+
+```{r ai_wordcloud, fig.width=10, fig.height=8, dpi=150}
+label_counts <- labelled |>
+  filter(!is.na(label)) |>
+  count(label, sort = TRUE)
+
+ggplot(label_counts, aes(label = label, size = n, colour = n)) +
+  geom_text_wordcloud_area(rm_outside = TRUE, shape = "circle",
+                           eccentricity = 0.65) +
+  scale_size_area(max_size = 16) +
+  scale_colour_gradient(low = "#2c7bb6", high = "#d7191c") +
+  theme_minimal() +
+  labs(title = "Innovation Word Cloud — AI-derived Labels",
+       subtitle = paste(nrow(label_counts), "distinct innovation themes"))
+```
+
+## 7 — AI-label bar chart
+
+```{r ai_bar_chart, fig.width=9, fig.height=7}
+label_counts |>
+  slice_max(n, n = 30, with_ties = FALSE) |>
+  mutate(label = reorder(label, n)) |>
+  ggplot(aes(n, label, fill = n)) +
+  geom_col(show.legend = FALSE) +
+  scale_fill_gradient(low = "#2c7bb6", high = "#d7191c") +
+  labs(x = "Frequency", y = NULL,
+       title = "Top Innovation Themes (AI-labelled)") +
+  theme_minimal()
+```
+
+## 8 — Statistical bigrams (original)
+
+For reference, the traditional bigram word cloud from raw abstract text.
+
+```{r bigrams}
+custom_stop <- tibble(word = c("patent", "invention", "present", "method",
+                               "comprises", "comprising", "device", "apparatus",
+                               "provided", "relates", "described", "including",
+                               "wherein", "thereof", "according"))
+
+bigrams <- abstracts |>
+  filter(!is.na(abstract)) |>
+  select(raw, abstract) |>
+  unnest_tokens(bigram, abstract, token = "ngrams", n = 2) |>
+  separate(bigram, into = c("word1", "word2"), sep = " ", remove = FALSE) |>
+  anti_join(stop_words, by = c("word1" = "word")) |>
+  anti_join(stop_words, by = c("word2" = "word")) |>
+  anti_join(custom_stop, by = c("word1" = "word")) |>
+  anti_join(custom_stop, by = c("word2" = "word")) |>
+  filter(!str_detect(word1, "\\d"), !str_detect(word2, "\\d"))
+
+bigram_counts <- bigrams |>
+  count(bigram, sort = TRUE)
+
+head(bigram_counts, 20)
+```
+
+```{r stat_wordcloud, fig.width=10, fig.height=8, dpi=150}
+top_bigrams <- bigram_counts |>
+  slice_max(n, n = 80, with_ties = FALSE)
+
+ggplot(top_bigrams, aes(label = bigram, size = n, colour = n)) +
+  geom_text_wordcloud_area(rm_outside = TRUE, shape = "circle",
+                           eccentricity = 0.65) +
+  scale_size_area(max_size = 14) +
+  scale_colour_gradient(low = "#2c7bb6", high = "#d7191c") +
+  theme_minimal() +
+  labs(title = "Statistical Bigram Word Cloud — Patent Abstracts",
+       subtitle = paste(sum(!is.na(abstracts$abstract)), "abstracts"))
+```
+
+## 8 — AI Summary of Key Innovations (OpenAI)
+
+Uses the OpenAI API to produce a brief paragraph summarising the most important
+innovations across all fetched abstracts.
+
+```{r ai_summary, message=TRUE}
+openai_key <- Sys.getenv("OPENAI_API_KEY", unset = "")
+stopifnot("Set OPENAI_API_KEY in your .Renviron" = nchar(openai_key) > 0)
+
+# Combine all abstracts into a single block, numbered
+abstract_texts <- abstracts |>
+  filter(!is.na(abstract)) |>
+  mutate(entry = paste0("[", row_number(), "] ", raw, ": ", abstract)) |>
+  pull(entry) |>
+  paste(collapse = "\n\n")
+
+prompt <- paste0(
+  "Below are abstracts from ", sum(!is.na(abstracts$abstract)),
+  " patents in the same selection.\n\n",
+  abstract_texts,
+  "\n\n---\n",
+  "Write a single concise paragraph (150-200 words) summarising the most ",
+  "important innovations represented by these patents. Focus on the key ",
+  "technological themes, what problems they solve, and why they matter. ",
+  "Do not list individual patents — synthesise across all of them."
+)
+
+resp <- request("https://api.openai.com/v1/chat/completions") |>
+  req_headers(Authorization = paste("Bearer", openai_key),
+              `Content-Type` = "application/json") |>
+  req_body_json(list(
+    model    = "gpt-4o-mini",
+    messages = list(list(role = "user", content = prompt)),
+    temperature = 0.4,
+    max_tokens  = 400
+  )) |>
+  req_perform()
+
+summary_text <- resp_body_json(resp)$choices[[1]]$message$content
+```
+
+### Innovation Summary
+
+```{r print_summary, results='asis'}
+cat(summary_text)
+```

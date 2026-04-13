@@ -16,6 +16,11 @@ data_dir <- "C:/Users/rmart/Dropbox/apps/iseapp"
 # 1. Load base maps
 cat("Loading base data...\n")
 countrymap <- read_fst(file.path(data_dir, "countrymap.fst"))
+
+# Exclude North Korea (KP) from all country mappings
+countrymap <- countrymap |>
+  dplyr::filter(ctry_code != "KP")
+
 regionmap <- read_fst(file.path(data_dir, "regionmap.fst"))
 techmap <- read_fst(file.path(data_dir, "techmap.fst"))
 
