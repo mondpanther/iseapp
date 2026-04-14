@@ -1,0 +1,722 @@
+---
+title: "Patent Cluster Comparison — LMICs vs HICs"
+output:
+  html_document:
+    df_print: paged
+---
+
+This notebook compares two sets of patents (e.g., LMICs vs HICs) by embedding
+their titles and abstracts, clustering them together, and visualizing with
+distinct styling for each group.
+
+## 0 — Setup
+
+```{r setup, message=FALSE, warning=FALSE}
+pkgs <- c("httr2", "xml2", "dplyr", "tidyr", "tidytext", "stringr",
+          "ggplot2", "ggwordcloud", "purrr", "tibble", "digest", "umap",
+          "jsonlite", "ggrepel", "DBI", "duckdb", "glue")
+install.packages(setdiff(pkgs, rownames(installed.packages())), quiet = TRUE)
+
+library(httr2)
+library(xml2)
+library(dplyr)
+library(tidyr)
+library(tidytext)
+library(stringr)
+library(ggplot2)
+library(purrr)
+library(tibble)
+library(umap)
+library(jsonlite)
+library(ggrepel)
+library(DBI)
+library(duckdb)
+library(glue)
+```
+
+## 1 — Query patent lists from app data
+
+Derive the top Adaptation patents for LMICs and HICs directly from the app's
+parquet database, using the same logic as the Shiny app.
+
+```{r query_patents}
+# --- Configuration (mirrors the URL parameters) ---
+tech_selection <- "Adaptation"
+toflow         <- "ev_global"
+top_n_ids      <- 200
+country_group1 <- "LMICs (excl. China)"
+country_group2 <- "High income countries"
+
+# --- Connect to parquet files via DuckDB ---
+con <- DBI::dbConnect(duckdb::duckdb())
+
+parquet_dir <- file.path("inst", "extdata")
+DBI::dbExecute(con, glue::glue(
+  "CREATE OR REPLACE VIEW full_patent_database AS
+   SELECT * FROM read_parquet('{file.path(parquet_dir, \"patent_database.parquet\")}')"
+))
+DBI::dbExecute(con, glue::glue(
+  "CREATE OR REPLACE TABLE patents_x_tech AS
+   SELECT * FROM read_parquet('{file.path(parquet_dir, \"patents_x_tech.parquet\")}')"
+))
+DBI::dbExecute(con, glue::glue(
+  "CREATE OR REPLACE TABLE tech_lookup AS
+   SELECT * FROM read_parquet('{file.path(parquet_dir, \"tech_lookup.parquet\")}')"
+))
+
+# --- Load country group definitions from the package's sysdata ---
+load("R/sysdata.rda")
+
+# --- Helper: get top patent appln_ids for a country group + tech ---
+get_top_patent_ids <- function(con, country_group, tech, toflow, top_n) {
+  country_codes <- if (country_group %in% names(group_definitions)) {
+    group_definitions[[country_group]]
+  } else {
+    country_group
+  }
+  country_sql   <- paste0("'", paste(country_codes, collapse = "', '"), "'")
+
+  sql <- glue::glue("
+    WITH filtered_tech AS (
+      SELECT DISTINCT t.docdb_family_id, '{tech}' AS technology
+      FROM patents_x_tech t
+      JOIN tech_lookup tl ON t.technology = tl.technology
+      WHERE tl.tech_group = '{tech}' OR t.technology = '{tech}'
+    ),
+
+    deduped AS (
+      SELECT DISTINCT ON (ft.technology, p.docdb_family_id)
+        ft.technology,
+        p.docdb_family_id,
+        p.appln_id,
+        p.{toflow}
+      FROM full_patent_database p
+      INNER JOIN filtered_tech ft ON p.docdb_family_id = ft.docdb_family_id
+      WHERE p.ctry_code IN ({country_sql})
+        AND p.{toflow} IS NOT NULL
+    ),
+
+    ranked AS (
+      SELECT
+        appln_id,
+        {toflow},
+        ROW_NUMBER() OVER (ORDER BY {toflow} DESC) AS rnk
+      FROM deduped
+    )
+
+    SELECT appln_id
+    FROM ranked
+    WHERE rnk <= {top_n}
+    ORDER BY {toflow} DESC
+  ")
+
+  DBI::dbGetQuery(con, sql)$appln_id
+}
+
+# --- Fetch patent IDs for both groups ---
+apps_lmic <- get_top_patent_ids(con, country_group1, tech_selection, toflow, top_n_ids)
+apps_hic  <- get_top_patent_ids(con, country_group2, tech_selection, toflow, top_n_ids)
+
+DBI::dbDisconnect(con, shutdown = TRUE)
+
+cat("LMICs (", country_group1, "):", length(apps_lmic), "applications\n")
+cat("HICs (", country_group2, "):", length(apps_hic), "applications\n")
+
+# Union of both lists, tracking source
+all_apps <- tibble(
+  raw = c(apps_lmic, apps_hic),
+  source = c(rep("LMIC", length(apps_lmic)), rep("HIC", length(apps_hic)))
+) |>
+  distinct(raw, .keep_all = TRUE)
+
+cat("Union (deduplicated):", nrow(all_apps), "applications\n")
+table(all_apps$source)
+```
+
+## 2 — Parse application numbers
+
+```{r parse_appnum}
+parse_app_number <- function(x) {
+  m <- str_match(x, "^([A-Z]{2,4})(\\d.*)$")
+  tibble(raw = x, country = m[, 2], docnumber = m[, 3])
+}
+
+parsed <- all_apps |>
+  left_join(bind_rows(lapply(all_apps$raw, parse_app_number)), by = "raw")
+
+parsed
+```
+
+## 3 — Authenticate with EPO OPS
+
+```{r ops_auth}
+ops_key    <- Sys.getenv("OPS_CONSUMER_KEY",    unset = "YOUR_KEY_HERE")
+ops_secret <- Sys.getenv("OPS_CONSUMER_SECRET", unset = "YOUR_SECRET_HERE")
+
+stopifnot("Set your OPS credentials via env vars OPS_CONSUMER_KEY / OPS_CONSUMER_SECRET" =
+            ops_key != "YOUR_KEY_HERE")
+
+token_resp <- request("https://ops.epo.org/3.2/auth/accesstoken") |>
+  req_auth_basic(ops_key, ops_secret) |>
+  req_body_form(grant_type = "client_credentials") |>
+  req_perform()
+
+access_token <- resp_body_json(token_resp)$access_token
+cat("OPS access token obtained.\n")
+```
+
+## 4 — Fetch abstracts (with caching)
+
+```{r fetch_abstracts, message=TRUE, warning=TRUE}
+cache_dir <- ".bigdata"
+if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
+
+cache_file <- file.path(cache_dir, paste0(
+  "epo_compare_", digest::digest(all_apps$raw, algo = "md5"), ".rds"
+))
+
+if (file.exists(cache_file)) {
+  cat("Loading cached EPO data from", cache_file, "\n")
+  results <- readRDS(cache_file)
+  cat("Loaded", sum(!is.na(results$abstract)), "abstracts from cache\n")
+} else {
+  cat("No cache found, fetching from EPO API...\n")
+
+  ns <- c(ex = "http://www.epo.org/exchange", ops = "http://ops.epo.org")
+
+  extract_en_abstract <- function(doc) {
+    abs_nodes <- xml_find_all(doc, ".//ex:abstract", ns)
+    langs <- xml_attr(abs_nodes, "lang")
+    en <- abs_nodes[!is.na(langs) & langs == "en"]
+    node <- if (length(en) > 0) en[[1]] else NULL
+    if (is.null(node)) return(NA_character_)
+
+    p_nodes <- xml_find_all(node, ".//ex:p", ns)
+    text <- if (length(p_nodes) > 0) paste(xml_text(p_nodes), collapse = " ") else xml_text(node)
+    text <- str_squish(text)
+    if (nchar(text) < 10) NA_character_ else text
+  }
+
+  extract_en_title <- function(doc) {
+    title_nodes <- xml_find_all(doc, ".//ex:invention-title", ns)
+    langs <- xml_attr(title_nodes, "lang")
+    en <- title_nodes[!is.na(langs) & langs == "en"]
+    node <- if (length(en) > 0) en[[1]] else NULL
+    if (is.null(node)) return(NA_character_)
+    str_squish(xml_text(node))
+  }
+
+  extract_applicants <- function(doc) {
+    # Find all applicant nodes in docdb format (deduplicated, standardised names)
+    app_nodes <- xml_find_all(doc, ".//ex:applicant[@data-format='docdb']", ns)
+    if (length(app_nodes) == 0) {
+      # Fall back to any applicant nodes
+      app_nodes <- xml_find_all(doc, ".//ex:applicant", ns)
+    }
+    if (length(app_nodes) == 0) {
+      return(tibble(
+        applicant_names = NA_character_,
+        applicant_types = NA_character_,
+        is_company      = NA
+      ))
+    }
+
+    applicants <- lapply(app_nodes, function(node) {
+      # Get name — prefer English, fall back to first available
+      name_nodes <- xml_find_all(node, ".//ex:applicant-name", ns)
+      name_langs <- xml_attr(name_nodes, "lang")
+      en_name <- name_nodes[!is.na(name_langs) & name_langs == "en"]
+      name_node <- if (length(en_name) > 0) en_name[[1]] else if (length(name_nodes) > 0) name_nodes[[1]] else NULL
+      name <- if (!is.null(name_node)) str_squish(xml_text(name_node)) else NA_character_
+
+      # Determine if company: presence of orgname vs first-name/last-name
+      has_orgname   <- length(xml_find_all(name_node, ".//ex:orgname", ns)) > 0
+      has_firstname <- length(xml_find_all(name_node, ".//ex:first-name", ns)) > 0
+
+      # app-type attribute: "applicant" vs "applicant-inventor"
+      app_type <- xml_attr(node, "app-type")
+
+      # Heuristic: it's a company if orgname present, or if no first-name
+      # and the name looks corporate (contains common suffixes)
+      is_corp <- has_orgname || (!has_firstname && !is.na(name) &&
+        str_detect(name, regex("\\b(inc|corp|ltd|llc|gmbh|ag|sa|sas|bv|nv|co|plc|pty|ab|oy|as|se|spa|srl|kk|univ)\\b",
+                               ignore_case = TRUE)))
+
+      list(name = name, app_type = app_type %||% NA_character_, is_company = is_corp)
+    })
+
+    # Deduplicate by name
+    names_vec <- sapply(applicants, \(a) a$name)
+    unique_idx <- !duplicated(names_vec) & !is.na(names_vec)
+    applicants <- applicants[unique_idx]
+
+    if (length(applicants) == 0) {
+      return(tibble(
+        applicant_names = NA_character_,
+        applicant_types = NA_character_,
+        is_company      = NA
+      ))
+    }
+
+    tibble(
+      applicant_names = paste(sapply(applicants, \(a) a$name), collapse = "; "),
+      applicant_types = paste(sapply(applicants, \(a) a$app_type), collapse = "; "),
+      is_company      = any(sapply(applicants, \(a) a$is_company))
+    )
+  }
+
+  fetch_patent <- function(country, docnumber, token) {
+    epodoc <- paste0(country, ".", docnumber)
+    abstract       <- NA_character_
+    title          <- NA_character_
+    applicant_info <- tibble(applicant_names = NA_character_,
+                             applicant_types = NA_character_,
+                             is_company = NA)
+
+    # Throttle-aware endpoint caller: retries with exponential backoff on 403/429/overload
+    try_endpoint <- function(url, max_retries = 7) {
+      last_status <- NA
+      for (attempt in seq_len(max_retries + 1)) {
+        resp <- request(url) |>
+          req_headers(Authorization = paste("Bearer", token),
+                      Accept        = "application/xml") |>
+          req_error(is_error = \(resp) FALSE) |>
+          req_perform()
+
+        status <- resp_status(resp)
+        last_status <<- status
+
+        # Check X-Throttling-Control header for quota info
+        throttle_hdr <- resp_header(resp, "X-Throttling-Control")
+        if (!is.null(throttle_hdr) && grepl("overloaded", throttle_hdr, ignore.case = TRUE)) {
+          wait_secs <- min(120, 10 * 2^(attempt - 1))
+          message("    [THROTTLED] OPS overloaded, waiting ", wait_secs, "s (attempt ", attempt, ")...")
+          Sys.sleep(wait_secs)
+          next
+        }
+
+        # Retry on any rate-limit or server error (403, 429, 500, 503, etc.)
+        if (status %in% c(403, 429, 500, 503)) {
+          wait_secs <- min(180, 15 * 2^(attempt - 1))
+          message("    [", status, "] Retrying after ", wait_secs, "s (attempt ", attempt, ")...")
+          Sys.sleep(wait_secs)
+          next
+        }
+
+        # Log non-200 status for debugging (404 = patent not found, that's normal)
+        if (status >= 400 && status != 404) {
+          message("    [HTTP ", status, "] ", url)
+        }
+
+        if (status >= 400) return(NULL)
+        return(resp_body_xml(resp))
+      }
+      message("    [GIVE UP] Max retries reached (last status: ", last_status, ") for ", url)
+      return(NULL)
+    }
+
+    needs_more <- function() is.na(abstract) || is.na(title) || is.na(applicant_info$applicant_names)
+
+    # Step 1: Try direct application endpoint
+    tryCatch({
+      doc <- try_endpoint(paste0(
+        "https://ops.epo.org/3.2/rest-services/published-data/application/epodoc/",
+        epodoc, "/biblio,abstract"
+      ))
+      if (!is.null(doc)) {
+        abstract <- extract_en_abstract(doc)
+        title    <- extract_en_title(doc)
+        applicant_info <- extract_applicants(doc)
+      }
+    }, error = function(e) NULL)
+
+    # Step 2: Try family endpoint if anything still missing
+    if (needs_more()) {
+      tryCatch({
+        Sys.sleep(1)
+        doc <- try_endpoint(paste0(
+          "https://ops.epo.org/3.2/rest-services/family/application/epodoc/",
+          epodoc, "/biblio,abstract"
+        ))
+        if (!is.null(doc)) {
+          if (is.na(abstract)) abstract <- extract_en_abstract(doc)
+          if (is.na(title)) title <- extract_en_title(doc)
+          if (is.na(applicant_info$applicant_names)) applicant_info <- extract_applicants(doc)
+        }
+      }, error = function(e) NULL)
+    }
+
+    # Step 3: Try publication endpoint as last resort
+    if (needs_more()) {
+      tryCatch({
+        Sys.sleep(1)
+        doc <- try_endpoint(paste0(
+          "https://ops.epo.org/3.2/rest-services/published-data/publication/epodoc/",
+          epodoc, "/biblio,abstract"
+        ))
+        if (!is.null(doc)) {
+          if (is.na(abstract)) abstract <- extract_en_abstract(doc)
+          if (is.na(title)) title <- extract_en_title(doc)
+          if (is.na(applicant_info$applicant_names)) applicant_info <- extract_applicants(doc)
+        }
+      }, error = function(e) NULL)
+    }
+
+    src <- if (!is.na(abstract)) "OK" else "miss"
+    message("  [", src, "] ", epodoc,
+            if (!is.na(title)) paste0(" - ", str_trunc(title, 50)) else "",
+            if (!is.na(applicant_info$applicant_names))
+              paste0(" | ", str_trunc(applicant_info$applicant_names, 40)) else "")
+
+    bind_cols(
+      tibble(title = title, abstract = abstract),
+      applicant_info
+    )
+  }
+
+  # Incremental fetching with checkpoint saves every 100 patents
+  partial_file <- paste0(cache_file, ".partial.rds")
+
+  # Resume from partial if available
+  if (file.exists(partial_file)) {
+    done <- readRDS(partial_file)
+    done_keys <- paste(done$country, done$docnumber, sep = ".")
+    cat("Resuming from partial cache:", nrow(done), "already fetched\n")
+  } else {
+    done <- tibble()
+    done_keys <- character(0)
+  }
+
+  todo <- parsed |> filter(!paste(country, docnumber, sep = ".") %in% done_keys)
+  n_total <- nrow(parsed)
+  n_done  <- nrow(done)
+  cat("Fetching", nrow(todo), "remaining patents (", n_done, "already done)...\n")
+
+  for (i in seq_len(nrow(todo))) {
+    row <- todo[i, ]
+    Sys.sleep(1)
+
+    if ((n_done + i) %% 50 == 0)
+      message("--- Progress: ", n_done + i, " / ", n_total, " ---")
+
+    fetched <- tryCatch(
+      fetch_patent(row$country, row$docnumber, access_token),
+      error = function(e) {
+        message("  [ERROR] ", row$country, ".", row$docnumber, ": ", e$message)
+        bind_cols(
+          tibble(title = NA_character_, abstract = NA_character_),
+          tibble(applicant_names = NA_character_, applicant_types = NA_character_, is_company = NA)
+        )
+      }
+    )
+
+    new_row <- bind_cols(row, fetched)
+    done <- bind_rows(done, new_row)
+
+    # Save checkpoint every 100 patents
+    if (i %% 100 == 0) {
+      saveRDS(done, partial_file)
+      message("  [CHECKPOINT] Saved ", nrow(done), " / ", n_total)
+    }
+  }
+
+  results <- done
+
+  cat("\nFetched", sum(!is.na(results$abstract)), "abstracts,",
+      sum(!is.na(results$title)), "titles, and",
+      sum(!is.na(results$applicant_names)), "applicant records\n")
+  cat("  of which", sum(results$is_company, na.rm = TRUE), "have a company assignee\n")
+
+  saveRDS(results, cache_file)
+  if (file.exists(partial_file)) file.remove(partial_file)
+  cat("Cached results to", cache_file, "\n")
+}
+```
+
+## 5 — Create embeddings
+
+```{r create_embeddings, message=TRUE}
+openai_key <- Sys.getenv("OPENAI_API_KEY", unset = "")
+stopifnot("Set OPENAI_API_KEY in your .Renviron" = nchar(openai_key) > 0)
+
+embed_data <- results |>
+  filter(!is.na(abstract) | !is.na(title)) |>
+  mutate(
+    text = paste(
+      if_else(!is.na(title), title, ""),
+      if_else(!is.na(abstract), abstract, "")
+    ) |> str_squish()
+  ) |>
+  filter(nchar(text) > 10)
+
+cat("Creating embeddings for", nrow(embed_data), "patents...\n")
+
+get_embeddings <- function(texts, api_key) {
+  resp <- request("https://api.openai.com/v1/embeddings") |>
+    req_headers(Authorization = paste("Bearer", api_key),
+                `Content-Type` = "application/json") |>
+    req_body_json(list(
+      model = "text-embedding-3-small",
+      input = texts
+    )) |>
+    req_perform()
+
+  result <- resp_body_json(resp)
+  embeddings <- lapply(result$data, function(x) unlist(x$embedding))
+  do.call(rbind, embeddings)
+}
+
+embedding_matrix <- get_embeddings(embed_data$text, openai_key)
+cat("Embedding dimensions:", dim(embedding_matrix), "\n")
+```
+
+## 6 — Cluster embeddings
+
+```{r cluster_embeddings}
+set.seed(42)
+k <- min(10, nrow(embedding_matrix))
+clusters <- kmeans(embedding_matrix, centers = k, nstart = 25)
+
+embed_data$cluster <- as.factor(clusters$cluster)
+cat("Patents per cluster:\n")
+table(embed_data$cluster)
+```
+
+## 7 — AI-generated cluster labels
+
+```{r cluster_labels, message=TRUE}
+cluster_summaries <- embed_data |>
+  group_by(cluster) |>
+  summarise(
+    patents = paste(
+      if_else(!is.na(title), title, str_trunc(text, 100)),
+      collapse = "\n- "
+    ),
+    n = n(),
+    .groups = "drop"
+  ) |>
+  mutate(entry = paste0("Cluster ", cluster, " (", n, " patents):\n- ", patents))
+
+label_prompt <- paste0(
+  "Below are clusters of patents grouped by semantic similarity.\n\n",
+  paste(cluster_summaries$entry, collapse = "\n\n"),
+  "\n\n---\n",
+  "For EACH cluster, provide a short descriptive label (2-5 words) that captures ",
+  "the common technological theme. Be specific and technical.\n\n",
+  "Return ONLY a JSON array of objects with keys \"cluster\" (the number) ",
+  "and \"label\" (the short description). No other text."
+)
+
+label_resp <- request("https://api.openai.com/v1/chat/completions") |>
+  req_headers(Authorization = paste("Bearer", openai_key),
+              `Content-Type` = "application/json") |>
+  req_body_json(list(
+    model    = "gpt-4o-mini",
+    messages = list(list(role = "user", content = label_prompt)),
+    temperature = 0.2,
+    max_tokens  = 500
+  )) |>
+  req_perform()
+
+raw_json <- resp_body_json(label_resp)$choices[[1]]$message$content
+raw_json <- str_remove_all(raw_json, "```json\\s*|```\\s*")
+
+cluster_labels <- jsonlite::fromJSON(raw_json) |>
+  as_tibble() |>
+  mutate(cluster = as.character(cluster))
+
+label_map <- setNames(cluster_labels$label, cluster_labels$cluster)
+
+embed_data <- embed_data |>
+  mutate(cluster_label = factor(label_map[as.character(cluster)], levels = label_map))
+
+cat("Cluster labels:\n")
+cluster_labels |> print(n = 20)
+```
+
+## 8 — UMAP projection and visualization
+
+```{r umap_viz, fig.width=12, fig.height=10, dpi=150}
+umap_config <- umap.defaults
+umap_config$n_neighbors <- min(15, nrow(embedding_matrix) - 1)
+umap_config$min_dist <- 0.1
+
+umap_result <- umap(embedding_matrix, config = umap_config)
+
+embed_data$umap_x <- umap_result$layout[, 1]
+embed_data$umap_y <- umap_result$layout[, 2]
+
+embed_data <- embed_data |>
+  mutate(plot_label = if_else(!is.na(title), str_trunc(title, 30), raw))
+
+# High-contrast colours for clusters
+cluster_colors <- c(
+ "#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00",
+  "#a65628", "#f781bf", "#1b9e77", "#d95f02", "#7570b3"
+)
+
+# Create faded versions for HICs (add transparency via alpha)
+# We'll use alpha in the plot instead
+
+# Separate data for layering
+lmic_data <- embed_data |> filter(source == "LMIC")
+hic_data <- embed_data |> filter(source == "HIC")
+
+# Plot with LMICs in full color and HICs faded with italic labels
+ggplot() +
+  # HICs: faded points, italic labels
+  geom_point(data = hic_data,
+             aes(x = umap_x, y = umap_y, colour = cluster_label),
+             size = 4, alpha = 0.35, shape = 16) +
+  geom_text_repel(data = hic_data,
+                  aes(x = umap_x, y = umap_y, label = plot_label, colour = cluster_label),
+                  size = 2.2, fontface = "italic", alpha = 0.6,
+                  max.overlaps = 15, show.legend = FALSE) +
+  # LMICs: full color points, normal labels
+  geom_point(data = lmic_data,
+             aes(x = umap_x, y = umap_y, colour = cluster_label),
+             size = 4, alpha = 0.9, shape = 16) +
+  geom_text_repel(data = lmic_data,
+                  aes(x = umap_x, y = umap_y, label = plot_label, colour = cluster_label),
+                  size = 2.2, fontface = "plain", alpha = 0.9,
+                  max.overlaps = 15, show.legend = FALSE) +
+  scale_colour_manual(values = cluster_colors) +
+  theme_minimal() +
+  labs(
+    title = "Patent Embedding Clusters — LMICs vs HICs",
+    subtitle = paste0(nrow(lmic_data), " LMIC patents (solid) and ",
+                      nrow(hic_data), " HIC patents (faded/italic) in ", k, " clusters"),
+    x = "UMAP 1",
+    y = "UMAP 2",
+    colour = "Theme"
+  ) +
+  theme(
+    legend.position = "right",
+    legend.text = element_text(size = 9)
+  )
+```
+
+## 9 — Summary statistics
+
+```{r summary_stats}
+embed_data |>
+  count(source, cluster_label) |>
+  tidyr::pivot_wider(names_from = source, values_from = n, values_fill = 0) |>
+  mutate(Total = LMIC + HIC) |>
+  arrange(desc(Total))
+```
+
+## 10 — Simple titles and word cloud
+
+Generate plain-language 3-word titles for each patent that a non-expert can understand.
+Similar patents can share the same title.
+
+```{r simple_titles, message=TRUE}
+# Build prompt with all patents
+patent_entries <- embed_data |>
+  mutate(entry = paste0(
+    "[", row_number(), "] ",
+    if_else(!is.na(title), paste0("Title: ", title, ". "), ""),
+    if_else(!is.na(abstract), paste0("Abstract: ", str_trunc(abstract, 300)), "")
+  )) |>
+  pull(entry) |>
+  paste(collapse = "\n\n")
+
+title_prompt <- paste0(
+  "Below are patents with their titles and/or abstracts.\n\n",
+  patent_entries,
+  "\n\n---\n",
+  "For EACH patent, create a simple 3-word label (maximum) that a non-expert ",
+  "can understand. Use plain language, not technical jargon. ",
+  "Examples: 'solar panel cleaning', 'cancer drug delivery', 'water purification system'.\n\n",
+  "Similar patents CAN and SHOULD have identical labels if they cover the same topic. ",
+  "Do NOT try to make labels unique — group similar innovations together.\n\n",
+  "Return ONLY a JSON array of objects with keys \"id\" (the bracket number) ",
+  "and \"simple_title\" (the 3-word label, lowercase). No other text."
+)
+
+title_resp <- request("https://api.openai.com/v1/chat/completions") |>
+  req_headers(Authorization = paste("Bearer", openai_key),
+              `Content-Type` = "application/json") |>
+  req_body_json(list(
+    model    = "gpt-4o-mini",
+    messages = list(list(role = "user", content = title_prompt)),
+    temperature = 0.3,
+    max_tokens  = 3000
+  )) |>
+  req_perform()
+
+raw_json <- resp_body_json(title_resp)$choices[[1]]$message$content
+raw_json <- str_remove_all(raw_json, "```json\\s*|```\\s*")
+
+simple_titles_df <- jsonlite::fromJSON(raw_json) |>
+  as_tibble() |>
+  mutate(id = as.integer(id),
+         simple_title = str_to_lower(str_squish(simple_title)))
+
+# Attach to embed_data
+embed_data <- embed_data |>
+  mutate(id = row_number()) |>
+  left_join(simple_titles_df, by = "id")
+
+cat("Generated", sum(!is.na(embed_data$simple_title)), "simple titles\n")
+embed_data |> select(raw, simple_title) |> print(n = 30)
+```
+
+```{r simple_title_wordcloud, fig.width=12, fig.height=10, dpi=150}
+library(ggwordcloud)
+
+# Count frequencies of simple titles
+title_counts <- embed_data |>
+  filter(!is.na(simple_title)) |>
+  count(simple_title, sort = TRUE)
+
+cat("Top simple titles:\n")
+print(title_counts, n = 25)
+
+# Word cloud
+ggplot(title_counts, aes(label = simple_title, size = n, colour = n)) +
+geom_text_wordcloud_area(rm_outside = TRUE, shape = "circle",
+                           eccentricity = 0.65) +
+  scale_size_area(max_size = 18) +
+  scale_colour_gradient(low = "#2c7bb6", high = "#d7191c") +
+  theme_minimal() +
+  labs(
+    title = "Patent Innovation Themes — Simple Titles",
+    subtitle = paste(nrow(title_counts), "distinct themes from", nrow(embed_data), "patents")
+  )
+```
+
+```{r simple_title_bar, fig.width=10, fig.height=8}
+# Bar chart of top titles
+title_counts |>
+  slice_max(n, n = 25, with_ties = FALSE) |>
+  mutate(simple_title = reorder(simple_title, n)) |>
+  ggplot(aes(n, simple_title, fill = n)) +
+  geom_col(show.legend = FALSE) +
+  scale_fill_gradient(low = "#2c7bb6", high = "#d7191c") +
+  labs(x = "Number of Patents", y = NULL,
+       title = "Top Innovation Themes (Simple Titles)") +
+  theme_minimal()
+```
+
+```{r simple_title_by_source, fig.width=12, fig.height=8}
+# Compare LMIC vs HIC distribution of simple titles
+title_source_counts <- embed_data |>
+  filter(!is.na(simple_title)) |>
+  count(simple_title, source) |>
+  tidyr::pivot_wider(names_from = source, values_from = n, values_fill = 0) |>
+  mutate(Total = LMIC + HIC) |>
+  slice_max(Total, n = 20, with_ties = FALSE) |>
+  tidyr::pivot_longer(cols = c(LMIC, HIC), names_to = "source", values_to = "n")
+
+ggplot(title_source_counts, aes(x = n, y = reorder(simple_title, Total),
+                                 fill = source)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("LMIC" = "#e41a1c", "HIC" = "#377eb8")) +
+  labs(x = "Number of Patents", y = NULL,
+       title = "Top Innovation Themes by Source",
+       fill = "Source") +
+  theme_minimal() +
+  theme(legend.position = "top")
+```

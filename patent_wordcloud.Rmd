@@ -14,7 +14,7 @@ draws a word cloud of the most frequent bigrams.
 ```{r setup, message=FALSE, warning=FALSE}
 # Install any missing packages
 pkgs <- c("httr2", "xml2", "dplyr", "tidyr", "tidytext", "stringr",
-           "ggplot2", "ggwordcloud", "purrr", "tibble")
+           "ggplot2", "ggwordcloud", "purrr", "tibble", "digest")
 install.packages(setdiff(pkgs, rownames(installed.packages())), quiet = TRUE)
 
 library(httr2)
@@ -117,12 +117,33 @@ if (resp_status(test_resp) < 400) {
 }
 ```
 
-## 4b — Fetch abstracts from OPS
+## 4b — Fetch abstracts from OPS (with caching)
 
 We query the *published-data* endpoint one patent at a time.
 OPS anonymous throttle is ~4 req/s; we add a small delay to be polite.
 
+Results are cached to `.bigdata/` to avoid repeated API calls.
+
 ```{r fetch_abstracts, message=TRUE, warning=TRUE}
+# Create cache directory if it doesn't exist
+cache_dir <- ".bigdata"
+if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
+
+# Cache file path based on hash of application numbers
+cache_file <- file.path(cache_dir, paste0(
+  "epo_abstracts_", digest::digest(app_numbers, algo = "md5"), ".rds"
+))
+
+# Check if cached data exists
+if (file.exists(cache_file)) {
+  cat("Loading cached EPO data from", cache_file, "\n")
+  results <- readRDS(cache_file)
+  abstracts <- results
+  cat("Loaded", sum(!is.na(results$abstract)), "abstracts and",
+      sum(!is.na(results$title)), "titles from cache\n")
+} else {
+  cat("No cache found, fetching from EPO API...\n")
+
 ns <- c(ex = "http://www.epo.org/exchange", ops = "http://ops.epo.org")
 
 extract_en_abstract <- function(doc) {
@@ -208,8 +229,13 @@ cat("\nFetched", sum(!is.na(results$abstract)), "abstracts and",
     sum(!is.na(results$title)), "titles out of",
     nrow(results), "applications\n")
 
-# Keep backward-compatible name for downstream chunks
-abstracts <- results
+  # Keep backward-compatible name for downstream chunks
+  abstracts <- results
+
+  # Save to cache
+  saveRDS(results, cache_file)
+  cat("Cached results to", cache_file, "\n")
+}
 ```
 
 ## 5 — AI-derived innovation labels
@@ -395,4 +421,158 @@ summary_text <- resp_body_json(resp)$choices[[1]]$message$content
 
 ```{r print_summary, results='asis'}
 cat(summary_text)
+```
+
+## 9 — Embedding Clusters
+
+Uses OpenAI embeddings to create vector representations of each patent's
+title + abstract, then clusters them with k-means and visualizes in 2D using UMAP.
+
+```{r embeddings_setup, message=FALSE, warning=FALSE}
+# Additional packages for clustering and dimensionality reduction
+pkgs_embed <- c("umap")
+install.packages(setdiff(pkgs_embed, rownames(installed.packages())), quiet = TRUE)
+library(umap)
+```
+
+```{r create_embeddings, message=TRUE}
+# Combine title and abstract for each patent
+embed_data <- abstracts |>
+
+filter(!is.na(abstract) | !is.na(title)) |>
+  mutate(
+    text = paste(
+      if_else(!is.na(title), title, ""),
+      if_else(!is.na(abstract), abstract, "")
+    ) |> str_squish()
+  ) |>
+  filter(nchar(text) > 10)
+
+cat("Creating embeddings for", nrow(embed_data), "patents...\n")
+
+# Function to get embeddings from OpenAI
+get_embeddings <- function(texts, api_key) {
+  resp <- request("https://api.openai.com/v1/embeddings") |>
+    req_headers(Authorization = paste("Bearer", api_key),
+                `Content-Type` = "application/json") |>
+    req_body_json(list(
+      model = "text-embedding-3-small",
+      input = texts
+    )) |>
+    req_perform()
+
+  result <- resp_body_json(resp)
+  # Extract embedding vectors and convert to matrix
+  embeddings <- lapply(result$data, function(x) unlist(x$embedding))
+  do.call(rbind, embeddings)  # Return as matrix with rows = documents
+}
+
+# Get embeddings (OpenAI allows batching)
+embedding_matrix <- get_embeddings(embed_data$text, openai_key)
+cat("Embedding dimensions:", dim(embedding_matrix), "\n")
+```
+
+```{r cluster_embeddings}
+# K-means clustering into 10 clusters (or fewer if not enough documents)
+set.seed(42)
+k <- min(10, nrow(embedding_matrix))
+clusters <- kmeans(embedding_matrix, centers = k, nstart = 25)
+
+embed_data$cluster <- as.factor(clusters$cluster)
+cat("Patents per cluster:\n")
+table(embed_data$cluster)
+```
+
+```{r cluster_labels, message=TRUE}
+# Build a summary of each cluster for the AI to label
+cluster_summaries <- embed_data |>
+  group_by(cluster) |>
+  summarise(
+    patents = paste(
+      if_else(!is.na(title), title, str_trunc(text, 100)),
+      collapse = "\n- "
+    ),
+    n = n(),
+    .groups = "drop"
+  ) |>
+  mutate(entry = paste0(
+    "Cluster ", cluster, " (", n, " patents):\n- ", patents
+  ))
+
+label_prompt <- paste0(
+  "Below are clusters of patents grouped by semantic similarity.\n\n",
+  paste(cluster_summaries$entry, collapse = "\n\n"),
+  "\n\n---\n",
+  "For EACH cluster, provide a short descriptive label (2-5 words) that captures ",
+  "the common technological theme. Be specific and technical.\n\n",
+  "Return ONLY a JSON array of objects with keys \"cluster\" (the number) ",
+  "and \"label\" (the short description). No other text."
+)
+
+label_resp <- request("https://api.openai.com/v1/chat/completions") |>
+  req_headers(Authorization = paste("Bearer", openai_key),
+              `Content-Type` = "application/json") |>
+  req_body_json(list(
+    model    = "gpt-4o-mini",
+    messages = list(list(role = "user", content = label_prompt)),
+    temperature = 0.2,
+    max_tokens  = 500
+  )) |>
+  req_perform()
+
+raw_json <- resp_body_json(label_resp)$choices[[1]]$message$content
+raw_json <- str_remove_all(raw_json, "```json\\s*|```\\s*")
+
+cluster_labels <- jsonlite::fromJSON(raw_json) |>
+  as_tibble() |>
+  mutate(cluster = as.character(cluster))
+
+# Create named vector for relabeling
+label_map <- setNames(cluster_labels$label, cluster_labels$cluster)
+
+# Update cluster factor with descriptive labels
+embed_data <- embed_data |>
+  mutate(cluster_label = factor(label_map[as.character(cluster)],
+                                levels = label_map))
+
+cat("Cluster labels:\n")
+cluster_labels |> print(n = 20)
+```
+
+```{r umap_viz, fig.width=10, fig.height=8, dpi=150}
+# UMAP dimensionality reduction to 2D
+umap_config <- umap.defaults
+umap_config$n_neighbors <- min(15, nrow(embedding_matrix) - 1)
+umap_config$min_dist <- 0.1
+
+umap_result <- umap(embedding_matrix, config = umap_config)
+
+embed_data$umap_x <- umap_result$layout[, 1]
+embed_data$umap_y <- umap_result$layout[, 2]
+
+# Create labels for the plot (truncated title or app number)
+embed_data <- embed_data |>
+  mutate(plot_label = if_else(!is.na(title), str_trunc(title, 30), raw))
+
+# High-contrast colour palette for clusters
+cluster_colors <- c(
+  "#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00",
+  "#a65628", "#f781bf", "#1b9e77", "#d95f02", "#7570b3"
+)
+
+# Plot clusters with AI-generated labels
+ggplot(embed_data, aes(x = umap_x, y = umap_y, colour = cluster_label)) +
+  geom_point(size = 4, alpha = 0.9) +
+  geom_text(aes(label = plot_label), size = 2.2, vjust = -1,
+            check_overlap = TRUE, show.legend = FALSE) +
+  scale_colour_manual(values = cluster_colors) +
+  theme_minimal() +
+  labs(
+    title = "Patent Embedding Clusters (UMAP projection)",
+    subtitle = paste(nrow(embed_data), "patents clustered into", k, "groups"),
+    x = "UMAP 1",
+    y = "UMAP 2",
+    colour = "Theme"
+  ) +
+  theme(legend.position = "right")
 ```
