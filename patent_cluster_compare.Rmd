@@ -220,11 +220,15 @@ make_ops_request <- function(token_mgr, max_retries = 15) {
         message("    [", status, "] possibly expired token, refreshing...")
         token_mgr$refresh(); Sys.sleep(5); next
       }
-      if (status %in% c(429, 500, 503)) {
+      if (status %in% c(429, 500, 502, 503, 504)) {
         message("    [", status, "] waiting 60s (attempt ", attempt, "/", max_retries, ")...")
         Sys.sleep(60); next
       }
-      if (status >= 400) return(NULL)
+      if (status >= 400) {
+        # Log non-retryable errors so we can see what went wrong
+        message("    [HTTP ", status, "] giving up: ", url)
+        return(NULL)
+      }
       return(resp_body_xml(resp))
     }
     NULL
@@ -238,8 +242,11 @@ fetch_one_patent <- function(raw_id, ops_request) {
                            applicant_types = NA_character_,
                            is_company = NA)
 
+  # Use `biblio` as the search constant — lightweight, returns the biblio
+  # exchange document which includes title, abstract, and applicants.
+  # NOTE: the search endpoint accepts ONE constant only (not comma-separated).
   search_url <- paste0(
-    "https://ops.epo.org/3.2/rest-services/published-data/search/biblio,abstract?q=ap%3D",
+    "https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=ap%3D",
     raw_id
   )
   doc <- tryCatch(ops_request(search_url), error = function(e) NULL)
@@ -373,6 +380,70 @@ label_clusters <- function(embed_data, openai_key) {
     mutate(cluster = as.character(cluster))
 }
 
+consolidate_titles <- function(titles_df, openai_key) {
+  # Count each raw label; send the distinct list to GPT for consolidation
+  counts <- titles_df |>
+    filter(!is.na(simple_title)) |>
+    count(simple_title, sort = TRUE, name = "freq")
+
+  if (nrow(counts) <= 1) {
+    return(titles_df |> mutate(simple_title_raw = simple_title))
+  }
+
+  # Build a compact bullet list: "label (n=freq)"
+  entries <- paste0("- ", counts$simple_title, " (n=", counts$freq, ")",
+                    collapse = "\n")
+
+  prompt <- paste0(
+    "Below is a list of short patent theme labels with their frequencies.\n\n",
+    entries, "\n\n---\n",
+    "Your job: consolidate this list. Many labels are synonyms or near-duplicates ",
+    "of the same broad theme — they should be merged into a single canonical label. ",
+    "Canonical labels should be ONE or TWO words — use one word when it naturally ",
+    "captures the theme, and two words when they give a more meaningful description.\n\n",
+    "Examples of merges: 'solar panel' + 'photovoltaic' + 'pv module' → 'solar'; ",
+    "'cancer drug' + 'oncology drug' + 'tumor therapy' → 'cancer drug'; ",
+    "'lithium battery' + 'battery cell' + 'energy storage' → 'battery'; ",
+    "'water filter' + 'desalination' + 'water treatment' → 'water purification'.\n\n",
+    "Aim to reduce the list to roughly 10-25 broad canonical themes total. ",
+    "Every input label MUST appear in the output mapping.\n\n",
+    "Return ONLY a JSON array of objects with keys \"from\" (the original label) ",
+    "and \"to\" (the canonical label, lowercase, 1-2 words). No other text."
+  )
+
+  raw_json <- chat_completion(prompt, openai_key,
+                              temperature = 0.1, max_tokens = 4000)
+
+  mapping <- tryCatch(
+    jsonlite::fromJSON(raw_json) |> as_tibble(),
+    error = function(e) {
+      warning("Failed to parse consolidation response: ", e$message,
+              " — keeping original labels")
+      tibble(from = character(), to = character())
+    }
+  )
+
+  if (nrow(mapping) == 0) {
+    return(titles_df |> mutate(simple_title_raw = simple_title))
+  }
+
+  mapping <- mapping |>
+    mutate(from = str_to_lower(str_squish(from)),
+           to   = str_to_lower(str_squish(to)))
+
+  map_vec <- setNames(mapping$to, mapping$from)
+
+  titles_df |>
+    mutate(
+      simple_title_raw = simple_title,
+      simple_title = unname(ifelse(
+        simple_title %in% names(map_vec),
+        map_vec[simple_title],
+        simple_title  # unmapped labels stay as-is
+      ))
+    )
+}
+
 generate_simple_titles <- function(embed_data, openai_key, batch_size = 100) {
   prep <- embed_data |>
     mutate(global_id = row_number()) |>
@@ -393,13 +464,19 @@ generate_simple_titles <- function(embed_data, openai_key, batch_size = 100) {
     prompt <- paste0(
       "Below are patents with their titles and/or abstracts.\n\n",
       entries, "\n\n---\n",
-      "For EACH patent, create a simple 3-word label (maximum) that a non-expert ",
-      "can understand. Use plain language, not technical jargon. ",
-      "Examples: 'solar panel cleaning', 'cancer drug delivery', 'water purification system'.\n\n",
-      "Similar patents CAN and SHOULD have identical labels if they cover the same topic. ",
-      "Do NOT try to make labels unique — group similar innovations together.\n\n",
+      "For EACH patent, create a very short label — ONE or TWO words — ",
+      "that a non-expert can understand. Use plain language, not technical jargon. ",
+      "Prefer one word when it naturally captures the theme, but two words are ",
+      "fine when they give a more meaningful description.\n\n",
+      "CRITICAL: labels MUST repeat across similar patents. The goal is to group ",
+      "patents into broad themes, NOT to describe each patent uniquely. ",
+      "Think of categories, not descriptions. ",
+      "Good examples: 'vaccine', 'battery', 'catalyst', 'solar', 'fertilizer', ",
+      "'turbine', 'cancer drug', 'solar cell', 'water purification', 'crop protection'.\n\n",
+      "Many patents SHOULD share the same label. If you find yourself writing ",
+      "many distinct labels, you are being too specific — generalize further.\n\n",
       "Return ONLY a JSON array of objects with keys \"id\" (the bracket number) ",
-      "and \"simple_title\" (the 3-word label, lowercase). No other text."
+      "and \"simple_title\" (the label, lowercase, 1-2 words). No other text."
     )
 
     message("    [titles] batch ", bi, "/", length(batches),
@@ -427,6 +504,156 @@ generate_simple_titles <- function(embed_data, openai_key, batch_size = 100) {
   })
 
   bind_rows(results)
+}
+
+# ---- Assignee harmonization --------------------------------------------------
+
+# Regex patterns for per-assignee heuristic classification
+# Organizations: corporate suffixes, universities, research institutions
+org_suffix_regex <- regex(
+  "\\b(inc|corp|ltd|llc|gmbh|ag|sa|sas|bv|nv|co|plc|pty|ab|oy|as|se|spa|srl|kk)\\b",
+  ignore_case = TRUE
+)
+# University/academia keywords (multilingual)
+university_regex <- regex(
+  paste0("\\b(univ|univers|universit|college|polytechnic|",
+         "institute|institut|academy|academia|school|schule|hochschule|",
+         "ecole|ecole polytechnique|escuela|scuola|faculty)\\b"),
+  ignore_case = TRUE
+)
+# Research institute / government keywords
+research_regex <- regex(
+  paste0("\\b(cnrs|csic|csiro|csir|fraunhofer|max planck|helmholtz|riken|",
+         "national lab|laboratory|laboratoire|laboratorio|research|forschung|",
+         "instituto|agency|ministry|ministr|commission|consejo|conseil|",
+         "council|foundation|fund|fonds|fundacion|stiftung)\\b"),
+  ignore_case = TRUE
+)
+
+# Explode the `applicant_names` column (semicolon-separated) into one row per
+# (patent, raw assignee). Strips EPO-style "[CC]" country suffixes and applies
+# per-assignee heuristic classification (company / university / research / person).
+explode_assignees <- function(embed_data) {
+  embed_data |>
+    filter(!is.na(applicant_names)) |>
+    select(raw, source, applicant_names) |>
+    mutate(assignee = str_split(applicant_names, ";\\s*")) |>
+    tidyr::unnest(assignee) |>
+    mutate(assignee = str_squish(str_remove(assignee, "\\s*\\[[A-Z]{2,3}\\]\\s*$"))) |>
+    filter(nchar(assignee) > 0) |>
+    mutate(
+      # Per-assignee heuristic classification
+      is_university_h = str_detect(assignee, university_regex),
+      is_research_h   = str_detect(assignee, research_regex),
+      is_company_h    = str_detect(assignee, org_suffix_regex),
+      is_org_h        = is_university_h | is_research_h | is_company_h,
+      heuristic_type  = case_when(
+        is_university_h ~ "university",
+        is_research_h   ~ "research_institute",
+        is_company_h    ~ "company",
+        TRUE            ~ "unknown"  # needs GPT to decide
+      )
+    )
+}
+
+# Ask GPT to: (1) drop individual person names, (2) harmonise variants to a
+# canonical firm/institution name, (3) classify as company/university/etc.
+# Returns a mapping: from -> (to, entity_type).  to == NA for persons.
+# Only names the heuristic couldn't classify confidently are sent to GPT;
+# names pre-classified by the heuristic are harmonised in a separate GPT pass
+# WITHIN each type to avoid cross-type merges.
+harmonize_assignees <- function(assignees_df, openai_key, batch_size = 150) {
+  # Get unique names with frequency AND their heuristic classification
+  uniq <- assignees_df |>
+    group_by(assignee) |>
+    summarise(
+      freq           = n(),
+      heuristic_type = first(heuristic_type),
+      .groups        = "drop"
+    ) |>
+    arrange(desc(freq))
+
+  if (nrow(uniq) == 0) {
+    return(tibble(from = character(), to = character(), entity_type = character()))
+  }
+
+  call_gpt_batch <- function(batch, prompt_prefix) {
+    entries <- paste0("- ", batch$assignee, " (n=", batch$freq, ")",
+                      collapse = "\n")
+    prompt <- paste0(prompt_prefix, "\n\n", entries, "\n\n---\n",
+      "Return ONLY a JSON array of objects with keys \"from\" (original name), ",
+      "\"to\" (canonical short name, Title Case, 1-4 words, null for persons), ",
+      "and \"entity_type\" (one of: \"company\", \"university\", ",
+      "\"research_institute\", \"government\", \"other\", \"person\"). ",
+      "EVERY input name MUST appear in the output. No other text."
+    )
+
+    raw_json <- chat_completion(prompt, openai_key,
+                                temperature = 0.1, max_tokens = 6000)
+
+    tryCatch(
+      jsonlite::fromJSON(raw_json) |>
+        as_tibble() |>
+        mutate(
+          from = str_squish(from),
+          to   = if (is.character(to)) str_squish(to) else as.character(to),
+          to   = na_if(to, "NA"),
+          to   = na_if(to, ""),
+          entity_type = str_to_lower(str_squish(entity_type))
+        ),
+      error = function(e) {
+        warning("Failed to parse assignee batch: ", e$message)
+        tibble(from = character(), to = character(), entity_type = character())
+      }
+    )
+  }
+
+  # Split by heuristic type so GPT harmonises WITHIN each type
+  # (prevents e.g. a university variant accidentally merging with a company)
+  run_for_type <- function(df, label, type_hint) {
+    if (nrow(df) == 0) return(tibble(from = character(), to = character(),
+                                     entity_type = character()))
+    batches <- split(df, ceiling(seq_len(nrow(df)) / batch_size))
+    prefix <- switch(label,
+      "unknown" = paste0(
+        "Below is a list of raw patent assignee names (with frequencies). ",
+        "These could not be pre-classified. For EACH name:\n",
+        "1. DECIDE if it is a PERSON or an organization (company, ",
+        "university, research institute, government). ",
+        "Persons look like 'SMITH JOHN', 'WANG WEI', 'GARCIA MARIA [US]'.\n",
+        "2. For organizations, HARMONISE variants to a SHORT canonical name. ",
+        "Examples: 'MERCK SHARP & DOHME CORP' + 'MERCK & CO INC' → 'Merck'; ",
+        "'UNIV CALIFORNIA' + 'REGENTS OF THE UNIVERSITY OF CALIFORNIA' → 'UC System'.\n",
+        "3. ASSIGN an entity_type."
+      ),
+      paste0(
+        "Below is a list of raw patent assignee names (with frequencies) that ",
+        "are all pre-classified as ", type_hint, ". ",
+        "HARMONISE variants to a SHORT canonical name (Title Case, 1-4 words, ",
+        "drop generic suffixes like Inc/Corp/Ltd/GmbH). ",
+        "Examples: 'MERCK SHARP & DOHME CORP' + 'MERCK & CO INC' → 'Merck'. ",
+        "Set entity_type = \"", type_hint, "\" for every entry unless a name ",
+        "is clearly something else (in which case correct it). ",
+        "A name is only a person if it is clearly an individual human — be strict, ",
+        "since these were pre-classified as organizations."
+      )
+    )
+
+    lapply(seq_along(batches), function(bi) {
+      message("    [assignees:", label, "] batch ", bi, "/", length(batches),
+              " (", nrow(batches[[bi]]), " names)")
+      call_gpt_batch(batches[[bi]], prefix)
+    }) |> bind_rows()
+  }
+
+  groups <- split(uniq, uniq$heuristic_type)
+
+  bind_rows(
+    run_for_type(groups$company            %||% uniq[0,], "company",            "company"),
+    run_for_type(groups$university         %||% uniq[0,], "university",         "university"),
+    run_for_type(groups$research_institute %||% uniq[0,], "research_institute", "research_institute"),
+    run_for_type(groups$unknown            %||% uniq[0,], "unknown",            NA)
+  )
 }
 
 # ---- Plotting functions ------------------------------------------------------
@@ -466,16 +693,31 @@ make_umap_plot <- function(embed_data, k, tech_name) {
     theme(legend.position = "right", legend.text = element_text(size = 9))
 }
 
-make_wordcloud_plot <- function(title_counts, tech_name) {
-  ggplot(title_counts, aes(label = simple_title, size = n, colour = n)) +
-    geom_text_wordcloud_area(rm_outside = TRUE, shape = "circle", eccentricity = 0.65) +
+make_wordcloud_plot <- function(embed_data, tech_name, max_per_source = 60) {
+  counts <- embed_data |>
+    filter(!is.na(simple_title)) |>
+    count(source, simple_title, sort = TRUE, name = "n") |>
+    group_by(source) |>
+    slice_max(n, n = max_per_source, with_ties = FALSE) |>
+    ungroup()
+
+  if (nrow(counts) == 0) {
+    return(ggplot() + theme_void() +
+           labs(title = paste0("No themes to display — ", tech_name)))
+  }
+
+  ggplot(counts, aes(label = simple_title, size = n, colour = source)) +
+    geom_text_wordcloud_area(rm_outside = TRUE, shape = "circle",
+                             eccentricity = 0.65) +
     scale_size_area(max_size = 18) +
-    scale_colour_gradient(low = "#2c7bb6", high = "#d7191c") +
+    scale_colour_manual(values = c("LMIC" = "#e41a1c", "HIC" = "#377eb8")) +
+    facet_wrap(~source, ncol = 2) +
     theme_minimal() +
     labs(
       title = paste0("Patent Innovation Themes — ", tech_name),
-      subtitle = paste(nrow(title_counts), "distinct themes")
-    )
+      subtitle = "Top canonical themes by source"
+    ) +
+    theme(strip.text = element_text(size = 14, face = "bold"))
 }
 
 make_top_titles_bar <- function(title_counts, tech_name) {
@@ -488,6 +730,48 @@ make_top_titles_bar <- function(title_counts, tech_name) {
     labs(x = "Number of Patents", y = NULL,
          title = paste0("Top Innovation Themes — ", tech_name)) +
     theme_minimal()
+}
+
+entity_type_colors <- c(
+  "company"            = "#377eb8",
+  "university"         = "#e41a1c",
+  "research_institute" = "#4daf4a",
+  "government"         = "#984ea3",
+  "other"              = "#999999"
+)
+
+make_assignee_wordcloud <- function(assignees_df, tech_name, max_per_source = 60) {
+  # Drop persons and unclassified; keep most common entity_type per canonical
+  counts <- assignees_df |>
+    filter(!is.na(canonical),
+           !entity_type %in% c("person", NA)) |>
+    group_by(source, canonical) |>
+    summarise(n = n(),
+              entity_type = names(sort(table(entity_type), decreasing = TRUE))[1],
+              .groups = "drop") |>
+    filter(entity_type %in% names(entity_type_colors)) |>
+    group_by(source) |>
+    slice_max(n, n = max_per_source, with_ties = FALSE) |>
+    ungroup()
+
+  if (nrow(counts) == 0) {
+    return(ggplot() + theme_void() +
+           labs(title = paste0("No assignees to display — ", tech_name)))
+  }
+
+  ggplot(counts, aes(label = canonical, size = n, colour = entity_type)) +
+    geom_text_wordcloud_area(rm_outside = TRUE, shape = "circle",
+                             eccentricity = 0.65) +
+    scale_size_area(max_size = 18) +
+    scale_colour_manual(values = entity_type_colors, name = "Entity type") +
+    facet_wrap(~source, ncol = 2) +
+    theme_minimal() +
+    labs(
+      title = paste0("Harmonized Assignees — ", tech_name),
+      subtitle = "Firms and institutions only (persons filtered out); colored by entity type"
+    ) +
+    theme(strip.text = element_text(size = 14, face = "bold"),
+          legend.position = "bottom")
 }
 
 make_source_comparison_bar <- function(embed_data, tech_name) {
@@ -522,8 +806,8 @@ produces its own full set of plots in Section 5.
 ```{r config}
 tech_selections <- c( "Green Technology")
 
-toflow         <- "ev_global"
-top_n_ids      <- 200
+toflow         <- "av_global"
+top_n_ids      <- 100
 country_group1 <- "LMICs (excl. China)"
 country_group2 <- "High income countries"
 
@@ -627,13 +911,39 @@ analyze_tech <- function(tech_selection) {
   embed_data <- embed_data |>
     mutate(plot_label = if_else(!is.na(title), str_trunc(title, 30), raw))
 
-  # --- 7. Simple titles ---
+  # --- 7. Simple titles (two-pass: label, then consolidate synonyms) ---
   simple_titles_df <- generate_simple_titles(embed_data, openai_key)
+  simple_titles_df <- consolidate_titles(simple_titles_df, openai_key)
+
+  n_raw    <- dplyr::n_distinct(simple_titles_df$simple_title_raw, na.rm = TRUE)
+  n_canon  <- dplyr::n_distinct(simple_titles_df$simple_title,     na.rm = TRUE)
+  cat("Simple titles: ", n_raw, " raw → ", n_canon, " canonical\n", sep = "")
+
   embed_data <- embed_data |>
     mutate(id = row_number()) |>
     left_join(simple_titles_df, by = "id")
 
-  # --- 8. Build plots ---
+  # --- 8. Assignee harmonization (drop persons, merge variants, classify) ---
+  assignees_long <- explode_assignees(embed_data)
+  assignee_map   <- harmonize_assignees(assignees_long, openai_key)
+
+  assignees_clean <- assignees_long |>
+    left_join(assignee_map, by = c("assignee" = "from")) |>
+    rename(canonical = to)
+
+  n_raw_assignees   <- dplyr::n_distinct(assignees_long$assignee)
+  n_canon_assignees <- dplyr::n_distinct(assignees_clean$canonical[!is.na(assignees_clean$canonical)])
+  n_persons_dropped <- sum(is.na(assignees_clean$canonical) |
+                           assignees_clean$entity_type == "person", na.rm = TRUE)
+  cat("Assignees: ", n_raw_assignees, " raw → ", n_canon_assignees,
+      " canonical firms/institutions (",
+      n_persons_dropped, " person-rows dropped)\n", sep = "")
+  cat("  Entity types: ",
+      paste(names(table(assignees_clean$entity_type)), "=",
+            as.integer(table(assignees_clean$entity_type)), collapse = ", "),
+      "\n", sep = "")
+
+  # --- 9. Build plots ---
   title_counts <- embed_data |>
     filter(!is.na(simple_title)) |>
     count(simple_title, sort = TRUE)
@@ -648,16 +958,18 @@ analyze_tech <- function(tech_selection) {
     arrange(desc(Total))
 
   list(
-    tech             = tech_selection,
-    embed_data       = embed_data,
-    cluster_labels   = cluster_labels,
-    k                = k,
-    title_counts     = title_counts,
-    src_summary      = src_summary,
-    umap_plot        = make_umap_plot(embed_data, k, tech_selection),
-    wordcloud        = make_wordcloud_plot(title_counts, tech_selection),
-    top_titles_bar   = make_top_titles_bar(title_counts, tech_selection),
-    source_bar       = make_source_comparison_bar(embed_data, tech_selection)
+    tech              = tech_selection,
+    embed_data        = embed_data,
+    cluster_labels    = cluster_labels,
+    k                 = k,
+    title_counts      = title_counts,
+    src_summary       = src_summary,
+    assignees_clean   = assignees_clean,
+    umap_plot         = make_umap_plot(embed_data, k, tech_selection),
+    wordcloud         = make_wordcloud_plot(embed_data, tech_selection),
+    top_titles_bar    = make_top_titles_bar(title_counts, tech_selection),
+    source_bar        = make_source_comparison_bar(embed_data, tech_selection),
+    assignee_wordcloud = make_assignee_wordcloud(assignees_clean, tech_selection)
   )
 }
 ```
@@ -692,6 +1004,7 @@ for (tech in names(results_by_tech)) {
   print(res$wordcloud)
   print(res$top_titles_bar)
   print(res$source_bar)
+  print(res$assignee_wordcloud)
 }
 ```
 
