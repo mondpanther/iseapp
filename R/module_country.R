@@ -482,7 +482,7 @@ country_module_server <- function(id, parent_session, con) {
           widthscale              = input$widthscale,
           display_mode            = input$display_mode,
           top_n_ids               = input$top_n_ids,
-          plot_title              = sub("^[^.]*\\.", "", flow_label),
+          plot_title              = paste0(sub("^[^.]*\\.", "", flow_label), " - ", paste(input$techs, collapse = ", ")),
           comparison_technologies = input$techs_comparison,
           precomputed_avstrax     = precomputed_data
         )
@@ -511,7 +511,7 @@ country_module_server <- function(id, parent_session, con) {
         if (nrow(avstrax_data) == 0) return(NULL)
 
         is_return <- grepl("^(is|av)", input$toflow)
-        map_title <- sub("^[^.]*\\.", "", flow_label)
+        map_title <- paste0(sub("^[^.]*\\.", "", flow_label), " - ", paste(input$techs, collapse = ", "))
 
         # Store ggplot version and data for PDF/CSV downloads
         plot_store$world_map_gg <- plot_world_map_gg(

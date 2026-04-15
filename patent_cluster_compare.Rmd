@@ -43,7 +43,7 @@ parquet database, using the same logic as the Shiny app.
 # --- Configuration (mirrors the URL parameters) ---
 tech_selection <- "Adaptation"
 toflow         <- "ev_global"
-top_n_ids      <- 200
+top_n_ids      <- 500
 country_group1 <- "LMICs (excl. China)"
 country_group2 <- "High income countries"
 
@@ -186,10 +186,11 @@ if (file.exists(cache_file)) {
 
   extract_en_abstract <- function(doc) {
     abs_nodes <- xml_find_all(doc, ".//ex:abstract", ns)
+    if (length(abs_nodes) == 0) return(NA_character_)
     langs <- xml_attr(abs_nodes, "lang")
+    # Prefer English; fall back to first available language
     en <- abs_nodes[!is.na(langs) & langs == "en"]
-    node <- if (length(en) > 0) en[[1]] else NULL
-    if (is.null(node)) return(NA_character_)
+    node <- if (length(en) > 0) en[[1]] else abs_nodes[[1]]
 
     p_nodes <- xml_find_all(node, ".//ex:p", ns)
     text <- if (length(p_nodes) > 0) paste(xml_text(p_nodes), collapse = " ") else xml_text(node)
@@ -199,10 +200,11 @@ if (file.exists(cache_file)) {
 
   extract_en_title <- function(doc) {
     title_nodes <- xml_find_all(doc, ".//ex:invention-title", ns)
+    if (length(title_nodes) == 0) return(NA_character_)
     langs <- xml_attr(title_nodes, "lang")
+    # Prefer English; fall back to first available language
     en <- title_nodes[!is.na(langs) & langs == "en"]
-    node <- if (length(en) > 0) en[[1]] else NULL
-    if (is.null(node)) return(NA_character_)
+    node <- if (length(en) > 0) en[[1]] else title_nodes[[1]]
     str_squish(xml_text(node))
   }
 
@@ -265,105 +267,87 @@ if (file.exists(cache_file)) {
     )
   }
 
-  fetch_patent <- function(country, docnumber, token) {
-    epodoc <- paste0(country, ".", docnumber)
+  # Token manager: refreshes the access token when it's close to expiring
+  # OPS tokens expire after ~20 minutes, so refresh every 15 minutes to be safe
+  token_env <- new.env()
+  token_env$token      <- access_token
+  token_env$expires_at <- Sys.time() + 15 * 60  # 15 min from now
+
+  refresh_token <- function() {
+    message("    [TOKEN] Refreshing OPS access token...")
+    resp <- request("https://ops.epo.org/3.2/auth/accesstoken") |>
+      req_auth_basic(ops_key, ops_secret) |>
+      req_body_form(grant_type = "client_credentials") |>
+      req_perform()
+    token_env$token      <- resp_body_json(resp)$access_token
+    token_env$expires_at <- Sys.time() + 15 * 60
+    message("    [TOKEN] Refreshed, valid until ", format(token_env$expires_at, "%H:%M:%S"))
+  }
+
+  get_token <- function() {
+    if (Sys.time() > token_env$expires_at) refresh_token()
+    token_env$token
+  }
+
+  # Throttle-aware HTTP caller: waits patiently until throttle clears
+  ops_request <- function(url, max_retries = 15) {
+    for (attempt in seq_len(max_retries + 1)) {
+      resp <- request(url) |>
+        req_headers(Authorization = paste("Bearer", get_token()),
+                    Accept        = "application/xml") |>
+        req_error(is_error = \(resp) FALSE) |>
+        req_perform()
+
+      status <- resp_status(resp)
+
+      throttle_hdr <- resp_header(resp, "X-Throttling-Control")
+      if (!is.null(throttle_hdr) && grepl("overloaded", throttle_hdr, ignore.case = TRUE)) {
+        message("    [THROTTLED] waiting 60s (attempt ", attempt, "/", max_retries, ")...")
+        Sys.sleep(60)
+        next
+      }
+      # 401/403 = possibly expired token → force refresh and retry
+      if (status %in% c(401, 403)) {
+        message("    [", status, "] possibly expired token, refreshing...")
+        refresh_token()
+        Sys.sleep(5)
+        next
+      }
+      if (status %in% c(429, 500, 503)) {
+        message("    [", status, "] waiting 60s (attempt ", attempt, "/", max_retries, ")...")
+        Sys.sleep(60)
+        next
+      }
+
+      if (status >= 400) return(NULL)
+      return(resp_body_xml(resp))
+    }
+    return(NULL)
+  }
+
+  fetch_patent <- function(raw_id, country, docnumber) {
     abstract       <- NA_character_
     title          <- NA_character_
     applicant_info <- tibble(applicant_names = NA_character_,
                              applicant_types = NA_character_,
                              is_company = NA)
 
-    # Throttle-aware endpoint caller: retries with exponential backoff on 403/429/overload
-    try_endpoint <- function(url, max_retries = 7) {
-      last_status <- NA
-      for (attempt in seq_len(max_retries + 1)) {
-        resp <- request(url) |>
-          req_headers(Authorization = paste("Bearer", token),
-                      Accept        = "application/xml") |>
-          req_error(is_error = \(resp) FALSE) |>
-          req_perform()
+    # Use OPS SEARCH API (same as Espacenet web search — accepts ap= syntax)
+    search_url <- paste0(
+      "https://ops.epo.org/3.2/rest-services/published-data/search/biblio,abstract?q=ap%3D",
+      raw_id
+    )
 
-        status <- resp_status(resp)
-        last_status <<- status
+    doc <- tryCatch(ops_request(search_url), error = function(e) NULL)
 
-        # Check X-Throttling-Control header for quota info
-        throttle_hdr <- resp_header(resp, "X-Throttling-Control")
-        if (!is.null(throttle_hdr) && grepl("overloaded", throttle_hdr, ignore.case = TRUE)) {
-          wait_secs <- min(120, 10 * 2^(attempt - 1))
-          message("    [THROTTLED] OPS overloaded, waiting ", wait_secs, "s (attempt ", attempt, ")...")
-          Sys.sleep(wait_secs)
-          next
-        }
-
-        # Retry on any rate-limit or server error (403, 429, 500, 503, etc.)
-        if (status %in% c(403, 429, 500, 503)) {
-          wait_secs <- min(180, 15 * 2^(attempt - 1))
-          message("    [", status, "] Retrying after ", wait_secs, "s (attempt ", attempt, ")...")
-          Sys.sleep(wait_secs)
-          next
-        }
-
-        # Log non-200 status for debugging (404 = patent not found, that's normal)
-        if (status >= 400 && status != 404) {
-          message("    [HTTP ", status, "] ", url)
-        }
-
-        if (status >= 400) return(NULL)
-        return(resp_body_xml(resp))
-      }
-      message("    [GIVE UP] Max retries reached (last status: ", last_status, ") for ", url)
-      return(NULL)
+    if (!is.null(doc)) {
+      abstract <- extract_en_abstract(doc)
+      title    <- extract_en_title(doc)
+      applicant_info <- extract_applicants(doc)
     }
 
-    needs_more <- function() is.na(abstract) || is.na(title) || is.na(applicant_info$applicant_names)
-
-    # Step 1: Try direct application endpoint
-    tryCatch({
-      doc <- try_endpoint(paste0(
-        "https://ops.epo.org/3.2/rest-services/published-data/application/epodoc/",
-        epodoc, "/biblio,abstract"
-      ))
-      if (!is.null(doc)) {
-        abstract <- extract_en_abstract(doc)
-        title    <- extract_en_title(doc)
-        applicant_info <- extract_applicants(doc)
-      }
-    }, error = function(e) NULL)
-
-    # Step 2: Try family endpoint if anything still missing
-    if (needs_more()) {
-      tryCatch({
-        Sys.sleep(1)
-        doc <- try_endpoint(paste0(
-          "https://ops.epo.org/3.2/rest-services/family/application/epodoc/",
-          epodoc, "/biblio,abstract"
-        ))
-        if (!is.null(doc)) {
-          if (is.na(abstract)) abstract <- extract_en_abstract(doc)
-          if (is.na(title)) title <- extract_en_title(doc)
-          if (is.na(applicant_info$applicant_names)) applicant_info <- extract_applicants(doc)
-        }
-      }, error = function(e) NULL)
-    }
-
-    # Step 3: Try publication endpoint as last resort
-    if (needs_more()) {
-      tryCatch({
-        Sys.sleep(1)
-        doc <- try_endpoint(paste0(
-          "https://ops.epo.org/3.2/rest-services/published-data/publication/epodoc/",
-          epodoc, "/biblio,abstract"
-        ))
-        if (!is.null(doc)) {
-          if (is.na(abstract)) abstract <- extract_en_abstract(doc)
-          if (is.na(title)) title <- extract_en_title(doc)
-          if (is.na(applicant_info$applicant_names)) applicant_info <- extract_applicants(doc)
-        }
-      }, error = function(e) NULL)
-    }
-
-    src <- if (!is.na(abstract)) "OK" else "miss"
-    message("  [", src, "] ", epodoc,
+    src <- if (!is.na(abstract) || !is.na(title)) "OK" else "miss"
+    message("  [", src, "] ", raw_id,
             if (!is.na(title)) paste0(" - ", str_trunc(title, 50)) else "",
             if (!is.na(applicant_info$applicant_names))
               paste0(" | ", str_trunc(applicant_info$applicant_names, 40)) else "")
@@ -380,29 +364,29 @@ if (file.exists(cache_file)) {
   # Resume from partial if available
   if (file.exists(partial_file)) {
     done <- readRDS(partial_file)
-    done_keys <- paste(done$country, done$docnumber, sep = ".")
+    done_keys <- done$raw
     cat("Resuming from partial cache:", nrow(done), "already fetched\n")
   } else {
     done <- tibble()
     done_keys <- character(0)
   }
 
-  todo <- parsed |> filter(!paste(country, docnumber, sep = ".") %in% done_keys)
+  todo <- parsed |> filter(!raw %in% done_keys)
   n_total <- nrow(parsed)
   n_done  <- nrow(done)
   cat("Fetching", nrow(todo), "remaining patents (", n_done, "already done)...\n")
 
   for (i in seq_len(nrow(todo))) {
     row <- todo[i, ]
-    Sys.sleep(1)
+    Sys.sleep(2)  # 2s between patents to stay under per-minute limit
 
     if ((n_done + i) %% 50 == 0)
       message("--- Progress: ", n_done + i, " / ", n_total, " ---")
 
     fetched <- tryCatch(
-      fetch_patent(row$country, row$docnumber, access_token),
+      fetch_patent(row$raw, row$country, row$docnumber),
       error = function(e) {
-        message("  [ERROR] ", row$country, ".", row$docnumber, ": ", e$message)
+        message("  [ERROR] ", row$raw, ": ", e$message)
         bind_cols(
           tibble(title = NA_character_, abstract = NA_character_),
           tibble(applicant_names = NA_character_, applicant_types = NA_character_, is_company = NA)
@@ -599,9 +583,13 @@ ggplot() +
 ## 9 — Summary statistics
 
 ```{r summary_stats}
-embed_data |>
+src_summary <- embed_data |>
   count(source, cluster_label) |>
-  tidyr::pivot_wider(names_from = source, values_from = n, values_fill = 0) |>
+  tidyr::pivot_wider(names_from = source, values_from = n, values_fill = 0)
+# Ensure both columns exist even if one group has no patents
+if (!"LMIC" %in% names(src_summary)) src_summary$LMIC <- 0L
+if (!"HIC" %in% names(src_summary)) src_summary$HIC <- 0L
+src_summary |>
   mutate(Total = LMIC + HIC) |>
   arrange(desc(Total))
 ```
@@ -702,10 +690,13 @@ title_counts |>
 
 ```{r simple_title_by_source, fig.width=12, fig.height=8}
 # Compare LMIC vs HIC distribution of simple titles
-title_source_counts <- embed_data |>
+title_source_wide <- embed_data |>
   filter(!is.na(simple_title)) |>
   count(simple_title, source) |>
-  tidyr::pivot_wider(names_from = source, values_from = n, values_fill = 0) |>
+  tidyr::pivot_wider(names_from = source, values_from = n, values_fill = 0)
+if (!"LMIC" %in% names(title_source_wide)) title_source_wide$LMIC <- 0L
+if (!"HIC" %in% names(title_source_wide)) title_source_wide$HIC <- 0L
+title_source_counts <- title_source_wide |>
   mutate(Total = LMIC + HIC) |>
   slice_max(Total, n = 20, with_ties = FALSE) |>
   tidyr::pivot_longer(cols = c(LMIC, HIC), names_to = "source", values_to = "n")
