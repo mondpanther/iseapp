@@ -42,6 +42,20 @@ region_module_sidebar <- function(id) {
           options = list(placeholder = 'Choose firms or sector groups...')
         )
       ),
+      shiny::conditionalPanel(
+        condition = not_tech,
+        shiny::div(
+          class = "side_input",
+          shiny::selectizeInput(
+            ns("techs_region"),
+            "Technologies included",
+            choices  = grouped_techs,
+            selected = "Green Technology",
+            multiple = TRUE,
+            options  = list(placeholder = 'Choose one or more technology categories...')
+          )
+        )
+      ),
 
     ),
 
@@ -124,17 +138,6 @@ region_module_sidebar <- function(id) {
     # --- Region/RTA inputs (not Tech) ---
     shiny::conditionalPanel(
       condition = not_tech,
-      shiny::div(
-        class = "side_input",
-        shiny::selectizeInput(
-          ns("techs_region"),
-          "Technologies for region/map view:",
-          choices  = grouped_techs,
-          selected = "Green Technology",
-          multiple = TRUE,
-          options  = list(placeholder = 'Choose one or more technology categories...')
-        )
-      ),
       shiny::div(
         class = "side_input",
         shiny::selectizeInput(

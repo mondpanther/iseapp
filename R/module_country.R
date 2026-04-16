@@ -42,6 +42,20 @@ country_module_sidebar <- function(id) {
           options = list(placeholder = 'Choose firms or sector groups...')
         )
       ),
+      shiny::conditionalPanel(
+        condition = not_tech,
+        shiny::div(
+          class = "side_input",
+          shiny::selectizeInput(
+            inputId = ns("techs"),
+            label = "Technologies included",
+            choices = grouped_techs,
+            selected = "Green Technology",
+            multiple = TRUE,
+            options = list(placeholder = 'Choose technologies...')
+          )
+        )
+      ),
 
     ),
 
@@ -118,22 +132,6 @@ country_module_sidebar <- function(id) {
           ns("top_n_ids"),
           "Number of Top Patent IDs shown",
           value = 10, min = 0, max = 50
-        )
-      )
-    ),
-
-    # --- Country/RTA inputs (not Tech) ---
-    shiny::conditionalPanel(
-      condition = not_tech,
-      shiny::div(
-        class = "side_input",
-        shiny::selectizeInput(
-          inputId = ns("techs"),
-          label = "Technologies for country/map view",
-          choices = grouped_techs,
-          selected = "Green Technology",
-          multiple = TRUE,
-          options = list(placeholder = 'Choose technologies...')
         )
       )
     ),
