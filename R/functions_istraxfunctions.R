@@ -2549,8 +2549,8 @@ plot_world_map_gg <- function(data,
                                       "SZ" = "Eswatini", "VA" = "Vatican"
                                     ))
 
-    world_merged <- merge(world_poly, map_data[, c("region", "map_value")],
-                          by = "region", all.x = TRUE)
+    world_merged <- dplyr::left_join(world_poly, map_data[, c("region", "map_value")],
+                                     by = "region")
 
     if (is_rta) {
       max_dev <- max(abs(max(map_data$map_value, na.rm = TRUE) - 1),
@@ -2606,8 +2606,24 @@ plot_uk_regions_map_gg <- function(data,
       "UKM" = "Scotland", "UKN" = "Northern Ireland"
     )
 
+    # Load boundaries if not already cached (mirrors logic in plot_uk_regions_map)
     if (!exists(".uk_nuts1_sf", envir = .GlobalEnv)) {
-      return(ggplot() + annotate("text", x = 0, y = 0, label = "Region boundaries not loaded") + theme_void())
+      uk_sf <- NULL
+      pkg_geojson <- system.file("www", "uk_nuts1_boundaries.geojson",
+                                 package = "innovationStrategyExplorer")
+      if (pkg_geojson == "") {
+        pkg_geojson <- file.path("inst", "www", "uk_nuts1_boundaries.geojson")
+      }
+      if (file.exists(pkg_geojson)) {
+        tryCatch({
+          uk_sf <- sf::st_read(pkg_geojson, quiet = TRUE)
+          nuts_col <- names(uk_sf)[grepl("NUTS.*CD", names(uk_sf), ignore.case = TRUE)][1]
+          if (!is.null(nuts_col) && !is.na(nuts_col) && nuts_col != "NUTS1CD") {
+            uk_sf <- dplyr::rename(uk_sf, NUTS1CD = !!rlang::sym(nuts_col))
+          }
+        }, error = function(e) message("plot_uk_regions_map_gg: could not load GeoJSON: ", e$message))
+      }
+      assign(".uk_nuts1_sf", uk_sf, envir = .GlobalEnv)
     }
     uk_sf <- get(".uk_nuts1_sf", envir = .GlobalEnv)
     if (is.null(uk_sf)) {
@@ -2655,8 +2671,8 @@ plot_uk_regions_map_gg <- function(data,
       }))
     }))
 
-    uk_coords <- merge(uk_coords, map_data[, c("ctry_code", "region_name", "map_value")],
-                        by.x = "nuts_code", by.y = "ctry_code", all.x = TRUE)
+    uk_coords <- dplyr::left_join(uk_coords, map_data[, c("ctry_code", "region_name", "map_value")],
+                                   by = c("nuts_code" = "ctry_code"))
 
     if (is_rta) {
       max_dev <- max(abs(max(map_data$map_value, na.rm = TRUE) - 1),

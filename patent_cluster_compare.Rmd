@@ -707,9 +707,9 @@ make_wordcloud_plot <- function(embed_data, tech_name, max_per_source = 60) {
   }
 
   ggplot(counts, aes(label = simple_title, size = n, colour = source)) +
-    geom_text_wordcloud_area(rm_outside = TRUE, shape = "circle",
-                             eccentricity = 0.65) +
-    scale_size_area(max_size = 18) +
+    geom_text_wordcloud_area(rm_outside = TRUE, shape = "square",
+                             eccentricity = 1) +
+    scale_size_area(max_size = 28) +
     scale_colour_manual(values = c("LMIC" = "#e41a1c", "HIC" = "#377eb8")) +
     facet_wrap(~source, ncol = 2) +
     theme_minimal() +
@@ -717,7 +717,9 @@ make_wordcloud_plot <- function(embed_data, tech_name, max_per_source = 60) {
       title = paste0("Patent Innovation Themes — ", tech_name),
       subtitle = "Top canonical themes by source"
     ) +
-    theme(strip.text = element_text(size = 14, face = "bold"))
+    theme(strip.text = element_text(size = 14, face = "bold"),
+          plot.margin = margin(5, 5, 5, 5),
+          panel.spacing = unit(0.5, "lines"))
 }
 
 make_top_titles_bar <- function(title_counts, tech_name) {
@@ -760,9 +762,9 @@ make_assignee_wordcloud <- function(assignees_df, tech_name, max_per_source = 60
   }
 
   ggplot(counts, aes(label = canonical, size = n, colour = entity_type)) +
-    geom_text_wordcloud_area(rm_outside = TRUE, shape = "circle",
-                             eccentricity = 0.65) +
-    scale_size_area(max_size = 18) +
+    geom_text_wordcloud_area(rm_outside = TRUE, shape = "square",
+                             eccentricity = 1) +
+    scale_size_area(max_size = 24) +
     scale_colour_manual(values = entity_type_colors, name = "Entity type") +
     facet_wrap(~source, ncol = 2) +
     theme_minimal() +
@@ -771,7 +773,9 @@ make_assignee_wordcloud <- function(assignees_df, tech_name, max_per_source = 60
       subtitle = "Firms and institutions only (persons filtered out); colored by entity type"
     ) +
     theme(strip.text = element_text(size = 14, face = "bold"),
-          legend.position = "bottom")
+          legend.position = "bottom",
+          plot.margin = margin(5, 5, 5, 5),
+          panel.spacing = unit(0.5, "lines"))
 }
 
 make_source_comparison_bar <- function(embed_data, tech_name) {
@@ -804,10 +808,10 @@ Add or remove technology names here to change what gets analysed. Each entry
 produces its own full set of plots in Section 5.
 
 ```{r config}
-tech_selections <- c( "Green Technology")
+tech_selections <- c("Any Agriculture & Food technology" , "Green Technology")
 
 toflow         <- "av_global"
-top_n_ids      <- 100
+top_n_ids      <- 300
 country_group1 <- "LMICs (excl. China)"
 country_group2 <- "High income countries"
 
@@ -854,21 +858,27 @@ analyze_tech <- function(tech_selection) {
                                   toflow, top_n_ids, group_definitions)
   cat("LMICs:", length(apps_lmic), "  HICs:", length(apps_hic), "\n")
 
+  # Keep ALL rows (a patent in both lists appears twice, once per source)
   all_apps <- tibble(
     raw = c(apps_lmic, apps_hic),
     source = c(rep("LMIC", length(apps_lmic)), rep("HIC", length(apps_hic)))
-  ) |>
-    distinct(raw, .keep_all = TRUE)
-  cat("Union (deduplicated):", nrow(all_apps), "\n")
+  )
+  n_overlap <- sum(duplicated(all_apps$raw))
+  cat("Union:", nrow(all_apps), "rows (", n_overlap, "patents in both groups)\n")
 
-  # --- 2. Parse & fetch abstracts ---
-  parsed <- all_apps |>
-    left_join(bind_rows(lapply(all_apps$raw, parse_app_number)), by = "raw")
+  # --- 2. Parse & fetch abstracts (deduplicated to avoid double-fetching) ---
+  unique_apps <- all_apps |> distinct(raw)
+  parsed <- unique_apps |>
+    left_join(bind_rows(lapply(unique_apps$raw, parse_app_number)), by = "raw")
 
   cache_file <- file.path(cache_dir, paste0(
-    "epo_compare_", digest::digest(all_apps$raw, algo = "md5"), ".rds"
+    "epo_compare_", digest::digest(sort(unique_apps$raw), algo = "md5"), ".rds"
   ))
-  results <- fetch_patents(parsed, cache_file, token_mgr)
+  fetched <- fetch_patents(parsed, cache_file, token_mgr)
+
+  # Rejoin fetched data back to ALL rows (including both sources for overlaps)
+  results <- all_apps |>
+    left_join(fetched |> select(-any_of("source")), by = "raw")
 
   # --- 3. Build embedding dataset ---
   embed_data <- results |>
@@ -886,42 +896,53 @@ analyze_tech <- function(tech_selection) {
     return(NULL)
   }
 
-  cat("Creating embeddings for", nrow(embed_data), "patents...\n")
-  embedding_matrix <- get_embeddings(embed_data$text, openai_key)
+  # Compute embeddings on UNIQUE patents only (avoid embedding overlaps twice)
+  unique_embed <- embed_data |> distinct(raw, .keep_all = TRUE)
+  cat("Creating embeddings for", nrow(unique_embed), "unique patents...\n")
+  embedding_matrix <- get_embeddings(unique_embed$text, openai_key)
 
-  # --- 4. Cluster ---
+  # --- 4. Cluster (on unique patents) ---
   set.seed(42)
   k <- min(10, nrow(embedding_matrix))
   clusters <- kmeans(embedding_matrix, centers = k, nstart = 25)
-  embed_data$cluster <- as.factor(clusters$cluster)
+  unique_embed$cluster <- as.factor(clusters$cluster)
 
   # --- 5. AI cluster labels ---
-  cluster_labels <- label_clusters(embed_data, openai_key)
+  cluster_labels <- label_clusters(unique_embed, openai_key)
   label_map <- setNames(cluster_labels$label, cluster_labels$cluster)
-  embed_data <- embed_data |>
+  unique_embed <- unique_embed |>
     mutate(cluster_label = factor(label_map[as.character(cluster)], levels = label_map))
 
-  # --- 6. UMAP projection ---
+  # --- 6. UMAP projection (on unique patents) ---
   umap_config <- umap.defaults
   umap_config$n_neighbors <- min(15, nrow(embedding_matrix) - 1)
   umap_config$min_dist <- 0.1
   umap_result <- umap(embedding_matrix, config = umap_config)
-  embed_data$umap_x <- umap_result$layout[, 1]
-  embed_data$umap_y <- umap_result$layout[, 2]
-  embed_data <- embed_data |>
+  unique_embed$umap_x <- umap_result$layout[, 1]
+  unique_embed$umap_y <- umap_result$layout[, 2]
+  unique_embed <- unique_embed |>
     mutate(plot_label = if_else(!is.na(title), str_trunc(title, 30), raw))
 
   # --- 7. Simple titles (two-pass: label, then consolidate synonyms) ---
-  simple_titles_df <- generate_simple_titles(embed_data, openai_key)
+  #     Run on unique patents only (avoid labelling the same text twice)
+  simple_titles_df <- generate_simple_titles(unique_embed, openai_key)
   simple_titles_df <- consolidate_titles(simple_titles_df, openai_key)
 
   n_raw    <- dplyr::n_distinct(simple_titles_df$simple_title_raw, na.rm = TRUE)
   n_canon  <- dplyr::n_distinct(simple_titles_df$simple_title,     na.rm = TRUE)
   cat("Simple titles: ", n_raw, " raw → ", n_canon, " canonical\n", sep = "")
 
-  embed_data <- embed_data |>
+  unique_embed <- unique_embed |>
     mutate(id = row_number()) |>
     left_join(simple_titles_df, by = "id")
+
+  # Rejoin all computed fields back to the full embed_data (both LMIC & HIC rows)
+  computed_cols <- c("raw", "cluster", "cluster_label", "umap_x", "umap_y",
+                     "plot_label", "simple_title", "simple_title_raw", "id")
+  computed_cols <- intersect(computed_cols, names(unique_embed))
+  embed_data <- embed_data |>
+    select(-any_of(setdiff(computed_cols, "raw"))) |>
+    left_join(unique_embed |> select(all_of(computed_cols)), by = "raw")
 
   # --- 8. Assignee harmonization (drop persons, merge variants, classify) ---
   assignees_long <- explode_assignees(embed_data)

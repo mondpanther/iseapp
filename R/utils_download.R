@@ -97,7 +97,7 @@ make_pdf_handler <- function(plot_reactive, filename_prefix, width = 12, height 
       p <- plot_reactive()
       if (!is.null(p)) {
         tryCatch(
-          ggplot2::ggsave(file, plot = p, device = "pdf", width = width, height = height),
+          ggplot2::ggsave(file, plot = p, device = cairo_pdf, width = width, height = height),
           error = function(e) {
             message("PDF export error for ", filename_prefix, ": ", e$message)
           }
