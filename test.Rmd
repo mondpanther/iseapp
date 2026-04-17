@@ -1,0 +1,319 @@
+---
+title: "Test: national istrax for developing countries"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(fst)
+library(arrow)
+library(dplyr)
+library(readr)
+```
+
+## Load RTA vs GDP data
+
+```{r}
+rta_vs_gdp <- read_csv(".bigdata/rta_vs_gdp_2026-04-17.csv")
+cat("rta_vs_gdp rows:", nrow(rta_vs_gdp), "\n")
+head(rta_vs_gdp)
+```
+
+## Load PRINZglobal docdb counts
+
+```{r}
+count_docdb <- read_csv("C:/Users/rmart/OneDrive/PRINZglobal/data/count_docdb_2024-11-21.csv")
+cat("count_docdb rows:", nrow(count_docdb), "\n")
+cat("columns:", paste(names(count_docdb), collapse = ", "), "\n")
+head(count_docdb)
+count_docdb %>% distinct(technology) %>% pull(technology)
+```
+
+## Green technology: pre/post 2010 x income group
+
+```{r}
+count_docdb |>
+  dplyr::filter(technology == "Green technology") |>
+  dplyr::mutate(
+    period = dplyr::if_else(earliest_filing_year < 2010, "<2010", ">=2010"),
+    income_grp = dplyr::case_when(
+      person_ctry_code == "CN"           ~ "China",
+      `Income group` == "High income"    ~ "High income",
+      TRUE                               ~ "Non-high income (excl. China)"
+    )
+  ) |>
+  dplyr::group_by(period, income_grp) |>
+  dplyr::summarise(
+    tech_sum = sum(docdb_family_count_tech, na.rm = TRUE),
+    all_sum  = sum(docdb_family_count,      na.rm = TRUE),
+    share    = tech_sum / all_sum,
+    .groups  = "drop"
+  ) |>
+  dplyr::arrange(period, income_grp)
+```
+
+## Compare countries present in count_docdb vs rta_vs_gdp
+
+```{r}
+library(countrycode)
+
+code_to_name <- function(codes) {
+  nm <- countrycode(codes, origin = "iso2c", destination = "country.name", warn = FALSE)
+  paste0(codes, " (", ifelse(is.na(nm), "??", nm), ")")
+}
+
+cd_countries  <- sort(unique(na.omit(count_docdb$person_ctry_code)))
+rvg_countries <- sort(unique(na.omit(rta_vs_gdp$ctry_code)))
+
+cat("count_docdb countries: ", length(cd_countries), "\n")
+cat("rta_vs_gdp countries:  ", length(rvg_countries), "\n")
+cat("Overlap:               ", length(intersect(cd_countries, rvg_countries)), "\n\n")
+
+cat("In count_docdb only (not in rta_vs_gdp):\n")
+print(code_to_name(setdiff(cd_countries, rvg_countries)))
+
+cat("\nIn rta_vs_gdp only (not in count_docdb):\n")
+print(code_to_name(setdiff(rvg_countries, cd_countries)))
+```
+
+## Compare Green Technology mapping: PRINZglobal vs Shiny DB
+
+```{r}
+# PRINZglobal mapping (all rows are "Green Technology")
+green_prinz <- read_csv("C:/Users/rmart/OneDrive/PRINZglobal/data/docdb_green_or_not.csv") |>
+  dplyr::filter(green_or_not == "Green Technology") |>
+  dplyr::distinct(docdb_family_id)
+
+# Shiny DB mapping: every family in patents_x_tech whose technology belongs
+# to tech_group "Green Technology"
+patents_x_tech <- arrow::read_parquet("inst/extdata/patents_x_tech.parquet")
+tech_lookup    <- arrow::read_parquet("inst/extdata/tech_lookup.parquet")
+
+green_shiny <- patents_x_tech |>
+  dplyr::inner_join(tech_lookup, by = "technology") |>
+  dplyr::filter(tech_group == "Green Technology") |>
+  dplyr::distinct(docdb_family_id)
+
+cat("PRINZglobal green docdbs: ", nrow(green_prinz), "\n")
+cat("Shiny DB green docdbs:    ", nrow(green_shiny), "\n")
+cat("Overlap:                  ",
+    length(intersect(green_prinz$docdb_family_id, green_shiny$docdb_family_id)), "\n\n")
+
+# In PRINZglobal only (missing from Shiny DB)
+only_prinz <- dplyr::anti_join(green_prinz, green_shiny, by = "docdb_family_id")
+cat("In PRINZglobal only: ", nrow(only_prinz), "\n")
+head(only_prinz)
+
+# In Shiny DB only (missing from PRINZglobal)
+only_shiny <- dplyr::anti_join(green_shiny, green_prinz, by = "docdb_family_id")
+cat("\nIn Shiny DB only:    ", nrow(only_shiny), "\n")
+head(only_shiny)
+```
+
+## Compare country-level counts: count_docdb (2009-2018, Green) vs rta_vs_gdp
+
+```{r}
+cd_2009_2018 <- count_docdb |>
+  dplyr::filter(technology == "Green technology",
+                earliest_filing_year >= 2009,
+                earliest_filing_year <= 2018) |>
+  dplyr::group_by(ctry_code = person_ctry_code) |>
+  dplyr::summarise(
+    tech_sum = sum(docdb_family_count_tech, na.rm = TRUE),
+    all_sum  = sum(docdb_family_count,      na.rm = TRUE),
+    .groups = "drop"
+  )
+
+comparison <- dplyr::full_join(
+    cd_2009_2018,
+    rta_vs_gdp |> dplyr::select(ctry_code, innos, Allinnos),
+    by = "ctry_code"
+  ) |>
+  dplyr::mutate(
+    country_name = countrycode::countrycode(ctry_code, origin = "iso2c",
+                                            destination = "country.name",
+                                            warn = FALSE),
+    diff_tech = tech_sum - innos,
+    diff_all  = all_sum - Allinnos,
+    ratio_tech = tech_sum / innos,
+    ratio_all  = all_sum  / Allinnos
+  ) |>
+  dplyr::select(ctry_code, country_name, dplyr::everything()) |>
+  dplyr::arrange(dplyr::desc(abs(diff_all)))
+
+cat("Totals across countries:\n")
+cat("  count_docdb tech_sum total: ", sum(comparison$tech_sum, na.rm = TRUE), "\n")
+cat("  rta_vs_gdp innos total:     ", sum(comparison$innos,    na.rm = TRUE), "\n")
+cat("  count_docdb all_sum total:  ", sum(comparison$all_sum,  na.rm = TRUE), "\n")
+cat("  rta_vs_gdp Allinnos total:  ", sum(comparison$Allinnos, na.rm = TRUE), "\n\n")
+
+comparison
+```
+
+## Green technology: 2009-2018 x income group
+
+```{r}
+count_docdb |>
+  dplyr::filter(technology == "Green technology",
+                earliest_filing_year >= 2009,
+                earliest_filing_year <= 2018) |>
+  dplyr::mutate(
+    income_grp = dplyr::case_when(
+      person_ctry_code == "CN"           ~ "China",
+      `Income group` == "High income"    ~ "High income",
+      TRUE                               ~ "Non-high income (excl. China)"
+    )
+  ) |>
+  dplyr::group_by(income_grp) |>
+  dplyr::summarise(
+    tech_sum = sum(docdb_family_count_tech, na.rm = TRUE),
+    all_sum  = sum(docdb_family_count,      na.rm = TRUE),
+    share    = tech_sum / all_sum,
+    .groups  = "drop"
+  ) |>
+  dplyr::arrange(income_grp)
+```
+
+## Load data
+
+```{r}
+istrax <- read_fst(".bigdata/istraxes/istrax_nationalkey_2009_2018.fst")
+country_lookup <- read_parquet("inst/extdata/country_lookup.parquet")
+
+cat("istrax rows:", nrow(istrax), "\n")
+cat("country_lookup rows:", nrow(country_lookup), "\n")
+```
+
+## Filter to LMICs excluding China
+
+```{r}
+lmic_codes <- country_lookup |>
+  filter(is_lmic_excl_china) |>
+  pull(ctry_code)
+
+istrax_lmic <- istrax |>
+  filter(ctry_code %in% lmic_codes)
+
+cat("LMIC (excl. China) rows:", nrow(istrax_lmic), "\n")
+cat("LMIC (excl. China) countries in istrax:", n_distinct(istrax_lmic$ctry_code), "\n")
+head(istrax_lmic)
+```
+
+## Summary by country
+
+```{r}
+istrax_lmic |>
+  group_by(ctry_code) |>
+  summarise(
+    n = n(),
+    mean_istrax = mean(istrax_nationalkey_2009_2018, na.rm = TRUE),
+    median_istrax = median(istrax_nationalkey_2009_2018, na.rm = TRUE)
+  ) |>
+  arrange(desc(n))
+```
+
+
+## rts vs gdp etc..
+
+```{r}
+
+rta_vs_gdp %>%
+  head()
+
+```
+
+## Add 2015 population data
+
+```{r}
+library(WDI)
+
+pop_2015 <- WDI(
+  indicator = c(pop_2015 = "SP.POP.TOTL"),
+  start = 2015, end = 2015,
+  extra = FALSE
+) |>
+  dplyr::select(ctry_code = iso2c, pop_2015)
+
+rta_vs_gdp <- rta_vs_gdp |>
+  dplyr::left_join(pop_2015, by = "ctry_code")
+
+cat("Rows with non-missing population:", sum(!is.na(rta_vs_gdp$pop_2015)), "\n")
+head(rta_vs_gdp)
+```
+
+## Add World Bank income classification
+
+```{r}
+wb_income <- as.data.frame(WDI::WDI_data$country) |>
+  dplyr::select(ctry_code = iso2c, income_group = income) |>
+  dplyr::filter(income_group != "Aggregates") |>
+  dplyr::distinct()
+
+rta_vs_gdp <- rta_vs_gdp |>
+  dplyr::left_join(wb_income, by = "ctry_code")
+
+table(rta_vs_gdp$income_group, useNA = "ifany")
+head(rta_vs_gdp)
+```
+
+## Share of innos in Allinnos: High income vs non-High income
+
+```{r}
+rta_vs_gdp |>
+  dplyr::mutate(
+    group = dplyr::if_else(income_group == "High income",
+                           "High income", "Non-high income",
+                           missing = "Non-high income")
+  ) |>
+  dplyr::group_by(group) |>
+  dplyr::summarise(
+    innos_sum    = sum(innos, na.rm = TRUE),
+    allinnos_sum = sum(Allinnos, na.rm = TRUE),
+    share        = innos_sum / allinnos_sum
+  )
+```
+
+## Share of innos in Allinnos: High income / China / Non-high income excl. China
+
+```{r}
+rta_vs_gdp |>
+  dplyr::mutate(
+    group = dplyr::case_when(
+      ctry_code == "CN"              ~ "China",
+      income_group == "High income"  ~ "High income",
+      TRUE                           ~ "Non-high income (excl. China)"
+    )
+  ) |>
+  dplyr::group_by(group) |>
+  dplyr::summarise(
+    innos_sum    = sum(innos, na.rm = TRUE),
+    allinnos_sum = sum(Allinnos, na.rm = TRUE),
+    share        = innos_sum / allinnos_sum
+  )
+```
+
+## Scatter: log GDP per capita vs RTA
+
+```{r}
+library(ggplot2)
+library(ggrepel)
+
+filtered=rta_vs_gdp %>% filter(pop_2015>1*10^6& Allinnos>50
+                             #&!(ctry_code %in% c("QA","SA","KW","MO","OM"))
+                             )
+
+ggplot(filtered, aes(y = (log_gdp_pc), x = RTA)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE) +
+  geom_text_repel(aes(label = ctry_code),
+                  size = 3,
+                  max.overlaps = Inf,
+                  box.padding = 0.3,
+                  point.padding = 0.2,
+                  segment.alpha = 0.4) +
+  labs(
+    x = "log GDP per capita",
+    y = "RTA",
+    title = "RTA vs log GDP per capita"
+  ) +  theme_minimal()
+```

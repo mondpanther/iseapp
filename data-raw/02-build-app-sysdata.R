@@ -182,7 +182,7 @@ grouped_techs <- list(
     as.list(setNames(hard_to_abate_classes_d, hard_to_abate_classes_d)),
   "Agriculture & Food technology" =
     as.list(setNames(agrifood_classes_d, agrifood_classes_d)),
-  "CPC Sections" =
+  "CPC Sections & Other Categories" =
     as.list(setNames(cpc_sections, cpc_sections))
 )
 
