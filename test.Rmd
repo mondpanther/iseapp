@@ -663,3 +663,35 @@ ggplot(filtered_ev, aes(y = log_gdp_pc, x = PVRTA)) +
   ) +
   theme_minimal()
 ```
+
+## Scatter: count-based RTA vs EVRTA
+
+Comparison of the two measures. The 45° reference line (`y = x`) marks perfect
+agreement; deviations indicate that EV weighting (by `pv + ev_global`) shifts
+the country's apparent green specialization relative to simple counts.
+
+```{r}
+ggplot(filtered_ev, aes(x = RTA, y = EVRTA)) +
+  geom_abline(slope = 1, intercept = 0,
+              linetype = "dashed", colour = "grey50") +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE,
+              aes(colour = "Unweighted")) +
+  geom_smooth(method = "lm", se = TRUE,
+              aes(weight = Allinnos, colour = "Weighted by Allinnos")) +
+  scale_colour_manual(name = "Trend",
+                      values = c("Unweighted" = "steelblue",
+                                 "Weighted by Allinnos" = "firebrick")) +
+  geom_text_repel(aes(label = ctry_code),
+                  size = 3,
+                  max.overlaps = Inf,
+                  box.padding = 0.3,
+                  point.padding = 0.2,
+                  segment.alpha = 0.4) +
+  labs(
+    x = "RTA (count-based)",
+    y = "EVRTA (EV-weighted)",
+    title = "EVRTA vs count-based RTA"
+  ) +
+  theme_minimal()
+```
