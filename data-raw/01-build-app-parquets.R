@@ -17,24 +17,62 @@ library(stringr)
 library(stringi)
 library(tidyr)
 library(tictoc)
+library(jsonlite)
 
 # ============================================================================
 # STEP 0: Setup paths
 # ============================================================================
+# Locate the user's Dropbox root without hardcoding a machine-specific path.
+# Dropbox writes its root location to info.json; see
+# https://help.dropbox.com/installs/locate-dropbox-folder
+# Override with env var ISEAPP_DROPBOX_DIR if your setup differs.
+find_dropbox_dir <- function() {
+  override <- Sys.getenv("ISEAPP_DROPBOX_DIR", unset = NA)
+  if (!is.na(override) && nzchar(override)) {
+    if (!dir.exists(override))
+      stop("ISEAPP_DROPBOX_DIR is set but does not exist: ", override)
+    return(normalizePath(override, winslash = "/", mustWork = TRUE))
+  }
 
-patbis_dir  <- "C:/Users/rmart/Dropbox/patbis2021/data"
+  info_candidates <- if (.Platform$OS.type == "windows") {
+    c(file.path(Sys.getenv("LOCALAPPDATA"), "Dropbox", "info.json"),
+      file.path(Sys.getenv("APPDATA"),      "Dropbox", "info.json"))
+  } else {
+    c("~/.dropbox/info.json", "~/.config/dropbox/info.json")
+  }
+  info_path <- Filter(file.exists, path.expand(info_candidates))
+  if (!length(info_path))
+    stop("Could not find Dropbox info.json. Is Dropbox installed? ",
+         "Set ISEAPP_DROPBOX_DIR to override.")
+
+  info <- jsonlite::fromJSON(info_path[[1]])
+  root <- info$personal$path %||% info$business$path
+  if (is.null(root))
+    stop("Dropbox info.json did not contain a personal or business path.")
+  normalizePath(root, winslash = "/", mustWork = TRUE)
+}
+`%||%` <- function(a, b) if (is.null(a)) b else a
+
+dropbox_dir <- find_dropbox_dir()
+patbis_dir  <- file.path(dropbox_dir, "patbis2021", "data")
 fromPATSTAT <- file.path(patbis_dir, "fromPATSTAT")
 fromWATSON  <- file.path(patbis_dir, "fromWATSON")
-iseapp_dir  <- "C:/Users/rmart/Dropbox/apps/iseapp"  # regionmap, firmmap, inglobe only
+iseapp_dir  <- file.path(dropbox_dir, "apps", "iseapp")  # regionmap, firmmap, inglobe only
 bigdata_dir <- ".bigdata"
+
+for (d in c(patbis_dir, fromPATSTAT, fromWATSON, iseapp_dir)) {
+  if (!dir.exists(d)) stop("Expected folder not found: ", d)
+}
 
 dir.create(bigdata_dir, showWarnings = FALSE)
 dir.create(file.path(bigdata_dir, "istraxes"), showWarnings = FALSE)
 dir.create("inst/extdata", recursive = TRUE, showWarnings = FALSE)
 
 cat("=== ISE App Data Build ===\n")
+cat("dropbox_dir:", dropbox_dir, "\n")
 cat("fromPATSTAT:", fromPATSTAT, "\n")
-cat("fromWATSON: ", fromWATSON, "\n\n")
+cat("fromWATSON: ", fromWATSON, "\n")
+cat("iseapp_dir: ", iseapp_dir, "\n\n")
 
 # ============================================================================
 # STEP 1: Build CPC base table from BigQuery
@@ -285,69 +323,56 @@ cat("  Saved to", techmap_cache, "\n\n")
 
 
 # ============================================================================
-# STEP 9: Build countrymap as (Watson nationalkey) INTERSECT (harmonized
-#         inventor UNION harmonized holder)
+# STEP 9: Build countrymap from harmonized inventor + holder country files
 # ============================================================================
-# The (family, country) pairs in the shiny database are driven by the
-# harmonized inventor + holder mappings (from
-# data-raw/build_inventor_countries_harm.R). We intersect with Watson's
-# nationalkey pairs so that:
-#   - only innovations with Watson istrax analysis are kept (family restriction)
-#   - the country set per family is driven by the harmonized inventor/holder
-#     attribution, not Watson's
-# Any harmonized pair not present in Watson is dropped (they'd have no
-# national istrax value to join anyway).
+# Assign each docdb_family to one or more countries based on the union of
+# harmonized inventor and holder country mappings (produced by
+# data-raw/build_inventor_countries_harm.R).
+#
+# The harmonized files come from PATSTAT persons joined with the inglobe
+# inventor/holder bridges, then reduced to a single "best" country per
+# psn_name. Using their union means a family is attributed to a country
+# if either an inventor or a holder on that family is based there.
+#
+# Dedup: a (docdb_family_id, ctry_code) pair that appears in both the
+# inventor and holder files is kept only once.
 
 inv_harm_path  <- file.path(bigdata_dir, "inventor_countries_harm.parquet")
 hold_harm_path <- file.path(bigdata_dir, "holder_countries_harm.parquet")
-if (!file.exists(inv_harm_path) || !file.exists(hold_harm_path)) {
-  stop("Missing harmonized country files.\n",
-       "Run data-raw/build_inventor_countries_harm.R first to generate:\n",
-       "  ", inv_harm_path, "\n",
-       "  ", hold_harm_path)
+for (p in c(inv_harm_path, hold_harm_path)) {
+  if (!file.exists(p)) {
+    stop("Missing ", p,
+         "\nRun data-raw/build_inventor_countries_harm.R first to generate it.")
+  }
 }
 
-cat("Building countrymap = Watson nationalkey INTERSECT harm(inventor U holder)...\n")
+cat("Building countrymap from harmonized inventor + holder countries...\n")
 tic("countrymap")
 
-# Watson's nationalkey pairs (family x country) — the Watson universe.
-countrymap_watson <- fread(
-  file.path(fromWATSON, "innos_ev_nationalkey_2009_2018.dsv"),
-  select = c("docdb_family_id", "ctry_code")
-) |>
-  unique()
-countrymap_watson <- countrymap_watson[ctry_code != "KP"]  # Exclude North Korea
+read_harm <- function(path, role) {
+  dt <- arrow::read_parquet(
+    path,
+    col_select = c("docdb_family_id", "person_ctry_code")
+  ) |> data.table::as.data.table()
+  data.table::setnames(dt, "person_ctry_code", "ctry_code")
+  cat(sprintf("  %-10s rows: %d  (%d distinct (family, country) pairs)\n",
+              role, nrow(dt), uniqueN(dt, by = c("docdb_family_id", "ctry_code"))))
+  dt
+}
 
-# Harmonized inventor + holder union (family x country).
-harm_inv <- arrow::read_parquet(inv_harm_path) |>
-  data.table::as.data.table()
-setnames(harm_inv, "person_ctry_code", "ctry_code")
-harm_inv <- harm_inv[, .(docdb_family_id, ctry_code)]
+inv_cm  <- read_harm(inv_harm_path,  "inventor")
+hold_cm <- read_harm(hold_harm_path, "holder")
 
-harm_hold <- arrow::read_parquet(hold_harm_path) |>
-  data.table::as.data.table()
-setnames(harm_hold, "person_ctry_code", "ctry_code")
-harm_hold <- harm_hold[, .(docdb_family_id, ctry_code)]
+# Union + dedup on (docdb_family_id, ctry_code)
+countrymap <- unique(rbindlist(list(inv_cm, hold_cm), use.names = TRUE))
+countrymap <- countrymap[!is.na(ctry_code) & nzchar(ctry_code)]
+countrymap <- countrymap[ctry_code != "KP"]  # Exclude North Korea
 
-harm_pairs <- unique(rbindlist(list(harm_inv, harm_hold)))
-rm(harm_inv, harm_hold)
+rm(inv_cm, hold_cm); gc()
 
-# Intersect: keep Watson rows whose (family, country) pair is in harm_pairs.
-setkey(countrymap_watson, docdb_family_id, ctry_code)
-setkey(harm_pairs,        docdb_family_id, ctry_code)
-countrymap <- countrymap_watson[harm_pairs, nomatch = 0L]
-
-cat("  Watson pairs:               ", nrow(countrymap_watson), "rows,",
-    uniqueN(countrymap_watson$docdb_family_id), "innovations,",
-    uniqueN(countrymap_watson$ctry_code), "countries\n")
-cat("  Harmonized pairs:           ", nrow(harm_pairs), "rows,",
-    uniqueN(harm_pairs$docdb_family_id), "innovations,",
-    uniqueN(harm_pairs$ctry_code), "countries\n")
-cat("  Intersection (countrymap):  ", nrow(countrymap), "rows,",
+cat("  countrymap:", nrow(countrymap), "rows,",
     uniqueN(countrymap$docdb_family_id), "innovations,",
     uniqueN(countrymap$ctry_code), "countries\n")
-rm(countrymap_watson, harm_pairs)
-gc()
 toc()
 
 
@@ -495,36 +520,11 @@ new_names <- old_names |>
 new_names <- tolower(new_names)
 setnames(patent_data, old_names, new_names)
 
-# Get appln_id: human-readable application docket string (e.g. "FI20090228")
-# built from PATSTAT tls201_appln (docdb_family_id, appln_auth, appln_nr).
-# We aggregate at the BigQuery side (one docket per family) so we only
-# download ~25M rows instead of the full ~115M-row tls201_appln table; this
-# avoids the JSON-parse errors that bq_table_download hits on very large pulls.
-# Cached in .bigdata/tls201_appln.fst after the first successful download.
-appln_cache <- file.path(bigdata_dir, "tls201_appln.fst")
-if (file.exists(appln_cache)) {
-  cat("  Loading cached application dockets from", appln_cache, "...\n")
-  appln_ids <- read_fst(appln_cache, as.data.table = TRUE)
-} else {
-  cat("  Downloading one appln docket per family from BigQuery...\n")
-  tic("tls201_appln download (aggregated)")
-  library(bigrquery)
-  library(DBI)
-  sql <- "
-    SELECT docdb_family_id,
-           ANY_VALUE(CONCAT(appln_auth, appln_nr)) AS appln_id
-    FROM `patbis.fromPATSTAT2021.tls201_appln`
-    WHERE appln_auth IS NOT NULL
-      AND appln_nr   IS NOT NULL
-    GROUP BY docdb_family_id
-  "
-  appln_ids <- bq_project_query("patbis", sql) |>
-    bq_table_download(page_size = 50000)
-  setDT(appln_ids)
-  write_fst(appln_ids, appln_cache, compress = 100)
-  gc()
-  toc()
-}
+# Get appln_id: read from innos_pub.dsv (first appln_id per family)
+cat("  Reading appln_id from innos_pub.dsv...\n")
+appln_ids <- fread(file.path(fromPATSTAT, "innos_pub.dsv"),
+                   select = c("docdb_family_id", "appln_id"))
+appln_ids <- appln_ids[, .(appln_id = appln_id[1]), by = docdb_family_id]
 
 # Add appln_id to patent_data
 patent_data <- appln_ids[patent_data, on = "docdb_family_id"]
