@@ -285,66 +285,68 @@ cat("  Saved to", techmap_cache, "\n\n")
 
 
 # ============================================================================
-# STEP 9: Build countrymap from fromWATSON nationalkey ev file
+# STEP 9: Build countrymap as (Watson nationalkey) INTERSECT (harmonized
+#         inventor UNION harmonized holder)
 # ============================================================================
-# innos_ev_nationalkey_2009_2018.dsv is at innovation x country level and
-# naturally restricts to innovations that have Watson analysis, while still
-# giving broader country coverage than innos_ctry_indicators.dsv (e.g.
-# Argentina is present here but missing from ctry_indicators).
-# Using innos_country.dsv directly would pull in tens of millions of
-# innovations that PATSTAT knows about but that have no Watson measures.
+# The (family, country) pairs in the shiny database are driven by the
+# harmonized inventor + holder mappings (from
+# data-raw/build_inventor_countries_harm.R). We intersect with Watson's
+# nationalkey pairs so that:
+#   - only innovations with Watson istrax analysis are kept (family restriction)
+#   - the country set per family is driven by the harmonized inventor/holder
+#     attribution, not Watson's
+# Any harmonized pair not present in Watson is dropped (they'd have no
+# national istrax value to join anyway).
 
-cat("Building countrymap from fromWATSON nationalkey...\n")
-tic("countrymap")
-
-countrymap <- fread(file.path(fromWATSON, "innos_ev_nationalkey_2009_2018.dsv"),
-                    select = c("docdb_family_id", "ctry_code"))
-countrymap <- unique(countrymap)
-countrymap <- countrymap[ctry_code != "KP"]  # Exclude North Korea
-
-cat("  countrymap:", nrow(countrymap), "rows,",
-    uniqueN(countrymap$docdb_family_id), "innovations,",
-    uniqueN(countrymap$ctry_code), "countries\n")
-toc()
-
-
-# ============================================================================
-# STEP 9b: Restrict countrymap to innovations present in inventor_countries_harm
-# ============================================================================
-# We only keep docdb_family_ids that appear in the harmonized inventor-country
-# map, so that the shiny database matches the inglobe universe of
-# inventor-linked families. The country mapping itself is still taken from
-# Watson nationalkey (more comprehensive than inventor-only attribution).
-#
-# The harmonized file is produced by data-raw/build_inventor_countries_harm.R
-# and written to .bigdata/inventor_countries_harm.parquet.
-
-inv_harm_path <- file.path(bigdata_dir, "inventor_countries_harm.parquet")
-if (!file.exists(inv_harm_path)) {
-  stop("Missing ", inv_harm_path,
-       "\nRun data-raw/build_inventor_countries_harm.R first to generate it.")
+inv_harm_path  <- file.path(bigdata_dir, "inventor_countries_harm.parquet")
+hold_harm_path <- file.path(bigdata_dir, "holder_countries_harm.parquet")
+if (!file.exists(inv_harm_path) || !file.exists(hold_harm_path)) {
+  stop("Missing harmonized country files.\n",
+       "Run data-raw/build_inventor_countries_harm.R first to generate:\n",
+       "  ", inv_harm_path, "\n",
+       "  ", hold_harm_path)
 }
 
-cat("Filtering countrymap to families present in inventor_countries_harm...\n")
-tic("inventor-countries filter")
+cat("Building countrymap = Watson nationalkey INTERSECT harm(inventor U holder)...\n")
+tic("countrymap")
 
-inventor_fams <- arrow::read_parquet(
-  inv_harm_path,
-  col_select = "docdb_family_id"
+# Watson's nationalkey pairs (family x country) — the Watson universe.
+countrymap_watson <- fread(
+  file.path(fromWATSON, "innos_ev_nationalkey_2009_2018.dsv"),
+  select = c("docdb_family_id", "ctry_code")
 ) |>
-  dplyr::distinct() |>
+  unique()
+countrymap_watson <- countrymap_watson[ctry_code != "KP"]  # Exclude North Korea
+
+# Harmonized inventor + holder union (family x country).
+harm_inv <- arrow::read_parquet(inv_harm_path) |>
   data.table::as.data.table()
+setnames(harm_inv, "person_ctry_code", "ctry_code")
+harm_inv <- harm_inv[, .(docdb_family_id, ctry_code)]
 
-before_fams <- uniqueN(countrymap$docdb_family_id)
-countrymap <- countrymap[docdb_family_id %in% inventor_fams$docdb_family_id]
-after_fams  <- uniqueN(countrymap$docdb_family_id)
+harm_hold <- arrow::read_parquet(hold_harm_path) |>
+  data.table::as.data.table()
+setnames(harm_hold, "person_ctry_code", "ctry_code")
+harm_hold <- harm_hold[, .(docdb_family_id, ctry_code)]
 
-cat("  Dropped", before_fams - after_fams, "families (",
-    round(100 * (before_fams - after_fams) / before_fams, 2), "%)\n")
-cat("  countrymap after filter:", nrow(countrymap), "rows,",
-    after_fams, "innovations,",
+harm_pairs <- unique(rbindlist(list(harm_inv, harm_hold)))
+rm(harm_inv, harm_hold)
+
+# Intersect: keep Watson rows whose (family, country) pair is in harm_pairs.
+setkey(countrymap_watson, docdb_family_id, ctry_code)
+setkey(harm_pairs,        docdb_family_id, ctry_code)
+countrymap <- countrymap_watson[harm_pairs, nomatch = 0L]
+
+cat("  Watson pairs:               ", nrow(countrymap_watson), "rows,",
+    uniqueN(countrymap_watson$docdb_family_id), "innovations,",
+    uniqueN(countrymap_watson$ctry_code), "countries\n")
+cat("  Harmonized pairs:           ", nrow(harm_pairs), "rows,",
+    uniqueN(harm_pairs$docdb_family_id), "innovations,",
+    uniqueN(harm_pairs$ctry_code), "countries\n")
+cat("  Intersection (countrymap):  ", nrow(countrymap), "rows,",
+    uniqueN(countrymap$docdb_family_id), "innovations,",
     uniqueN(countrymap$ctry_code), "countries\n")
-rm(inventor_fams)
+rm(countrymap_watson, harm_pairs)
 gc()
 toc()
 
@@ -493,11 +495,36 @@ new_names <- old_names |>
 new_names <- tolower(new_names)
 setnames(patent_data, old_names, new_names)
 
-# Get appln_id: read from innos_pub.dsv (first appln_id per family)
-cat("  Reading appln_id from innos_pub.dsv...\n")
-appln_ids <- fread(file.path(fromPATSTAT, "innos_pub.dsv"),
-                   select = c("docdb_family_id", "appln_id"))
-appln_ids <- appln_ids[, .(appln_id = appln_id[1]), by = docdb_family_id]
+# Get appln_id: human-readable application docket string (e.g. "FI20090228")
+# built from PATSTAT tls201_appln (docdb_family_id, appln_auth, appln_nr).
+# We aggregate at the BigQuery side (one docket per family) so we only
+# download ~25M rows instead of the full ~115M-row tls201_appln table; this
+# avoids the JSON-parse errors that bq_table_download hits on very large pulls.
+# Cached in .bigdata/tls201_appln.fst after the first successful download.
+appln_cache <- file.path(bigdata_dir, "tls201_appln.fst")
+if (file.exists(appln_cache)) {
+  cat("  Loading cached application dockets from", appln_cache, "...\n")
+  appln_ids <- read_fst(appln_cache, as.data.table = TRUE)
+} else {
+  cat("  Downloading one appln docket per family from BigQuery...\n")
+  tic("tls201_appln download (aggregated)")
+  library(bigrquery)
+  library(DBI)
+  sql <- "
+    SELECT docdb_family_id,
+           ANY_VALUE(CONCAT(appln_auth, appln_nr)) AS appln_id
+    FROM `patbis.fromPATSTAT2021.tls201_appln`
+    WHERE appln_auth IS NOT NULL
+      AND appln_nr   IS NOT NULL
+    GROUP BY docdb_family_id
+  "
+  appln_ids <- bq_project_query("patbis", sql) |>
+    bq_table_download(page_size = 50000)
+  setDT(appln_ids)
+  write_fst(appln_ids, appln_cache, compress = 100)
+  gc()
+  toc()
+}
 
 # Add appln_id to patent_data
 patent_data <- appln_ids[patent_data, on = "docdb_family_id"]
