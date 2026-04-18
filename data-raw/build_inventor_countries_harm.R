@@ -28,6 +28,7 @@ library(arrow)
 library(fst)
 library(tictoc)
 library(jsonlite)
+library(countrycode)
 
 # ---- Paths ----
 # Locate the user's Dropbox root without hardcoding a machine-specific path.
@@ -123,10 +124,22 @@ if (file.exists(persons_cache)) {
 
   # Light normalization: trim + uppercase to absorb trivial whitespace/case differences
   persons[, psn_name := toupper(trimws(psn_name))]
-  # Drop rows with no usable identifier/name or country code
-  persons <- persons[!is.na(person_id) & nzchar(psn_name) & nzchar(person_ctry_code)]
+  persons[, person_ctry_code := trimws(person_ctry_code)]
 
-  cat("  persons rows:", nrow(persons), "\n")
+  n_before <- nrow(persons)
+
+  # Drop rows with no usable identifier or name
+  persons <- persons[!is.na(person_id) & nzchar(psn_name)]
+
+  # Restrict person_ctry_code to VALID ISO2 codes only. This prevents the
+  # harmonization step from selecting blanks (" ", "  ") or non-ISO codes
+  # (e.g. "ZZ", "XH", old "SU"/"DD") as the mode country for a name.
+  valid_iso2 <- unique(na.omit(countrycode::codelist$iso2c))
+  persons <- persons[person_ctry_code %in% valid_iso2]
+
+  cat("  persons rows before filter:", n_before, "\n")
+  cat("  persons rows after filter:", nrow(persons),
+      sprintf(" (dropped %d)\n", n_before - nrow(persons)))
   cat("  Caching to", persons_cache, "...\n")
   write_fst(persons, persons_cache, compress = 100)
   toc()
