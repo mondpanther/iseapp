@@ -27,9 +27,46 @@ library(data.table)
 library(arrow)
 library(fst)
 library(tictoc)
+library(jsonlite)
 
 # ---- Paths ----
-iseapp_dir  <- "C:/Users/rmart/Dropbox/apps/iseapp"
+# Locate the user's Dropbox root without hardcoding a machine-specific path.
+# Dropbox writes its root location to info.json; see
+# https://help.dropbox.com/installs/locate-dropbox-folder
+# Override with env var ISEAPP_DROPBOX_DIR if your setup differs.
+find_dropbox_dir <- function() {
+  override <- Sys.getenv("ISEAPP_DROPBOX_DIR", unset = NA)
+  if (!is.na(override) && nzchar(override)) {
+    if (!dir.exists(override))
+      stop("ISEAPP_DROPBOX_DIR is set but does not exist: ", override)
+    return(normalizePath(override, winslash = "/", mustWork = TRUE))
+  }
+
+  info_candidates <- if (.Platform$OS.type == "windows") {
+    c(file.path(Sys.getenv("LOCALAPPDATA"), "Dropbox", "info.json"),
+      file.path(Sys.getenv("APPDATA"),      "Dropbox", "info.json"))
+  } else {
+    c("~/.dropbox/info.json", "~/.config/dropbox/info.json")
+  }
+  info_path <- Filter(file.exists, path.expand(info_candidates))
+  if (!length(info_path))
+    stop("Could not find Dropbox info.json. Is Dropbox installed? ",
+         "Set ISEAPP_DROPBOX_DIR to override.")
+
+  info <- jsonlite::fromJSON(info_path[[1]])
+  root <- info$personal$path %||% info$business$path
+  if (is.null(root))
+    stop("Dropbox info.json did not contain a personal or business path.")
+  normalizePath(root, winslash = "/", mustWork = TRUE)
+}
+`%||%` <- function(a, b) if (is.null(a)) b else a
+
+dropbox_dir <- find_dropbox_dir()
+iseapp_dir  <- file.path(dropbox_dir, "apps", "iseapp")
+if (!dir.exists(iseapp_dir))
+  stop("Expected iseapp folder not found at: ", iseapp_dir)
+cat("Using iseapp_dir:", iseapp_dir, "\n")
+
 bigdata_dir <- ".bigdata"
 dir.create(bigdata_dir, showWarnings = FALSE)
 
