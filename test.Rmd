@@ -695,3 +695,60 @@ ggplot(filtered_ev, aes(x = RTA, y = EVRTA)) +
   ) +
   theme_minimal()
 ```
+
+## Compare shiny-app RTA (with holders & inventors) vs chunk-computed RTA
+
+Load the shiny-app-exported scatter-data CSV and compare its per-country `RTA`
+with the count-based `RTA` we compute in the EVRTA chunk above.
+
+```{r}
+library(readr)
+library(dplyr)
+
+shiny_rta <- read_csv(
+  ".bigdata/rta_vs_gdp_2026-04-18_updated_with_holders_and_innovators.csv"
+) |>
+  dplyr::select(ctry_code,
+                innos_shiny     = innos,
+                Allinnos_shiny  = Allinnos,
+                share_c_shiny   = share_c,
+                share_shiny     = share,
+                RTA_shiny       = RTA)
+
+compare <- dplyr::inner_join(
+    evrta |>
+      dplyr::select(ctry_code,
+                    green_n, total_n,
+                    share_country, share_global, RTA),
+    shiny_rta,
+    by = "ctry_code"
+  ) |>
+  dplyr::mutate(
+    diff_greens  = green_n  - innos_shiny,
+    diff_totals  = total_n  - Allinnos_shiny,
+    diff_sharec  = share_country - share_c_shiny,
+    diff_rta     = RTA - RTA_shiny
+  ) |>
+  dplyr::arrange(dplyr::desc(abs(diff_rta)))
+
+cat("Shape-level check:\n")
+cat("  countries in shiny CSV:", nrow(shiny_rta), "\n")
+cat("  countries in compare  :", nrow(compare),   "\n\n")
+
+cat("Global 'share' (green / total) chunk vs shiny:\n")
+cat("  chunk share_global:", unique(compare$share_global), "\n")
+cat("  shiny 'share'     :", unique(compare$share_shiny),  "\n\n")
+
+cat("Largest RTA discrepancies:\n")
+print(head(compare, 20))
+
+cat("\nSummary of absolute RTA differences:\n")
+print(summary(abs(compare$diff_rta)))
+```
+
+
+```{r}
+
+acompare=compare %>% summarize(sum(Allinnos_shiny),sum(total_n))
+
+```
