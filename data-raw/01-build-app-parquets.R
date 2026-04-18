@@ -17,24 +17,62 @@ library(stringr)
 library(stringi)
 library(tidyr)
 library(tictoc)
+library(jsonlite)
 
 # ============================================================================
 # STEP 0: Setup paths
 # ============================================================================
+# Locate the user's Dropbox root without hardcoding a machine-specific path.
+# Dropbox writes its root location to info.json; see
+# https://help.dropbox.com/installs/locate-dropbox-folder
+# Override with env var ISEAPP_DROPBOX_DIR if your setup differs.
+find_dropbox_dir <- function() {
+  override <- Sys.getenv("ISEAPP_DROPBOX_DIR", unset = NA)
+  if (!is.na(override) && nzchar(override)) {
+    if (!dir.exists(override))
+      stop("ISEAPP_DROPBOX_DIR is set but does not exist: ", override)
+    return(normalizePath(override, winslash = "/", mustWork = TRUE))
+  }
 
-patbis_dir  <- "C:/Users/rmart/Dropbox/patbis2021/data"
+  info_candidates <- if (.Platform$OS.type == "windows") {
+    c(file.path(Sys.getenv("LOCALAPPDATA"), "Dropbox", "info.json"),
+      file.path(Sys.getenv("APPDATA"),      "Dropbox", "info.json"))
+  } else {
+    c("~/.dropbox/info.json", "~/.config/dropbox/info.json")
+  }
+  info_path <- Filter(file.exists, path.expand(info_candidates))
+  if (!length(info_path))
+    stop("Could not find Dropbox info.json. Is Dropbox installed? ",
+         "Set ISEAPP_DROPBOX_DIR to override.")
+
+  info <- jsonlite::fromJSON(info_path[[1]])
+  root <- info$personal$path %||% info$business$path
+  if (is.null(root))
+    stop("Dropbox info.json did not contain a personal or business path.")
+  normalizePath(root, winslash = "/", mustWork = TRUE)
+}
+`%||%` <- function(a, b) if (is.null(a)) b else a
+
+dropbox_dir <- find_dropbox_dir()
+patbis_dir  <- file.path(dropbox_dir, "patbis2021", "data")
 fromPATSTAT <- file.path(patbis_dir, "fromPATSTAT")
 fromWATSON  <- file.path(patbis_dir, "fromWATSON")
-iseapp_dir  <- "C:/Users/rmart/Dropbox/apps/iseapp"  # regionmap, firmmap, inglobe only
+iseapp_dir  <- file.path(dropbox_dir, "apps", "iseapp")  # regionmap, firmmap, inglobe only
 bigdata_dir <- ".bigdata"
+
+for (d in c(patbis_dir, fromPATSTAT, fromWATSON, iseapp_dir)) {
+  if (!dir.exists(d)) stop("Expected folder not found: ", d)
+}
 
 dir.create(bigdata_dir, showWarnings = FALSE)
 dir.create(file.path(bigdata_dir, "istraxes"), showWarnings = FALSE)
 dir.create("inst/extdata", recursive = TRUE, showWarnings = FALSE)
 
 cat("=== ISE App Data Build ===\n")
+cat("dropbox_dir:", dropbox_dir, "\n")
 cat("fromPATSTAT:", fromPATSTAT, "\n")
-cat("fromWATSON: ", fromWATSON, "\n\n")
+cat("fromWATSON: ", fromWATSON, "\n")
+cat("iseapp_dir: ", iseapp_dir, "\n\n")
 
 # ============================================================================
 # STEP 1: Build CPC base table from BigQuery
@@ -285,67 +323,56 @@ cat("  Saved to", techmap_cache, "\n\n")
 
 
 # ============================================================================
-# STEP 9: Build countrymap from fromWATSON nationalkey ev file
+# STEP 9: Build countrymap from harmonized inventor + holder country files
 # ============================================================================
-# innos_ev_nationalkey_2009_2018.dsv is at innovation x country level and
-# naturally restricts to innovations that have Watson analysis, while still
-# giving broader country coverage than innos_ctry_indicators.dsv (e.g.
-# Argentina is present here but missing from ctry_indicators).
-# Using innos_country.dsv directly would pull in tens of millions of
-# innovations that PATSTAT knows about but that have no Watson measures.
+# Assign each docdb_family to one or more countries based on the union of
+# harmonized inventor and holder country mappings (produced by
+# data-raw/build_inventor_countries_harm.R).
+#
+# The harmonized files come from PATSTAT persons joined with the inglobe
+# inventor/holder bridges, then reduced to a single "best" country per
+# psn_name. Using their union means a family is attributed to a country
+# if either an inventor or a holder on that family is based there.
+#
+# Dedup: a (docdb_family_id, ctry_code) pair that appears in both the
+# inventor and holder files is kept only once.
 
-cat("Building countrymap from fromWATSON nationalkey...\n")
+inv_harm_path  <- file.path(bigdata_dir, "inventor_countries_harm.parquet")
+hold_harm_path <- file.path(bigdata_dir, "holder_countries_harm.parquet")
+for (p in c(inv_harm_path, hold_harm_path)) {
+  if (!file.exists(p)) {
+    stop("Missing ", p,
+         "\nRun data-raw/build_inventor_countries_harm.R first to generate it.")
+  }
+}
+
+cat("Building countrymap from harmonized inventor + holder countries...\n")
 tic("countrymap")
 
-countrymap <- fread(file.path(fromWATSON, "innos_ev_nationalkey_2009_2018.dsv"),
-                    select = c("docdb_family_id", "ctry_code"))
-countrymap <- unique(countrymap)
+read_harm <- function(path, role) {
+  dt <- arrow::read_parquet(
+    path,
+    col_select = c("docdb_family_id", "person_ctry_code")
+  ) |> data.table::as.data.table()
+  data.table::setnames(dt, "person_ctry_code", "ctry_code")
+  cat(sprintf("  %-10s rows: %d  (%d distinct (family, country) pairs)\n",
+              role, nrow(dt), uniqueN(dt, by = c("docdb_family_id", "ctry_code"))))
+  dt
+}
+
+inv_cm  <- read_harm(inv_harm_path,  "inventor")
+hold_cm <- read_harm(hold_harm_path, "holder")
+
+# Union + dedup on (docdb_family_id, ctry_code)
+countrymap <- unique(rbindlist(list(inv_cm, hold_cm), use.names = TRUE))
+countrymap <- countrymap[!is.na(ctry_code) & nzchar(ctry_code)]
 countrymap <- countrymap[ctry_code != "KP"]  # Exclude North Korea
+
+rm(inv_cm, hold_cm); gc()
 
 cat("  countrymap:", nrow(countrymap), "rows,",
     uniqueN(countrymap$docdb_family_id), "innovations,",
     uniqueN(countrymap$ctry_code), "countries\n")
-toc()
-
-
-# ============================================================================
-# STEP 9b: Restrict countrymap to innovations present in inventor_countries_harm
-# ============================================================================
-# We only keep docdb_family_ids that appear in the harmonized inventor-country
-# map, so that the shiny database matches the inglobe universe of
-# inventor-linked families. The country mapping itself is still taken from
-# Watson nationalkey (more comprehensive than inventor-only attribution).
-#
-# The harmonized file is produced by data-raw/build_inventor_countries_harm.R
-# and written to .bigdata/inventor_countries_harm.parquet.
-
-inv_harm_path <- file.path(bigdata_dir, "inventor_countries_harm.parquet")
-if (!file.exists(inv_harm_path)) {
-  stop("Missing ", inv_harm_path,
-       "\nRun data-raw/build_inventor_countries_harm.R first to generate it.")
-}
-
-cat("Filtering countrymap to families present in inventor_countries_harm...\n")
-tic("inventor-countries filter")
-
-inventor_fams <- arrow::read_parquet(
-  inv_harm_path,
-  col_select = "docdb_family_id"
-) |>
-  dplyr::distinct() |>
-  data.table::as.data.table()
-
-before_fams <- uniqueN(countrymap$docdb_family_id)
-countrymap <- countrymap[docdb_family_id %in% inventor_fams$docdb_family_id]
-after_fams  <- uniqueN(countrymap$docdb_family_id)
-
-cat("  Dropped", before_fams - after_fams, "families (",
-    round(100 * (before_fams - after_fams) / before_fams, 2), "%)\n")
-cat("  countrymap after filter:", nrow(countrymap), "rows,",
-    after_fams, "innovations,",
-    uniqueN(countrymap$ctry_code), "countries\n")
-rm(inventor_fams)
-gc()
 toc()
 
 
