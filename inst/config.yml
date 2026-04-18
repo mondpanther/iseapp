@@ -1,0 +1,4 @@
+default:
+  aws:
+    key: ""
+    secret: ""

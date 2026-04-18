@@ -11,6 +11,93 @@ library(dplyr)
 library(readr)
 ```
 
+## Green share 2009-2018 by country group (HIC / CN / non-HIC excl. China)
+
+Filter each PRINZglobal tagging to docdbs with earliest_filing_year in [2009, 2018],
+attach harmonized inventor countries, and compute the share of green docdbs within
+each country group.
+
+```{r}
+library(data.table)
+
+prinz_dir <- "C:/Users/rmart/OneDrive/PRINZglobal/data"
+fromPATSTAT <- "C:/Users/rmart/Dropbox/patbis2021/data/fromPATSTAT"
+bigdata_dir <- ".bigdata"
+
+# 1. Family -> earliest_filing_year (from innos.dsv)
+fy <- fread(file.path(fromPATSTAT, "innos.dsv"),
+            select = c("docdb_family_id", "earliest_filing_year"))
+fy <- unique(fy[earliest_filing_year >= 2000 & earliest_filing_year <= 2018,
+                .(docdb_family_id)])
+cat("Families in [2009, 2018]:", nrow(fy), "\n")
+
+# 2. Harmonized inventor countries -> country group per family
+inv_harm <- as.data.table(arrow::read_parquet(
+  file.path(bigdata_dir, "inventor_countries_harm.parquet")
+))
+setnames(inv_harm, "person_ctry_code", "ctry_code")
+
+# Restrict to valid ISO2 country codes (drops "EP", "WO", blanks, typos, etc.)
+valid_iso2 <- unique(na.omit(countrycode::codelist$iso2c))
+inv_harm  <- inv_harm[ctry_code %in% valid_iso2]
+
+hic_codes <- c("AD","AE","AG","AR","AU","AT","AW","BE","BH","BM","BS","BW","CA","CH","CL","CN","CW","CY","CZ","DE","DK","EE","ES","FI","FR","GB","GI","GR","GU","HK","HR","HU","IE","IL","IM","IS","IT","JP","KR","KW","KY","LI","LT","LU","LV","MC","MP","MT","MO","NL","NO","NZ","OM","PA","PL","PR","PT","QA","RO","SA","SC","SG","SI","SK","SM","SE","TC","TT","TW","UY","US","VI","VG")
+
+inv_harm[, group := fifelse(ctry_code == "CN", "China",
+                     fifelse(ctry_code %in% hic_codes, "HIC",
+                             "Non-HIC (excl. China)"))]
+
+# For each family, collapse to the set of groups it's attached to
+fam_groups <- unique(inv_harm[, .(docdb_family_id, group)])
+
+# 3. Helper: for a tag file, produce the 3-group share table
+compute_shares <- function(tag_file, green_values, label) {
+  t <- fread(tag_file)
+  # second column is the tag; normalise name
+  setnames(t, 2, "tag")
+  green_fams <- unique(t[tag %in% green_values, .(docdb_family_id)])
+  green_fams[, is_green := TRUE]
+
+  # filter to 2009-2018 families, attach group(s), attach green flag
+  fg <- fam_groups[fy, on = "docdb_family_id", nomatch = 0L]
+  fg <- green_fams[fg, on = "docdb_family_id"]
+  fg[is.na(is_green), is_green := FALSE]
+
+  res <- fg[, .(total_fams = uniqueN(docdb_family_id),
+                green_fams = uniqueN(docdb_family_id[is_green]),
+                share      = uniqueN(docdb_family_id[is_green]) /
+                             uniqueN(docdb_family_id)),
+            by = group][order(group)]
+  res[, source := label]
+  setcolorder(res, c("source", "group", "total_fams", "green_fams", "share"))
+  res
+}
+
+res_green_or_not <- compute_shares(
+  file.path(prinz_dir, "docdb_green_or_not.csv"),
+  green_values = c("Green Technology"),
+  label = "docdb_green_or_not"
+)
+
+res_level0 <- compute_shares(
+  file.path(prinz_dir, "docdb_level0.csv"),
+  # All non-"Trending Technologies", non-"Fossil Fuel Technologies" level0 tags
+  # are green sub-categories. Adjust if you want a different set.
+  green_values = c("Adaptation","Circular Economy","GHG Capture","Green Agriculture",
+                   "Green Buildings","Green Energy","Green ICT","Green Manufacturing",
+                   "Green Transport"),
+  label = "docdb_level0"
+)
+
+res_nolevel <- compute_shares(
+  file.path(prinz_dir, "docdb_nolevel.csv"),
+  green_values = c("Green technology"),
+  label = "docdb_nolevel"
+)
+
+rbindlist(list(res_green_or_not, res_level0, res_nolevel))
+```
+
 ## Load RTA vs GDP data
 
 ```{r}
@@ -298,13 +385,20 @@ rta_vs_gdp |>
 library(ggplot2)
 library(ggrepel)
 
-filtered=rta_vs_gdp %>% filter(pop_2015>1*10^6& Allinnos>50
+filtered=rta_vs_gdp %>% filter(#pop_2015>0.5*10^6&
+                           Allinnos>200
                              #&!(ctry_code %in% c("QA","SA","KW","MO","OM"))
                              )
 
 ggplot(filtered, aes(y = (log_gdp_pc), x = RTA)) +
   geom_point(alpha = 0.6) +
-  geom_smooth(method = "lm", se = TRUE) +
+  geom_smooth(method = "lm", se = TRUE,
+              aes(colour = "Unweighted")) +
+  geom_smooth(method = "lm", se = TRUE,
+              aes(weight = Allinnos, colour = "Weighted by Allinnos")) +
+  scale_colour_manual(name = "Trend",
+                      values = c("Unweighted" = "steelblue",
+                                 "Weighted by Allinnos" = "firebrick")) +
   geom_text_repel(aes(label = ctry_code),
                   size = 3,
                   max.overlaps = Inf,
@@ -316,4 +410,288 @@ ggplot(filtered, aes(y = (log_gdp_pc), x = RTA)) +
     y = "RTA",
     title = "RTA vs log GDP per capita"
   ) +  theme_minimal()
+```
+
+## EV-weighted Green Technology RTA (EVRTA)
+
+For each country we compute an EV-weighted share based on `pv + ev_global`
+(private value plus external spillover value):
+
+- `EVshare_country = sum(pv+ev_global over distinct green docdbs in country) / sum(pv+ev_global over distinct docdbs in country)`
+- `EVshare_global  = sum(pv+ev_global over distinct green docdbs globally) / sum(pv+ev_global over distinct docdbs globally)`
+- `EVRTA = EVshare_country / (0.5 * (EVshare_country + EVshare_global))`
+
+**Mapping of innovations to countries** uses the UNION of the harmonized
+inventor and holder country parquets (`.bigdata/inventor_countries_harm.parquet`
+and `.bigdata/holder_countries_harm.parquet`). **Per-family values** `pv` and
+`ev` are read from `innos_istraxfield_global_2009_2018.dsv` (the same source
+file Step 10a of `01-build-app-parquets.R` uses). **Green families** are
+identified from the shiny DB's `patents_x_tech` / `tech_lookup`.
+
+We also compute a count-based RTA in the same query:
+`RTA = share_country / (0.5 * (share_country + share_global))`
+where `share = green_fams / total_fams`.
+
+Deduplication is enforced at every step so a docdb is never counted twice.
+
+```{r}
+library(duckdb)
+library(DBI)
+library(data.table)
+
+fromWATSON  <- "C:/Users/rmart/Dropbox/patbis2021/data/fromWATSON"
+bigdata_dir <- ".bigdata"
+
+con <- dbConnect(duckdb::duckdb())
+dbExecute(con, sprintf(
+  "CREATE VIEW pxt AS SELECT * FROM read_parquet('%s')",
+  normalizePath("inst/extdata/patents_x_tech.parquet")
+))
+dbExecute(con, sprintf(
+  "CREATE VIEW tl  AS SELECT * FROM read_parquet('%s')",
+  normalizePath("inst/extdata/tech_lookup.parquet")
+))
+
+# Distinct green docdbs (by tech_group = 'Green Technology')
+dbExecute(con, "
+  CREATE OR REPLACE VIEW green_fams AS
+  SELECT DISTINCT pxt.docdb_family_id
+  FROM pxt JOIN tl ON pxt.technology = tl.technology
+  WHERE tl.tech_group = 'Green Technology'
+")
+
+# Per-family pv and ev from the Watson global istrax source file.
+pv_ev_df <- fread(
+  file.path(fromWATSON, "innos_istraxfield_global_2009_2018.dsv"),
+  select = c("docdb_family_id", "pv", "ev")
+)
+pv_ev_df <- pv_ev_df[!is.na(docdb_family_id),
+                      .(pv = sum(pv, na.rm = TRUE),
+                        ev_global = sum(ev, na.rm = TRUE)),
+                      by = docdb_family_id]
+duckdb::duckdb_register(con, "pv_ev", pv_ev_df)
+
+# Family -> country pairs from harmonized inventor + harmonized holder (union).
+inv_harm  <- as.data.table(arrow::read_parquet(
+  file.path(bigdata_dir, "inventor_countries_harm.parquet")
+))
+hold_harm <- as.data.table(arrow::read_parquet(
+  file.path(bigdata_dir, "holder_countries_harm.parquet")
+))
+setnames(inv_harm,  "person_ctry_code", "ctry_code")
+setnames(hold_harm, "person_ctry_code", "ctry_code")
+
+pairs_df <- unique(rbindlist(list(
+  inv_harm [, .(docdb_family_id, ctry_code)],
+  hold_harm[, .(docdb_family_id, ctry_code)]
+)))
+# Restrict to valid ISO2 codes
+valid_iso2 <- unique(na.omit(countrycode::codelist$iso2c))
+pairs_df   <- pairs_df[ctry_code %in% valid_iso2]
+duckdb::duckdb_register(con, "pairs", pairs_df)
+
+cat("pairs (inventor UNION holder, harmonized):", nrow(pairs_df), "rows,",
+    data.table::uniqueN(pairs_df$ctry_code), "countries\n\n")
+
+# Country-level sums (both EV-weighted and count-based).
+# pairs already has one row per (family, country) after unique(), so we can
+# use SUM for EV and COUNT for the count-based measure without further dedup.
+country_shares <- dbGetQuery(con, "
+  SELECT
+    pairs.ctry_code,
+    SUM(CASE WHEN pairs.docdb_family_id IN (SELECT docdb_family_id FROM green_fams)
+             THEN (COALESCE(v.pv, 0) + COALESCE(v.ev_global, 0))
+             ELSE 0 END) AS green_ev,
+    SUM(COALESCE(v.pv, 0) + COALESCE(v.ev_global, 0)) AS total_ev,
+    SUM(CASE WHEN pairs.docdb_family_id IN (SELECT docdb_family_id FROM green_fams)
+             THEN COALESCE(v.pv, 0) ELSE 0 END) AS green_pv,
+    SUM(COALESCE(v.pv, 0)) AS total_pv,
+    SUM(CASE WHEN pairs.docdb_family_id IN (SELECT docdb_family_id FROM green_fams)
+             THEN 1 ELSE 0 END) AS green_n,
+    COUNT(*) AS total_n
+  FROM pairs
+  LEFT JOIN pv_ev v USING (docdb_family_id)
+  GROUP BY pairs.ctry_code
+") |>
+  dplyr::mutate(EVshare_country = green_ev / total_ev,
+                PVshare_country = green_pv / total_pv,
+                share_country   = green_n  / total_n)
+
+# Global sums over distinct families that appear somewhere in pairs.
+# (Restricting to families in `pairs` so the global reference matches the
+# countrymap.)
+global <- dbGetQuery(con, "
+  WITH fam_universe AS (SELECT DISTINCT docdb_family_id FROM pairs)
+  SELECT
+    SUM(CASE WHEN f.docdb_family_id IN (SELECT docdb_family_id FROM green_fams)
+             THEN (COALESCE(v.pv, 0) + COALESCE(v.ev_global, 0))
+             ELSE 0 END) AS green_ev_global,
+    SUM(COALESCE(v.pv, 0) + COALESCE(v.ev_global, 0)) AS total_ev_global,
+    SUM(CASE WHEN f.docdb_family_id IN (SELECT docdb_family_id FROM green_fams)
+             THEN COALESCE(v.pv, 0) ELSE 0 END) AS green_pv_global,
+    SUM(COALESCE(v.pv, 0)) AS total_pv_global,
+    SUM(CASE WHEN f.docdb_family_id IN (SELECT docdb_family_id FROM green_fams)
+             THEN 1 ELSE 0 END) AS green_n_global,
+    COUNT(*) AS total_n_global
+  FROM fam_universe f
+  LEFT JOIN pv_ev v USING (docdb_family_id)
+")
+EVshare_global <- global$green_ev_global / global$total_ev_global
+PVshare_global <- global$green_pv_global / global$total_pv_global
+share_global   <- global$green_n_global  / global$total_n_global
+cat("Global green (pv+ev) share:", signif(EVshare_global, 4), "\n")
+cat("Global green (pv only) share:", signif(PVshare_global, 4), "\n")
+cat("Global green (count) share:", signif(share_global,   4), "\n\n")
+
+# Symmetric RTAs
+evrta <- country_shares |>
+  dplyr::mutate(
+    EVshare_global = EVshare_global,
+    PVshare_global = PVshare_global,
+    share_global   = share_global,
+    EVRTA = EVshare_country / (0.5 * (EVshare_country + EVshare_global)),
+    PVRTA = PVshare_country / (0.5 * (PVshare_country + PVshare_global)),
+    RTA   = share_country   / (0.5 * (share_country   + share_global))
+  ) |>
+  dplyr::arrange(dplyr::desc(EVRTA))
+
+dbDisconnect(con, shutdown = TRUE)
+
+head(evrta, 15)
+tail(evrta, 15)
+```
+
+## Scatter: log GDP per capita vs EVRTA
+
+Same style as the RTA scatter — two trendlines (unweighted and weighted by `innos`),
+country-code labels with non-overlapping placement, same population / Allinnos
+filters.
+
+```{r}
+library(ggplot2)
+library(ggrepel)
+
+# Attach log_gdp_pc, pop_2015 and Allinnos from rta_vs_gdp
+evrta_gdp <- evrta |>
+  dplyr::left_join(
+    rta_vs_gdp |> dplyr::select(ctry_code, log_gdp_pc, pop_2015, innos, Allinnos),
+    by = "ctry_code"
+  )
+
+filtered_ev <- evrta_gdp |>
+  dplyr::filter(!is.na(log_gdp_pc),
+                #pop_2015 > 1e6,
+                Allinnos > 100)
+
+ggplot(filtered_ev, aes(y = log_gdp_pc, x = EVRTA)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE,
+              aes(colour = "Unweighted")) +
+  geom_smooth(method = "lm", se = TRUE,
+              aes(weight = Allinnos, colour = "Weighted by Allinnos")) +
+  scale_colour_manual(name = "Trend",
+                      values = c("Unweighted" = "steelblue",
+                                 "Weighted by Allinnos" = "firebrick")) +
+  geom_text_repel(aes(label = ctry_code),
+                  size = 3,
+                  max.overlaps = Inf,
+                  box.padding = 0.3,
+                  point.padding = 0.2,
+                  segment.alpha = 0.4) +
+  labs(
+    x = "EVRTA (Green Technology, EV-weighted)",
+    y = "log GDP per capita",
+    title = "log GDP per capita vs EVRTA"
+  ) +
+  theme_minimal()
+```
+
+## Scatter: log GDP per capita vs count-based RTA
+
+Same filters and styling as the EVRTA scatter, but plotting the count-based
+RTA (share of green families in total families per country) on the x-axis.
+
+```{r}
+ggplot(filtered_ev, aes(y = log_gdp_pc, x = RTA)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE,
+              aes(colour = "Unweighted")) +
+  geom_smooth(method = "lm", se = TRUE,
+              aes(weight = Allinnos, colour = "Weighted by Allinnos")) +
+  scale_colour_manual(name = "Trend",
+                      values = c("Unweighted" = "steelblue",
+                                 "Weighted by Allinnos" = "firebrick")) +
+  geom_text_repel(aes(label = ctry_code),
+                  size = 3,
+                  max.overlaps = Inf,
+                  box.padding = 0.3,
+                  point.padding = 0.2,
+                  segment.alpha = 0.4) +
+  labs(
+    x = "RTA (Green Technology, count-based)",
+    y = "log GDP per capita",
+    title = "log GDP per capita vs count-based RTA"
+  ) +
+  theme_minimal()
+```
+
+## Scatter: log GDP per capita vs PV-weighted RTA (PVRTA)
+
+Weighting by private value only (`pv`), excluding the external spillover
+component `ev_global`.
+
+```{r}
+ggplot(filtered_ev, aes(y = log_gdp_pc, x = PVRTA)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE,
+              aes(colour = "Unweighted")) +
+  geom_smooth(method = "lm", se = TRUE,
+              aes(weight = Allinnos, colour = "Weighted by Allinnos")) +
+  scale_colour_manual(name = "Trend",
+                      values = c("Unweighted" = "steelblue",
+                                 "Weighted by Allinnos" = "firebrick")) +
+  geom_text_repel(aes(label = ctry_code),
+                  size = 3,
+                  max.overlaps = Inf,
+                  box.padding = 0.3,
+                  point.padding = 0.2,
+                  segment.alpha = 0.4) +
+  labs(
+    x = "PVRTA (Green Technology, PV-weighted)",
+    y = "log GDP per capita",
+    title = "log GDP per capita vs PVRTA"
+  ) +
+  theme_minimal()
+```
+
+## Scatter: count-based RTA vs EVRTA
+
+Comparison of the two measures. The 45° reference line (`y = x`) marks perfect
+agreement; deviations indicate that EV weighting (by `pv + ev_global`) shifts
+the country's apparent green specialization relative to simple counts.
+
+```{r}
+ggplot(filtered_ev, aes(x = RTA, y = EVRTA)) +
+  geom_abline(slope = 1, intercept = 0,
+              linetype = "dashed", colour = "grey50") +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE,
+              aes(colour = "Unweighted")) +
+  geom_smooth(method = "lm", se = TRUE,
+              aes(weight = Allinnos, colour = "Weighted by Allinnos")) +
+  scale_colour_manual(name = "Trend",
+                      values = c("Unweighted" = "steelblue",
+                                 "Weighted by Allinnos" = "firebrick")) +
+  geom_text_repel(aes(label = ctry_code),
+                  size = 3,
+                  max.overlaps = Inf,
+                  box.padding = 0.3,
+                  point.padding = 0.2,
+                  segment.alpha = 0.4) +
+  labs(
+    x = "RTA (count-based)",
+    y = "EVRTA (EV-weighted)",
+    title = "EVRTA vs count-based RTA"
+  ) +
+  theme_minimal()
 ```
