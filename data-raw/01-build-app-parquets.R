@@ -323,53 +323,26 @@ cat("  Saved to", techmap_cache, "\n\n")
 
 
 # ============================================================================
-# STEP 9: Build countrymap from harmonized inventor + holder country files
+# STEP 9: Load pre-built countrymap
 # ============================================================================
-# Assign each docdb_family to one or more countries based on the union of
-# harmonized inventor and holder country mappings (produced by
-# data-raw/build_inventor_countries_harm.R).
-#
-# The harmonized files come from PATSTAT persons joined with the inglobe
-# inventor/holder bridges, then reduced to a single "best" country per
-# psn_name. Using their union means a family is attributed to a country
-# if either an inventor or a holder on that family is based there.
-#
-# Dedup: a (docdb_family_id, ctry_code) pair that appears in both the
-# inventor and holder files is kept only once.
+# countrymap is produced by data-raw/build_nationalkey.R as the union of
+# harmonized inventor and holder country files, restricted to countries that
+# have an innos_ev_XX_2009_2018.dsv file in fromWATSON. Each (docdb_family_id,
+# ctry_code) pair is unique.
 
-inv_harm_path  <- file.path(bigdata_dir, "inventor_countries_harm.parquet")
-hold_harm_path <- file.path(bigdata_dir, "holder_countries_harm.parquet")
-for (p in c(inv_harm_path, hold_harm_path)) {
+countrymap_path  <- file.path(bigdata_dir, "countrymap.fst")
+nationalkey_path <- file.path(bigdata_dir, "nationalkey.fst")
+for (p in c(countrymap_path, nationalkey_path)) {
   if (!file.exists(p)) {
     stop("Missing ", p,
-         "\nRun data-raw/build_inventor_countries_harm.R first to generate it.")
+         "\nRun data-raw/build_nationalkey.R first to generate it (which in\n",
+         "turn requires data-raw/build_inventor_countries_harm.R).")
   }
 }
 
-cat("Building countrymap from harmonized inventor + holder countries...\n")
+cat("Loading pre-built countrymap...\n")
 tic("countrymap")
-
-read_harm <- function(path, role) {
-  dt <- arrow::read_parquet(
-    path,
-    col_select = c("docdb_family_id", "person_ctry_code")
-  ) |> data.table::as.data.table()
-  data.table::setnames(dt, "person_ctry_code", "ctry_code")
-  cat(sprintf("  %-10s rows: %d  (%d distinct (family, country) pairs)\n",
-              role, nrow(dt), uniqueN(dt, by = c("docdb_family_id", "ctry_code"))))
-  dt
-}
-
-inv_cm  <- read_harm(inv_harm_path,  "inventor")
-hold_cm <- read_harm(hold_harm_path, "holder")
-
-# Union + dedup on (docdb_family_id, ctry_code)
-countrymap <- unique(rbindlist(list(inv_cm, hold_cm), use.names = TRUE))
-countrymap <- countrymap[!is.na(ctry_code) & nzchar(ctry_code)]
-countrymap <- countrymap[ctry_code != "KP"]  # Exclude North Korea
-
-rm(inv_cm, hold_cm); gc()
-
+countrymap <- read_fst(countrymap_path, as.data.table = TRUE)
 cat("  countrymap:", nrow(countrymap), "rows,",
     uniqueN(countrymap$docdb_family_id), "innovations,",
     uniqueN(countrymap$ctry_code), "countries\n")
@@ -394,14 +367,12 @@ patchar[, avstrax_global := (ev_global + pv) / cost]
 
 cat("    patchar:", nrow(patchar), "innovations\n")
 
-# 10b: Build patchar_countrymap using nationalkey ev file
-# innos_ev_nationalkey has broader country coverage than innos_ctry_indicators
-# (e.g. Argentina exists in nationalkey but not in ctry_indicators)
-cat("  10b: Reading national ev values...\n")
-ev_natl <- fread(file.path(fromWATSON, "innos_ev_nationalkey_2009_2018.dsv"))
-ev_natl_ev_col <- grep("^ev", names(ev_natl), value = TRUE)[1]
-ev_natl <- ev_natl[, .(docdb_family_id, ctry_code,
-                       ev_nationalkey_2009_2018 = get(ev_natl_ev_col))]
+# 10b: Load the custom-built nationalkey (produced by
+# data-raw/build_nationalkey.R) and compute istrax/avstrax from it.
+# This uses per-country innos_ev_XX files rather than the precomputed
+# innos_ev_nationalkey_2009_2018.dsv.
+cat("  10b: Loading custom-built nationalkey...\n")
+ev_natl <- read_fst(nationalkey_path, as.data.table = TRUE)
 
 # Join with patchar to get pv, cost, alpha for istrax formula
 pcm <- patchar[ev_natl, on = "docdb_family_id", nomatch = 0L]
