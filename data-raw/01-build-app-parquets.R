@@ -520,14 +520,40 @@ new_names <- old_names |>
 new_names <- tolower(new_names)
 setnames(patent_data, old_names, new_names)
 
-# Get appln_id: read from innos_pub.dsv (first appln_id per family)
-cat("  Reading appln_id from innos_pub.dsv...\n")
-appln_ids <- fread(file.path(fromPATSTAT, "innos_pub.dsv"),
-                   select = c("docdb_family_id", "appln_id"))
-appln_ids <- appln_ids[, .(appln_id = appln_id[1]), by = docdb_family_id]
+# Get appln_id: build an Espacenet-searchable publication number per family
+# from PATSTAT innos_pub.dsv.
+#
+# Espacenet's `pn=` search accepts publication numbers in the form
+# `<publn_auth><publn_nr>` (e.g. EP1234567, WO2020123456, US20200123456).
+# Publication numbers are what Espacenet always displays and are definitively
+# searchable there. PATSTAT's internal integer appln_id is NOT searchable,
+# which is why the previous implementation (storing innos_pub$appln_id) gave
+# broken URLs.
+#
+# Priority per family: EP > WO > US > any other office (most internationally
+# recognizable publication). Within a preferred office, first row wins
+# (matches the dev_test "first per family" pattern).
+cat("  Building Espacenet-searchable appln_id from innos_pub.dsv...\n")
+pubs <- fread(file.path(fromPATSTAT, "innos_pub.dsv"),
+              select = c("docdb_family_id", "publn_auth", "publn_nr"))
+pubs <- pubs[!is.na(publn_auth) & nzchar(publn_auth) &
+             !is.na(publn_nr)   & nzchar(publn_nr)]
+
+office_rank <- c(EP = 1L, WO = 2L, US = 3L)
+pubs[, prio := fcoalesce(office_rank[publn_auth], 99L)]
+setorder(pubs, docdb_family_id, prio)
+appln_ids <- pubs[, .(appln_id = paste0(publn_auth[1], publn_nr[1])),
+                  by = docdb_family_id]
+rm(pubs); gc()
 
 # Add appln_id to patent_data
 patent_data <- appln_ids[patent_data, on = "docdb_family_id"]
+
+n_missing <- sum(is.na(patent_data$appln_id))
+if (n_missing > 0) {
+  cat("  WARNING:", n_missing, "rows have no publication match in innos_pub.dsv (",
+      round(100 * n_missing / nrow(patent_data), 2), "%)\n")
+}
 
 # Replace NAs with 0 and round numeric measures
 num_cols <- names(patent_data)[sapply(patent_data, is.double)]

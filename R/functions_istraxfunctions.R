@@ -1304,11 +1304,14 @@ Main: ", paste(technologies, collapse = ", "),
 }
 
 
-# Build Espacenet search URLs for a comma-separated list of application IDs
+# Build Espacenet search URLs for a comma-separated list of publication numbers.
+# IDs are expected in the form <publn_auth><publn_nr> (e.g. EP1234567,
+# WO2020123456, US20200123456), as produced by data-raw/01-build-app-parquets.R.
+# Uses the `pn=` publication-number field, which Espacenet searches directly.
 build_espacenet_search <- function(id_strings) {
   sapply(id_strings, function(ids) {
     id_vec <- unlist(strsplit(ids, ",\\s*"))
-    query <- paste(paste0("ap=", id_vec), collapse = " OR ")
+    query <- paste(paste0("pn=", id_vec), collapse = " OR ")
     paste0('window.open("https://worldwide.espacenet.com/patent/search?q=',
            utils::URLencode(query, reserved = TRUE), '")')
   })
