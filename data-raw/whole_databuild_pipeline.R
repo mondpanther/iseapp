@@ -39,6 +39,10 @@
 # -------- Options (override by assigning before source()) --------
 if (!exists("RUN_WATSON_CONVERT")) RUN_WATSON_CONVERT <- TRUE
 if (!exists("STOP_ON_ERROR"))      STOP_ON_ERROR      <- TRUE
+# Use the BigQuery-native harmonization rebuild (post-1999 scope, address-
+# inferred country codes, built from tls20* PATSTAT tables) rather than the
+# legacy local DuckDB version that consumes the inglobe bridges.
+if (!exists("USE_BQ_HARMONIZATION")) USE_BQ_HARMONIZATION <- TRUE
 
 # -------- Sanity --------
 if (!file.exists("DESCRIPTION"))
@@ -86,24 +90,42 @@ if (RUN_WATSON_CONVERT) {
 # 1. Harmonize per-person country codes (inventors + holders)
 # ----------------------------------------------------------------------------
 # For each psn_name in PATSTAT, pick one "best" country based on majority
-# vote across all (inventor + holder) × family rows. Ties are broken using
-# the family mode when one of the tied candidates equals it; otherwise by
-# uniform random pick. Invalid ISO2 codes (blanks, "SU", "DD", etc.) are
+# vote across (inventor + holder) × family rows. Ties are broken using the
+# family mode when one of the tied candidates equals it; otherwise by a
+# deterministic hash. Invalid ISO2 codes (blanks, "SU", "DD", etc.) are
 # filtered out up front.
-# Outputs: .bigdata/inventor_countries_harm.parquet
-#          .bigdata/holder_countries_harm.parquet
-# Cache:   .bigdata/tls206_person.fst  (skip BigQuery download if present;
-#          cleaning/filtering runs unconditionally so cache is safe even
-#          after filter changes)
+#
+# USE_BQ_HARMONIZATION = TRUE (default): BigQuery-native rebuild from
+#   tls201_appln, tls206_person, tls207_pers_appln; restricted to persons
+#   linked to applications with earliest_publn_year >= 1999; Tier A
+#   address-based country inference for missing ctry codes.
+# USE_BQ_HARMONIZATION = FALSE: legacy local DuckDB version that joins
+#   persons with the inglobe bridges from Dropbox.
+# Both variants write the same output parquets:
+#   .bigdata/inventor_countries_harm.parquet
+#   .bigdata/holder_countries_harm.parquet
 # ============================================================================
-run_step("Harmonize inventor/holder country codes",
-         "data-raw/build_inventor_countries_harm.R")
+if (USE_BQ_HARMONIZATION) {
+  run_step("Harmonize inventor/holder country codes (BigQuery)",
+           "data-raw/build_inventor_countries_harm_bq.R")
+} else {
+  run_step("Harmonize inventor/holder country codes (local DuckDB)",
+           "data-raw/build_inventor_countries_harm.R")
+}
 
 # ============================================================================
 # 2. Build countrymap + nationalkey
 # ----------------------------------------------------------------------------
-# countrymap = union of harmonized inventor + holder (family, country)
-# pairs, restricted to the 185 countries with Watson EV data.
+# countrymap:
+#   - Primary: inventor_countries_harm (optionally + holder_countries_harm
+#     if INCLUDE_HOLDERS is set).
+#   - Augmented (default, AUGMENT_WITH_WATSON = TRUE): for any docdb_family_id
+#     present in Watson's innos_ev_nationalkey_2009_2018 but absent from the
+#     primary set, carry over Watson's (family, ctry) pairs. This ensures we
+#     don't drop Watson-scored families that happen to not have a harmonized
+#     inventor attribution (e.g. pre-1999 families when USE_BQ_HARMONIZATION
+#     restricts to post-1999 persons).
+#   - Restricted to the 185 countries with Watson per-country EV files.
 # nationalkey = countrymap joined with per-country Watson EV values
 # (fast path: one DuckDB query over parquet siblings; fallback: DSV loop).
 # Outputs: .bigdata/countrymap.fst

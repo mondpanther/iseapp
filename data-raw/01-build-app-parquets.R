@@ -317,6 +317,10 @@ techmap <- rbindlist(list(techmap, section_map))
 cat("  CPC sections:", nrow(section_map), "rows\n")
 rm(section_map)
 
+# cpcs is no longer needed downstream — free it before building the huge
+# patent_data table in step 10.
+rm(cpcs); gc()
+
 
 # ============================================================================
 # STEP 8: Deduplicate techmap
@@ -553,8 +557,9 @@ appln_ids <- pubs[, .(appln_id = paste0(publn_auth[1], publn_nr[1])),
                   by = docdb_family_id]
 rm(pubs); gc()
 
-# Add appln_id to patent_data
+# Add appln_id to patent_data; free the small lookup
 patent_data <- appln_ids[patent_data, on = "docdb_family_id"]
+rm(appln_ids); gc()
 
 n_missing <- sum(is.na(patent_data$appln_id))
 if (n_missing > 0) {
@@ -574,26 +579,31 @@ cat("  patent_data:", nrow(patent_data), "rows,", ncol(patent_data), "columns\n"
 # Sort by ctry_code for optimal parquet predicate pushdown
 setorder(patent_data, ctry_code)
 
-# Convert to data.frame for arrow
-patent_data_df <- as.data.frame(patent_data)
-
-# Build schema
+# ---- Write parquet with minimal memory overhead ----
+# Build the float32 schema from the data.table directly (data.table inherits
+# from data.frame so `[[col]]` works identically). Avoids the prior
+# `as.data.frame(patent_data)` duplication.
+output_file <- "inst/extdata/patent_database.parquet"
 float_schema <- arrow::schema(
-  purrr::map(names(patent_data_df), \(col) {
+  purrr::map(names(patent_data), \(col) {
     if (col == "docdb_family_id") {
       arrow::field(col, arrow::int32())
-    } else if (is.double(patent_data_df[[col]])) {
+    } else if (is.double(patent_data[[col]])) {
       arrow::field(col, arrow::float32())
     } else {
-      arrow::field(col, arrow::infer_type(patent_data_df[[col]]))
+      arrow::field(col, arrow::infer_type(patent_data[[col]]))
     }
   })
 )
 
-output_file <- "inst/extdata/patent_database.parquet"
-patent_data_df |>
-  arrow::as_arrow_table(schema = float_schema) |>
-  arrow::write_parquet(output_file, compression = "zstd", compression_level = 3)
+# Convert to an Arrow Table, then drop the R-side data.table BEFORE writing
+# so we only hold one full copy during the zstd compression pass.
+at <- arrow::as_arrow_table(patent_data, schema = float_schema)
+rm(patent_data); gc()
+
+arrow::write_parquet(at, output_file,
+                     compression = "zstd", compression_level = 3)
+rm(at); gc()
 
 file_size <- file.info(output_file)$size / 1024^3
 cat("  Saved to", output_file, "(", round(file_size, 2), "GB)\n")
@@ -670,23 +680,23 @@ write_parquet(region_lookup, "inst/extdata/region_lookup.parquet",
 cat("    ", nrow(region_lookup), "rows\n")
 
 # -- patents_x_firm (from old iseapp) --
+# Read firmmap ONCE (it's not tiny) and derive both top_companies and the
+# filtered bridge from the same in-memory copy.
 cat("  Writing patents_x_firm.parquet...\n")
-top_companies <- arrow::read_parquet(file.path(iseapp_dir, "firmmap.parquet")) |>
-  dplyr::group_by(company_raw) |>
-  dplyr::count() |>
-  dplyr::arrange(desc(n)) |>
-  dplyr::ungroup() |>
-  dplyr::slice_head(n = 100) |>
+firmmap_full <- arrow::read_parquet(file.path(iseapp_dir, "firmmap.parquet"))
+
+top_companies <- firmmap_full |>
+  dplyr::count(company_raw, name = "n") |>
+  dplyr::slice_max(n, n = 100, with_ties = FALSE) |>
   dplyr::pull(company_raw)
 
-firmmap_top100 <- arrow::read_parquet(file.path(iseapp_dir, "firmmap.parquet")) |>
+patents_x_firm <- firmmap_full |>
   dplyr::filter(company_raw %in% top_companies) |>
   dplyr::rename(firm = company_raw) |>
-  dplyr::select(docdb_family_id, firm)
-
-patents_x_firm <- firmmap_top100 |>
   dplyr::select(docdb_family_id, firm) |>
   dplyr::distinct()
+rm(firmmap_full); gc()
+
 write_parquet(patents_x_firm, "inst/extdata/patents_x_firm.parquet",
               compression = "zstd", compression_level = 3)
 cat("    ", nrow(patents_x_firm), "rows\n")
@@ -731,17 +741,17 @@ df_processed <- df_raw |>
       ifelse(is.na(tech_subgroup), "ALL", tech_subgroup), "_",
       sample_size, "_", source_id
     )
-  )
-
-df_processed <- df_processed |>
+  ) |>
   dplyr::select(
     sce_country, sce_tech_display, tech_group,
     sample_size, wave, source_lon, source_lat,
     target_lon, target_lat, chain_id
   )
+rm(df_raw); gc()
 
 arrow::write_parquet(df_processed, "inst/extdata/inglobe_processed.parquet")
 cat("  Written inglobe_processed.parquet:", nrow(df_processed), "rows\n")
+rm(df_processed); gc()
 
 # ============================================================================
 # SUMMARY

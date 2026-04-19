@@ -60,9 +60,15 @@ if (!dir.exists(fromWATSON))
 bigdata_dir <- ".bigdata"
 dir.create(bigdata_dir, showWarnings = FALSE)
 
-# Toggle: include holder countries in addition to inventor countries.
-# Default FALSE — countrymap reflects where the *inventors* are based.
-if (!exists("INCLUDE_HOLDERS")) INCLUDE_HOLDERS <- FALSE
+# Toggles (override by assigning before sourcing this script):
+#   INCLUDE_HOLDERS        — also add holder countries to the primary set.
+#                            Default FALSE (inventor-only).
+#   AUGMENT_WITH_WATSON    — for docdb_family_ids that are in the Watson
+#                            innos_ev_nationalkey_2009_2018 file but NOT in
+#                            inventor_countries_harm, carry over Watson's
+#                            (docdb, ctry) pairs as a fallback. Default TRUE.
+if (!exists("INCLUDE_HOLDERS"))     INCLUDE_HOLDERS     <- FALSE
+if (!exists("AUGMENT_WITH_WATSON")) AUGMENT_WITH_WATSON <- FALSE
 
 inv_harm_path  <- file.path(bigdata_dir, "inventor_countries_harm.parquet")
 hold_harm_path <- file.path(bigdata_dir, "holder_countries_harm.parquet")
@@ -70,7 +76,8 @@ required_paths <- if (INCLUDE_HOLDERS) c(inv_harm_path, hold_harm_path) else inv
 for (p in required_paths) {
   if (!file.exists(p)) {
     stop("Missing ", p,
-         "\nRun data-raw/build_inventor_countries_harm.R first to generate it.")
+         "\nRun data-raw/build_inventor_countries_harm_bq.R (or the local",
+         " build_inventor_countries_harm.R) first to generate it.")
   }
 }
 
@@ -80,7 +87,14 @@ nationalkey_out <- file.path(bigdata_dir, "nationalkey.fst")
 cat("=== Building nationalkey from per-country innos_ev_XX files ===\n")
 
 # ============================================================================
-# 1. Build candidate countrymap from harmonized inventor (+ optionally holder)
+# 1. Build candidate countrymap
+# ----------------------------------------------------------------------------
+# Primary source:  inventor_countries_harm (from build_inventor_countries_harm[_bq].R)
+#                  optionally unioned with holder_countries_harm if INCLUDE_HOLDERS.
+# Fallback source (if AUGMENT_WITH_WATSON): for docdb_family_ids that are NOT
+# represented in the primary set but ARE in the Watson
+# innos_ev_nationalkey_2009_2018 file, carry over Watson's (docdb, ctry) pairs
+# so those families still get a country attribution.
 # ============================================================================
 
 src_label <- if (INCLUDE_HOLDERS) "inventor + holder" else "inventor only"
@@ -99,16 +113,65 @@ if (INCLUDE_HOLDERS) {
 }
 rm(inv)
 
-countrymap <- unique(rbindlist(parts, use.names = TRUE))
+primary <- unique(rbindlist(parts, use.names = TRUE))
 rm(parts)
-countrymap <- countrymap[!is.na(ctry_code) & nzchar(ctry_code)]
-countrymap <- countrymap[ctry_code != "KP"]  # exclude North Korea
+primary <- primary[!is.na(ctry_code) & nzchar(ctry_code)]
+primary <- primary[ctry_code != "KP"]  # exclude North Korea
 
-cat("  countrymap (pre-filter):", nrow(countrymap), "rows,",
+cat("  primary (harmonized):",
+    nrow(primary), "rows,",
+    uniqueN(primary$docdb_family_id), "families,",
+    uniqueN(primary$ctry_code), "countries\n")
+toc()
+
+# ---- Watson nationalkey fallback ------------------------------------------
+
+if (AUGMENT_WITH_WATSON) {
+  cat("Augmenting countrymap from Watson innos_ev_nationalkey...\n")
+  tic("watson augment")
+
+  wnk_pq  <- file.path(fromWATSON, "innos_ev_nationalkey_2009_2018.parquet")
+  wnk_dsv <- file.path(fromWATSON, "innos_ev_nationalkey_2009_2018.dsv")
+
+  if (file.exists(wnk_pq)) {
+    cat("  Reading ", basename(wnk_pq), " (parquet)\n", sep = "")
+    wnk <- as.data.table(arrow::read_parquet(
+      wnk_pq,
+      col_select = c("docdb_family_id", "ctry_code")
+    ))
+  } else if (file.exists(wnk_dsv)) {
+    cat("  Reading ", basename(wnk_dsv), " (dsv)\n", sep = "")
+    wnk <- fread(wnk_dsv,
+                 select = c("docdb_family_id", "ctry_code"),
+                 showProgress = FALSE)
+  } else {
+    stop("Neither ", wnk_pq, " nor ", wnk_dsv,
+         " found. Run data-raw/convert_watson_dsvs.R first, or set ",
+         "AUGMENT_WITH_WATSON <- FALSE.")
+  }
+  wnk <- unique(wnk)
+  wnk <- wnk[!is.na(ctry_code) & nzchar(ctry_code) & ctry_code != "KP"]
+
+  # Families already present in the primary set — those take priority.
+  primary_fams  <- unique(primary$docdb_family_id)
+  wnk_only      <- wnk[!docdb_family_id %in% primary_fams]
+  n_watson_only <- uniqueN(wnk_only$docdb_family_id)
+  cat(sprintf("  Watson-only families added: %s\n",
+              format(n_watson_only, big.mark = ",")))
+
+  countrymap <- unique(rbindlist(list(primary, wnk_only), use.names = TRUE))
+  rm(primary, wnk, wnk_only, primary_fams)
+  toc()
+} else {
+  countrymap <- primary
+  rm(primary)
+}
+
+cat("  countrymap (pre-country-filter):",
+    nrow(countrymap), "rows,",
     uniqueN(countrymap$docdb_family_id), "families,",
     uniqueN(countrymap$ctry_code), "countries\n")
 gc()
-toc()
 
 # ============================================================================
 # 2. Restrict to countries for which an innos_ev_XX file exists
@@ -196,7 +259,20 @@ if (use_parquet) {
   dbWriteTable(con, "countrymap_tbl",
                as.data.frame(countrymap),
                overwrite = TRUE)
-  parquet_glob <- file.path(fromWATSON, "innos_ev_*_2009_2018.parquet")
+
+  # Build an EXPLICIT list of the per-country parquets (don't glob — the
+  # folder also contains group-level parquets like innos_ev_emdenocn_*.parquet
+  # which have a different schema and would break read_parquet).
+  per_country_paths <- file.path(
+    fromWATSON,
+    sprintf("innos_ev_%s_2009_2018.parquet", parquet_cc)
+  )
+  file_list_sql <- paste0(
+    "[", paste(vapply(per_country_paths,
+                      function(p) dbQuoteString(con, p), character(1)),
+               collapse = ", "),
+    "]"
+  )
   sql <- sprintf(
     "SELECT e.docdb_family_id,
             e.ctry_code,
@@ -205,7 +281,7 @@ if (use_parquet) {
      INNER JOIN countrymap_tbl c
        ON e.docdb_family_id = c.docdb_family_id
       AND e.ctry_code       = c.ctry_code",
-    dbQuoteString(con, parquet_glob)
+    file_list_sql
   )
   nationalkey <- setDT(dbGetQuery(con, sql))
   dbDisconnect(con, shutdown = TRUE)
