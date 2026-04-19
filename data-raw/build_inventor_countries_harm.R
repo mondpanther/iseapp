@@ -10,9 +10,13 @@
 #   1. For each psn_name, pick the country code that is most often associated
 #      with that name across all (inventor ∪ holder) × family rows.
 #   2. If two or more countries tie at the per-name max count, resolve
-#      per (name × family) using the mode country across all persons
-#      (inventors + holders) in that family.
-#   3. If still tied at the family level, keep the original country code.
+#      per (name × family):
+#        - if the family-mode country is one of the tied candidates, pick it;
+#        - otherwise (the family mode is not among the candidates and
+#          therefore not informative), pick uniformly at random from the
+#          tied candidates.
+#   3. As a final safety net, any row that is somehow still unresolved
+#      keeps its original person_ctry_code.
 #
 # Outputs:
 #   .bigdata/inventor_countries_harm.parquet
@@ -23,6 +27,7 @@
 
 library(bigrquery)
 library(DBI)
+library(duckdb)
 library(data.table)
 library(arrow)
 library(fst)
@@ -71,10 +76,15 @@ cat("Using iseapp_dir:", iseapp_dir, "\n")
 bigdata_dir <- ".bigdata"
 dir.create(bigdata_dir, showWarnings = FALSE)
 
-persons_cache <- file.path(bigdata_dir, "tls206_person.fst")
-persons_local <- file.path(iseapp_dir, "inglobe", "persons.parquet")
-out_inv  <- file.path(bigdata_dir, "inventor_countries_harm.parquet")
-out_hold <- file.path(bigdata_dir, "holder_countries_harm.parquet")
+persons_cache_parquet <- file.path(bigdata_dir, "tls206_person.parquet")
+persons_cache_fst     <- file.path(bigdata_dir, "tls206_person.fst")    # legacy
+persons_local         <- file.path(iseapp_dir, "inglobe", "persons.parquet")
+out_inv   <- file.path(bigdata_dir, "inventor_countries_harm.parquet")
+out_hold  <- file.path(bigdata_dir, "holder_countries_harm.parquet")
+
+# Input parquet paths for DuckDB (bridges already live as parquets in Dropbox)
+inv_bridge_parquet  <- file.path(iseapp_dir, "inglobe", "data", "inventors.parquet")
+hold_bridge_parquet <- file.path(iseapp_dir, "inglobe", "data", "holders.parquet")
 
 cat("=== Building harmonized inventor/holder country mappings ===\n")
 
@@ -109,9 +119,18 @@ load_persons_from_bigquery <- function() {
   p
 }
 
-if (file.exists(persons_cache)) {
-  cat("Loading cached persons from", persons_cache, "...\n")
-  persons <- read_fst(persons_cache, as.data.table = TRUE)
+# Load persons (cached parquet, legacy fst cache, local parquet, or BigQuery).
+# The cleaning/filter step runs UNCONDITIONALLY below so that changes to the
+# filter logic always take effect even when a stale cache exists.
+loaded_from_cache <- FALSE
+if (file.exists(persons_cache_parquet)) {
+  cat("Loading cached persons parquet:", persons_cache_parquet, "...\n")
+  persons <- as.data.table(arrow::read_parquet(persons_cache_parquet))
+  loaded_from_cache <- TRUE
+} else if (file.exists(persons_cache_fst)) {
+  cat("Loading legacy persons fst cache:", persons_cache_fst, "...\n")
+  persons <- read_fst(persons_cache_fst, as.data.table = TRUE)
+  loaded_from_cache <- TRUE
 } else {
   tic("persons load")
   if (file.exists(persons_local)) {
@@ -121,184 +140,283 @@ if (file.exists(persons_cache)) {
     cat("Falling back to BigQuery.\n")
     persons <- load_persons_from_bigquery()
   }
-
-  # Light normalization: trim + uppercase to absorb trivial whitespace/case differences
-  persons[, psn_name := toupper(trimws(psn_name))]
-  persons[, person_ctry_code := trimws(person_ctry_code)]
-
-  n_before <- nrow(persons)
-
-  # Drop rows with no usable identifier or name
-  persons <- persons[!is.na(person_id) & nzchar(psn_name)]
-
-  # Restrict person_ctry_code to VALID ISO2 codes only. This prevents the
-  # harmonization step from selecting blanks (" ", "  ") or non-ISO codes
-  # (e.g. "ZZ", "XH", old "SU"/"DD") as the mode country for a name.
-  valid_iso2 <- unique(na.omit(countrycode::codelist$iso2c))
-  persons <- persons[person_ctry_code %in% valid_iso2]
-
-  cat("  persons rows before filter:", n_before, "\n")
-  cat("  persons rows after filter:", nrow(persons),
-      sprintf(" (dropped %d)\n", n_before - nrow(persons)))
-  cat("  Caching to", persons_cache, "...\n")
-  write_fst(persons, persons_cache, compress = 100)
   toc()
 }
 
-# ============================================================================
-# 2. Load inventor + holder bridges and combine
-# ============================================================================
+# --- Cleaning + filtering (always runs) ---
+# Aggressive psn_name normalization: strip ALL punctuation (commas, periods,
+# semicolons, hyphens, etc.), collapse whitespace, trim, uppercase. This
+# merges spellings that PATSTAT/DOCDB leave separate (e.g.
+#   "KHATRI, HIMAL"   vs "KHATRI HIMAL"
+#   "AWONIYI, OLUFUNMILOLA O." vs "AWONIYI OLUFUNMILOLA O"
+# would otherwise be treated as different persons and their per-name
+# country votes would not combine.
+persons[, psn_name := toupper(trimws(psn_name))]
+persons[, psn_name := gsub("[[:punct:]]+", " ", psn_name)]
+persons[, psn_name := gsub("\\s+", " ", psn_name)]
+persons[, psn_name := trimws(psn_name)]
+persons[, person_ctry_code := trimws(person_ctry_code)]
 
-cat("Loading inventors and holders bridges...\n")
-tic("bridges")
+n_before <- nrow(persons)
 
-inventors <- read_parquet(
-  file.path(iseapp_dir, "inglobe", "data", "inventors.parquet")
-)
-holders <- read_parquet(
-  file.path(iseapp_dir, "inglobe", "data", "holders.parquet")
-)
-setDT(inventors)
-setDT(holders)
-inventors[, type := "inventor"]
-holders[,   type := "holder"]
+# Drop rows with no usable identifier or name
+persons <- persons[!is.na(person_id) & nzchar(psn_name)]
 
-both <- rbindlist(list(inventors, holders), use.names = TRUE)
-rm(inventors, holders)
-cat("  combined rows:", nrow(both), "\n")
-toc()
+# Restrict person_ctry_code to VALID ISO2 codes only. This prevents the
+# harmonization step from selecting blanks (" ", "  ") or non-ISO codes
+# (e.g. "ZZ", "XH", old "SU"/"DD") as the mode country for a name.
+valid_iso2 <- unique(na.omit(countrycode::codelist$iso2c))
+persons <- persons[person_ctry_code %in% valid_iso2]
 
-# ============================================================================
-# 3. Join persons onto bridges
-# ============================================================================
+cat("  persons rows before filter:", n_before, "\n")
+cat("  persons rows after filter: ", nrow(persons),
+    sprintf(" (dropped %d)\n", n_before - nrow(persons)))
 
-cat("Joining persons onto bridges...\n")
-tic("person join")
-
-# Use data.table merge; drop rows with no person match
-setkey(persons, person_id)
-work <- persons[both, on = "person_id", nomatch = 0L]
-rm(both)
-setnames(work, c("person_ctry_code"), c("person_ctry_code"))  # no-op, explicit
-cat("  work rows:", nrow(work), "\n")
-toc()
-
-# ============================================================================
-# 4. Per-name country counts -> candidate sets
-# ============================================================================
-
-cat("Computing per-name country counts...\n")
-tic("name counts")
-
-name_ctry_counts <- work[, .(N = .N), by = .(psn_name, person_ctry_code)]
-name_max <- name_ctry_counts[, .(max_N = max(N)), by = psn_name]
-name_top <- name_ctry_counts[name_max, on = "psn_name"][N == max_N]
-# name_top: rows of (psn_name, person_ctry_code, N, max_N); tied names have
-# multiple rows per psn_name
-
-cand_counts <- name_top[, .(n_candidates = .N), by = psn_name]
-
-unambig_names <- cand_counts[n_candidates == 1, psn_name]
-tied_names    <- cand_counts[n_candidates >  1, psn_name]
-
-name_best_unambig <- name_top[psn_name %in% unambig_names,
-                              .(psn_name, harm_ctry = person_ctry_code)]
-setkey(name_best_unambig, psn_name)
-
-cat("  unique names:           ", nrow(cand_counts), "\n")
-cat("  unambiguous names:      ", length(unambig_names), "\n")
-cat("  tied names (need break):", length(tied_names), "\n")
-toc()
-
-# ============================================================================
-# 5. Family-level mode country (for tie-breaking)
-# ============================================================================
-
-cat("Computing family-level mode country...\n")
-tic("family mode")
-
-fam_ctry_counts <- work[, .(N = .N), by = .(docdb_family_id, person_ctry_code)]
-setorder(fam_ctry_counts, docdb_family_id, -N)
-fam_mode <- fam_ctry_counts[, .SD[1], by = docdb_family_id][
-  , .(docdb_family_id, fam_mode = person_ctry_code)
-]
-setkey(fam_mode, docdb_family_id)
-cat("  family modes:", nrow(fam_mode), "\n")
-toc()
-
-# ============================================================================
-# 6. Resolve ties per (tied name × family)
-# ============================================================================
-
-cat("Resolving tied names via family mode...\n")
-tic("tie resolution")
-
-if (length(tied_names) > 0) {
-  # Which families does each tied name appear in?
-  tied_name_fams <- unique(work[psn_name %in% tied_names,
-                                .(psn_name, docdb_family_id)])
-
-  # Candidate countries per tied name
-  tied_candidates <- name_top[psn_name %in% tied_names,
-                              .(psn_name, person_ctry_code)]
-
-  # Cross candidates × (name, family) and attach fam_mode
-  tied_cross <- tied_candidates[tied_name_fams, on = "psn_name",
-                                allow.cartesian = TRUE]
-  tied_cross <- fam_mode[tied_cross, on = "docdb_family_id"]
-  tied_cross[, match_flag := as.integer(person_ctry_code == fam_mode)]
-  # Replace NAs (no fam_mode match) with 0
-  tied_cross[is.na(match_flag), match_flag := 0L]
-
-  # Prefer rows whose candidate matches the family mode, else first candidate
-  setorder(tied_cross, psn_name, docdb_family_id, -match_flag)
-  tied_best <- tied_cross[, .SD[1], by = .(psn_name, docdb_family_id)][
-    , .(psn_name, docdb_family_id, harm_ctry = person_ctry_code)
-  ]
-  setkeyv(tied_best, c("psn_name", "docdb_family_id"))
-  cat("  tied (name, family) resolutions:", nrow(tied_best), "\n")
-} else {
-  tied_best <- data.table(psn_name = character(),
-                          docdb_family_id = integer(),
-                          harm_ctry = character())
+# Cache as parquet — this is the format DuckDB reads directly via
+# read_parquet() in the aggregation pipeline below.
+needs_write <- !file.exists(persons_cache_parquet) ||
+               !loaded_from_cache ||
+               nrow(persons) != n_before
+if (needs_write) {
+  cat("  Caching to", persons_cache_parquet, "...\n")
+  arrow::write_parquet(persons, persons_cache_parquet,
+                       compression = "zstd", compression_level = 3)
+  # If we upgraded from legacy fst, remove it to avoid future confusion.
+  if (file.exists(persons_cache_fst) && file.exists(persons_cache_parquet)) {
+    unlink(persons_cache_fst)
+    cat("  Removed legacy cache ", persons_cache_fst, "\n")
+  }
 }
+# Free the R-side persons — the DuckDB pipeline reads from parquet.
+rm(persons); gc()
+
+# ============================================================================
+# 2-7. DuckDB pipeline: bridges + persons -> per-name counts -> family mode
+#      -> tie resolution -> harmonized rows, all in SQL.
+#
+# Avoids materializing the ~100M-row `work = persons JOIN bridges` table in
+# R (which used to dominate memory). DuckDB streams the join through the
+# aggregations, keeping peak RSS to a few hundred MB instead of ~10-15 GB.
+# ============================================================================
+
+cat("Setting up DuckDB pipeline...\n")
+tic("duckdb pipeline")
+
+con <- dbConnect(duckdb::duckdb(), dbdir = ":memory:")
+dbExecute(con, sprintf("PRAGMA threads = %d",
+                       max(1L, parallel::detectCores() - 1L)))
+# Reproducible random tie-breaking: DuckDB's RANDOM() is deterministic once
+# SETSEED is called (seed must be in [-1, 1]).
+dbExecute(con, "SELECT SETSEED(0.42)")
+
+# --- Source tables (as views, no copy) ---
+dbExecute(con, sprintf(
+  "CREATE VIEW persons AS SELECT * FROM read_parquet(%s)",
+  dbQuoteString(con, persons_cache_parquet)
+))
+dbExecute(con, sprintf(
+  "CREATE VIEW bridges AS
+     SELECT person_id, docdb_family_id, 'inventor' AS type
+     FROM read_parquet(%s)
+     UNION ALL
+     SELECT person_id, docdb_family_id, 'holder' AS type
+     FROM read_parquet(%s)",
+  dbQuoteString(con, inv_bridge_parquet),
+  dbQuoteString(con, hold_bridge_parquet)
+))
+
+# --- work view: persons JOIN bridges (streamed, never materialized) ---
+dbExecute(con, "
+  CREATE VIEW work AS
+    SELECT p.psn_name, b.docdb_family_id, p.person_ctry_code, b.type
+    FROM persons p
+    JOIN bridges b USING (person_id)
+")
+
+# Row count (cheap aggregate; just for the log)
+work_rows <- dbGetQuery(con, "SELECT COUNT(*) AS n FROM work")$n
+cat("  work rows (virtual):", format(work_rows, big.mark=","), "\n")
+
+# --- Per-name country counts + top candidate(s) per name ---
+cat("Computing per-name country counts...\n")
+dbExecute(con, "
+  CREATE TABLE name_ctry_counts AS
+    SELECT psn_name, person_ctry_code, COUNT(*) AS N
+    FROM work
+    GROUP BY psn_name, person_ctry_code
+")
+dbExecute(con, "
+  CREATE TABLE name_top AS
+    SELECT psn_name, person_ctry_code, N
+    FROM (
+      SELECT *, MAX(N) OVER (PARTITION BY psn_name) AS max_N
+      FROM name_ctry_counts
+    )
+    WHERE N = max_N
+")
+dbExecute(con, "
+  CREATE TABLE cand_counts AS
+    SELECT psn_name, COUNT(*) AS n_candidates
+    FROM name_top
+    GROUP BY psn_name
+")
+
+diag <- dbGetQuery(con, "
+  SELECT
+    (SELECT COUNT(*) FROM cand_counts)                         AS unique_names,
+    (SELECT COUNT(*) FROM cand_counts WHERE n_candidates = 1)  AS unambig_names,
+    (SELECT COUNT(*) FROM cand_counts WHERE n_candidates > 1)  AS tied_names
+")
+cat("  unique names:           ", format(diag$unique_names,  big.mark=","), "\n")
+cat("  unambiguous names:      ", format(diag$unambig_names, big.mark=","), "\n")
+cat("  tied names (need break):", format(diag$tied_names,    big.mark=","), "\n")
+
+# Unambiguous: single top candidate per name
+dbExecute(con, "
+  CREATE TABLE name_best_unambig AS
+    SELECT nt.psn_name, nt.person_ctry_code AS harm_ctry
+    FROM name_top nt
+    JOIN cand_counts cc USING (psn_name)
+    WHERE cc.n_candidates = 1
+")
+
+# --- Family-level mode country ---
+cat("Computing family-level mode country...\n")
+dbExecute(con, "
+  CREATE TABLE fam_mode AS
+    SELECT docdb_family_id, person_ctry_code AS fam_mode
+    FROM (
+      SELECT docdb_family_id, person_ctry_code,
+             ROW_NUMBER() OVER (PARTITION BY docdb_family_id
+                                ORDER BY COUNT(*) DESC) AS rnk
+      FROM work
+      GROUP BY docdb_family_id, person_ctry_code
+    )
+    WHERE rnk = 1
+")
+fam_mode_n <- dbGetQuery(con, "SELECT COUNT(*) AS n FROM fam_mode")$n
+cat("  family modes:", format(fam_mode_n, big.mark=","), "\n")
+
+# --- Tie resolution per (tied name × family) ---
+cat("Resolving tied names...\n")
+# Candidates for each tied name × each family the name appears in.
+# Tie-breaking rule:
+#   1. Prefer the candidate that equals the family mode (match_flag = 1).
+#   2. Otherwise (no candidate matches), pick uniformly at random among the
+#      tied candidates. The family mode is uninformative in this case.
+dbExecute(con, "
+  CREATE TABLE tied_best AS
+    WITH tied_names AS (
+      SELECT psn_name FROM cand_counts WHERE n_candidates > 1
+    ),
+    tied_fam AS (
+      SELECT DISTINCT w.psn_name, w.docdb_family_id
+      FROM work w
+      JOIN tied_names tn USING (psn_name)
+    ),
+    tied_cross AS (
+      SELECT tf.psn_name, tf.docdb_family_id,
+             nt.person_ctry_code,
+             CASE WHEN nt.person_ctry_code = fm.fam_mode THEN 1 ELSE 0 END
+               AS match_flag,
+             RANDOM() AS rnd
+      FROM tied_fam tf
+      JOIN name_top nt USING (psn_name)
+      LEFT JOIN fam_mode fm USING (docdb_family_id)
+    ),
+    ranked AS (
+      SELECT *, ROW_NUMBER() OVER (
+                  PARTITION BY psn_name, docdb_family_id
+                  ORDER BY match_flag DESC, rnd
+                ) AS rnk
+      FROM tied_cross
+    )
+    SELECT psn_name, docdb_family_id, person_ctry_code AS harm_ctry
+    FROM ranked WHERE rnk = 1
+")
+tied_diag <- dbGetQuery(con, "
+  WITH by_group AS (
+    SELECT psn_name, docdb_family_id, MAX(match_flag) AS any_match
+    FROM (
+      SELECT tf.psn_name, tf.docdb_family_id,
+             CASE WHEN nt.person_ctry_code = fm.fam_mode THEN 1 ELSE 0 END
+               AS match_flag
+      FROM (SELECT DISTINCT w.psn_name, w.docdb_family_id
+            FROM work w
+            JOIN cand_counts cc USING (psn_name)
+            WHERE cc.n_candidates > 1) tf
+      JOIN name_top nt USING (psn_name)
+      LEFT JOIN fam_mode fm USING (docdb_family_id)
+    )
+    GROUP BY psn_name, docdb_family_id
+  )
+  SELECT COUNT(*)                             AS total,
+         SUM(CASE WHEN any_match=1 THEN 1 ELSE 0 END) AS by_mode,
+         SUM(CASE WHEN any_match=0 THEN 1 ELSE 0 END) AS by_random
+  FROM by_group
+")
+cat(sprintf("  tied (name, family) resolutions: %s\n",
+            format(tied_diag$total, big.mark=",")))
+if (tied_diag$total > 0) {
+  cat(sprintf("    via family mode : %s (%.1f%%)\n",
+              format(tied_diag$by_mode,  big.mark=","),
+              100 * tied_diag$by_mode   / tied_diag$total))
+  cat(sprintf("    via random pick : %s (%.1f%%)\n",
+              format(tied_diag$by_random, big.mark=","),
+              100 * tied_diag$by_random / tied_diag$total))
+}
+
+# --- Apply harmonization + emit distinct (family, country) per type ---
+# Use a view so DuckDB can stream work_harm through the final DISTINCT.
+dbExecute(con, "
+  CREATE VIEW work_harm AS
+    SELECT w.docdb_family_id, w.type,
+           COALESCE(nu.harm_ctry, tb.harm_ctry, w.person_ctry_code)
+             AS harm_ctry
+    FROM work w
+    LEFT JOIN name_best_unambig nu
+      ON w.psn_name = nu.psn_name
+    LEFT JOIN tied_best tb
+      ON w.psn_name       = tb.psn_name
+     AND w.docdb_family_id = tb.docdb_family_id
+")
+
+cat("Applying harmonization & collecting outputs...\n")
+# Row-level change diagnostic (cheap single-pass aggregate)
+change_diag <- dbGetQuery(con, "
+  SELECT COUNT(*) AS total,
+         SUM(CASE WHEN harm_ctry != person_ctry_code THEN 1 ELSE 0 END) AS changed
+  FROM (
+    SELECT w.person_ctry_code,
+           COALESCE(nu.harm_ctry, tb.harm_ctry, w.person_ctry_code) AS harm_ctry
+    FROM work w
+    LEFT JOIN name_best_unambig nu ON w.psn_name = nu.psn_name
+    LEFT JOIN tied_best tb
+      ON w.psn_name = tb.psn_name AND w.docdb_family_id = tb.docdb_family_id
+  )
+")
+cat("  rows with country changed:", format(change_diag$changed, big.mark=","),
+    sprintf(" (%.2f%%)\n", 100 * change_diag$changed / change_diag$total))
+
+# Bring back the (much smaller) distinct (family, country) outputs.
+inventor_countries_harm <- as.data.table(dbGetQuery(con, "
+  SELECT DISTINCT docdb_family_id, harm_ctry AS person_ctry_code
+  FROM work_harm WHERE type = 'inventor'
+"))
+holder_countries_harm <- as.data.table(dbGetQuery(con, "
+  SELECT DISTINCT docdb_family_id, harm_ctry AS person_ctry_code
+  FROM work_harm WHERE type = 'holder'
+"))
+
+dbDisconnect(con, shutdown = TRUE)
 toc()
 
 # ============================================================================
-# 7. Apply harmonization to the work table
-# ============================================================================
-
-cat("Applying harmonization...\n")
-tic("apply")
-
-# Unambiguous: same country for every family the name appears in
-work[name_best_unambig, on = "psn_name", harm_ctry := i.harm_ctry]
-
-# Tied: resolved per (name, family)
-work[tied_best, on = c("psn_name", "docdb_family_id"),
-     harm_ctry := ifelse(is.na(harm_ctry), i.harm_ctry, harm_ctry)]
-
-# Fallback for any residual NA -> original person_ctry_code
-work[is.na(harm_ctry), harm_ctry := person_ctry_code]
-
-n_changed <- sum(work$harm_ctry != work$person_ctry_code, na.rm = TRUE)
-cat("  rows with country changed:", n_changed,
-    sprintf(" (%.2f%%)\n", 100 * n_changed / nrow(work)))
-toc()
-
-# ============================================================================
-# 8. Build outputs and write parquet
+# 8. Write parquet outputs
 # ============================================================================
 
 cat("Writing harmonized outputs...\n")
 tic("write")
-
-inventor_countries_harm <- unique(
-  work[type == "inventor", .(docdb_family_id, person_ctry_code = harm_ctry)]
-)
-holder_countries_harm <- unique(
-  work[type == "holder", .(docdb_family_id, person_ctry_code = harm_ctry)]
-)
 
 write_parquet(inventor_countries_harm, out_inv,
               compression = "zstd", compression_level = 3)

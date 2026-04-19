@@ -1,0 +1,156 @@
+# ============================================================================
+# whole_databuild_pipeline.R
+# ----------------------------------------------------------------------------
+# Run the full ISE app data pipeline, start to finish, in the correct order.
+#
+# Usage (from the project root):
+#   source("data-raw/whole_databuild_pipeline.R")
+#
+# What this produces (in order):
+#   <dropbox>/patbis2021/data/fromWATSON/innos_ev_<CC>_2009_2018.parquet
+#       – compact parquet siblings of the Watson DSVs (one-time conversion)
+#   .bigdata/inventor_countries_harm.parquet
+#   .bigdata/holder_countries_harm.parquet
+#       – harmonized per-person country assignments (one country per psn_name
+#         in PATSTAT; tied names resolved via family mode, else random)
+#   .bigdata/countrymap.fst
+#   .bigdata/nationalkey.fst
+#       – family × country map restricted to the 185 countries with Watson
+#         EV data; nationalkey attaches the EV value per (family, country)
+#   inst/extdata/patent_database.parquet   (and other per-dimension parquets)
+#       – the app's main database (istrax / avstrax / EV measures, joined
+#         against countrymap + firm/tech/region lookups)
+#   R/sysdata.rda
+#       – UI lookup objects loaded automatically by the Shiny package
+#
+# Expected runtime on a warm cache (all intermediates present):
+#   ~5-10 minutes end-to-end.
+# Cold cache (first run, or after deleting .bigdata/):
+#   ~45-60 minutes, dominated by BigQuery downloads (CPC + persons) and
+#   the initial DSV -> parquet conversion.
+#
+# Cache controls:
+#   * Set   RUN_WATSON_CONVERT = FALSE   to skip the DSV -> parquet conversion
+#     (it is idempotent and fast when already done, so usually leave TRUE).
+#   * Delete a specific .fst/.parquet under .bigdata/ to force that step to
+#     re-run.
+# ============================================================================
+
+# -------- Options (override by assigning before source()) --------
+if (!exists("RUN_WATSON_CONVERT")) RUN_WATSON_CONVERT <- TRUE
+if (!exists("STOP_ON_ERROR"))      STOP_ON_ERROR      <- TRUE
+
+# -------- Sanity --------
+if (!file.exists("DESCRIPTION"))
+  stop("Run this from the iseapp project root (cwd should contain DESCRIPTION).")
+if (!dir.exists("data-raw"))
+  stop("Expected data-raw/ folder in the current working directory.")
+
+run_step <- function(label, path) {
+  cat("\n", strrep("=", 78), "\n", sep = "")
+  cat("STEP: ", label, "\n", sep = "")
+  cat("      ", path,  "\n", sep = "")
+  cat(strrep("=", 78), "\n", sep = "")
+  t0 <- Sys.time()
+  tryCatch(
+    source(path, echo = FALSE),
+    error = function(e) {
+      cat("  >>> ERROR in step:", label, "\n")
+      cat("  >>>", conditionMessage(e), "\n")
+      if (STOP_ON_ERROR) stop(e)
+    }
+  )
+  mins <- round(as.numeric(difftime(Sys.time(), t0, units = "mins")), 2)
+  cat(sprintf("STEP done (%.2f min): %s\n", mins, label))
+}
+
+pipeline_start <- Sys.time()
+
+# ============================================================================
+# 0. One-time Watson DSV -> parquet conversion
+# ----------------------------------------------------------------------------
+# Converts the 185 per-country innos_ev_<CC>_2009_2018.dsv files in Dropbox
+# to parquet siblings. Parquets are ~10x smaller and let build_nationalkey
+# run the per-country join as one parallel DuckDB query instead of a 185-
+# iteration R loop. Existing parquet files are skipped, so re-runs are
+# effectively free once done.
+# ============================================================================
+if (RUN_WATSON_CONVERT) {
+  run_step("Convert Watson DSVs to parquet (one-time)",
+           "data-raw/convert_watson_dsvs.R")
+} else {
+  cat("\nSkipping Watson DSV conversion (RUN_WATSON_CONVERT = FALSE).\n")
+}
+
+# ============================================================================
+# 1. Harmonize per-person country codes (inventors + holders)
+# ----------------------------------------------------------------------------
+# For each psn_name in PATSTAT, pick one "best" country based on majority
+# vote across all (inventor + holder) × family rows. Ties are broken using
+# the family mode when one of the tied candidates equals it; otherwise by
+# uniform random pick. Invalid ISO2 codes (blanks, "SU", "DD", etc.) are
+# filtered out up front.
+# Outputs: .bigdata/inventor_countries_harm.parquet
+#          .bigdata/holder_countries_harm.parquet
+# Cache:   .bigdata/tls206_person.fst  (skip BigQuery download if present;
+#          cleaning/filtering runs unconditionally so cache is safe even
+#          after filter changes)
+# ============================================================================
+run_step("Harmonize inventor/holder country codes",
+         "data-raw/build_inventor_countries_harm.R")
+
+# ============================================================================
+# 2. Build countrymap + nationalkey
+# ----------------------------------------------------------------------------
+# countrymap = union of harmonized inventor + holder (family, country)
+# pairs, restricted to the 185 countries with Watson EV data.
+# nationalkey = countrymap joined with per-country Watson EV values
+# (fast path: one DuckDB query over parquet siblings; fallback: DSV loop).
+# Outputs: .bigdata/countrymap.fst
+#          .bigdata/nationalkey.fst
+# ============================================================================
+run_step("Build countrymap + nationalkey",
+         "data-raw/build_nationalkey.R")
+
+# ============================================================================
+# 3. Build the main app parquet database
+# ----------------------------------------------------------------------------
+# Produces inst/extdata/patent_database.parquet — the single file the Shiny
+# app queries via DuckDB. Along the way it also builds the smaller per-
+# dimension parquets: patents_x_firm, patents_x_tech, patents_x_region,
+# firm_lookup, country_lookup, tech_lookup, region_lookup, inglobe_processed.
+# Reads from: Watson DSVs, CPC table (BigQuery, cached), ifcreport.xlsx,
+#             firmmap/firmsectormap/regionmap/inglobe from Dropbox, and
+#             countrymap.fst produced by step 2. The Espacenet-searchable
+#             appln_id per family is sourced from innos_pub.dsv as
+#             publn_auth || publn_nr (preferring EP > WO > US).
+# ============================================================================
+run_step("Build app parquet database",
+         "data-raw/01-build-app-parquets.R")
+
+# ============================================================================
+# 4. Build the Shiny UI sysdata
+# ----------------------------------------------------------------------------
+# Reads the parquets from step 3 and builds R/sysdata.rda — the internal
+# package data loaded automatically whenever the app starts. Contains the
+# selectizeInput choices, grouped hierarchies, and boundary geometries.
+# ============================================================================
+run_step("Build R/sysdata.rda for the app",
+         "data-raw/02-build-app-sysdata.R")
+
+# ============================================================================
+# Summary
+# ============================================================================
+total_min <- round(as.numeric(difftime(Sys.time(), pipeline_start,
+                                       units = "mins")), 2)
+cat("\n", strrep("=", 78), "\n", sep = "")
+cat(sprintf("PIPELINE COMPLETE in %.2f minutes.\n", total_min))
+cat(strrep("=", 78), "\n", sep = "")
+cat("Outputs:\n")
+cat("  .bigdata/inventor_countries_harm.parquet\n")
+cat("  .bigdata/holder_countries_harm.parquet\n")
+cat("  .bigdata/countrymap.fst\n")
+cat("  .bigdata/nationalkey.fst\n")
+cat("  inst/extdata/patent_database.parquet (+ lookup parquets)\n")
+cat("  R/sysdata.rda\n\n")
+cat("Next: run/reload the Shiny app to pick up the new data.\n")

@@ -18,6 +18,8 @@ library(stringi)
 library(tidyr)
 library(tictoc)
 library(jsonlite)
+library(DBI)
+library(duckdb)
 
 # ============================================================================
 # STEP 0: Setup paths
@@ -146,19 +148,28 @@ ifc_expanded <- ifc |>
   filter(nchar(cpc_prefix) > 0) |>
   select(technology, cpc_prefix)
 
-# Prefix matching: find all innovations whose CPC symbol starts with each prefix
-techmap_ifc <- rbindlist(lapply(seq_len(nrow(ifc_expanded)), function(i) {
-  prefix <- ifc_expanded$cpc_prefix[i]
-  tech   <- ifc_expanded$technology[i]
-  matched <- cpcs[startsWith(cpc_class_symbol, prefix),
-                  .(docdb_family_id, technology = tech)]
-  unique(matched)
-}))
+# Prefix matching: find all innovations whose CPC symbol starts with each
+# prefix. Handled by a single DuckDB query instead of an R loop over
+# prefixes — DuckDB builds a prefix lookup structure and scans cpcs once in
+# parallel, which is ~10-50x faster than the previous O(N_prefixes × 25M)
+# approach.
+con <- dbConnect(duckdb::duckdb(), dbdir = ":memory:")
+dbExecute(con, sprintf("PRAGMA threads = %d",
+                       max(1L, parallel::detectCores() - 1L)))
+dbWriteTable(con, "cpcs",         as.data.frame(cpcs),         overwrite = TRUE)
+dbWriteTable(con, "ifc_expanded", as.data.frame(ifc_expanded), overwrite = TRUE)
 
-techmap <- unique(techmap_ifc)
+techmap <- setDT(dbGetQuery(con, "
+  SELECT DISTINCT c.docdb_family_id, p.technology
+  FROM cpcs c
+  JOIN ifc_expanded p
+    ON starts_with(c.cpc_class_symbol, p.cpc_prefix)
+"))
+dbDisconnect(con, shutdown = TRUE)
+
 cat("  ifcreport techmap:", nrow(techmap), "rows,",
     uniqueN(techmap$technology), "technologies\n")
-rm(techmap_ifc, ifc_expanded, ifc)
+rm(ifc_expanded, ifc)
 toc()
 
 
@@ -356,11 +367,33 @@ toc()
 cat("\nComputing istraxes from fromWATSON...\n")
 tic("istraxes total")
 
+# Helper: read a Watson file, preferring its parquet sibling if it exists
+# (produced by data-raw/convert_watson_dsvs.R). Parquet reads with
+# col_select are an order of magnitude faster than fread on the wide DSVs.
+read_watson <- function(dsv_path, columns = NULL) {
+  pq_path <- sub("\\.dsv$", ".parquet", dsv_path)
+  if (file.exists(pq_path)) {
+    cat("    [parquet] ", basename(pq_path), "\n", sep = "")
+    if (!is.null(columns)) {
+      out <- arrow::read_parquet(pq_path, col_select = all_of(columns))
+    } else {
+      out <- arrow::read_parquet(pq_path)
+    }
+    return(as.data.table(out))
+  }
+  if (!file.exists(dsv_path)) return(NULL)
+  cat("    [dsv]     ", basename(dsv_path), "\n", sep = "")
+  fread(dsv_path, showProgress = FALSE,
+        select = if (is.null(columns)) NULL else columns)
+}
+
 # 10a: Build patchar (global-level per innovation)
 cat("  10a: Reading global istrax data...\n")
-patchar <- fread(file.path(fromWATSON, "innos_istraxfield_global_2009_2018.dsv"))
-patchar <- patchar[, .(docdb_family_id, pv, ev, costpvyear_2009_2018,
-                       alphapvyear_2009_2018, istrax)]
+patchar <- read_watson(
+  file.path(fromWATSON, "innos_istraxfield_global_2009_2018.dsv"),
+  columns = c("docdb_family_id", "pv", "ev",
+              "costpvyear_2009_2018", "alphapvyear_2009_2018", "istrax")
+)
 setnames(patchar, c("istrax", "costpvyear_2009_2018", "alphapvyear_2009_2018", "ev"),
                   c("istrax_global", "cost", "alpha", "ev_global"))
 patchar[, avstrax_global := (ev_global + pv) / cost]
@@ -394,18 +427,19 @@ ev_variants <- c("CN", "emde", "eu", "euplusuk", "g7", "IN",
                  "AT", "GB", "DE", "FR", "US")
 
 for (ff in ev_variants) {
-  ev_file <- file.path(fromWATSON,
-                       paste0("innos_ev_", tolower(ff), "_2009_2018.dsv"))
-  if (!file.exists(ev_file)) {
-    cat("    WARNING: Missing", ev_file, "- skipping\n")
+  ev_dsv <- file.path(fromWATSON,
+                      paste0("innos_ev_", tolower(ff), "_2009_2018.dsv"))
+  cat("    Reading ev_", toupper(ff), "...\n", sep = "")
+  ev_data <- read_watson(ev_dsv)  # prefers parquet sibling
+  if (is.null(ev_data)) {
+    cat("    WARNING: Missing ", ev_dsv, " - skipping\n", sep = "")
     next
   }
-  cat("    Reading ev_", toupper(ff), "...\n", sep = "")
-  ev_data <- fread(ev_file)
-  # Find the ev column (starts with "ev")
+  # Find the ev column (starts with "ev"). Per-country parquets store the
+  # value as "ev"; group DSVs/parquets store it as "ev_<group>_2009_2018".
   ev_src_col <- grep("^ev", names(ev_data), value = TRUE)[1]
   if (is.na(ev_src_col)) {
-    cat("    WARNING: No ev column found in", basename(ev_file), "- skipping\n")
+    cat("    WARNING: No ev column found in", basename(ev_dsv), "- skipping\n")
     next
   }
   ev_col_name <- paste0("ev_", toupper(ff))
@@ -504,9 +538,11 @@ setnames(patent_data, old_names, new_names)
 # Priority per family: EP > WO > US > any other office (most internationally
 # recognizable publication). Within a preferred office, first row wins
 # (matches the dev_test "first per family" pattern).
-cat("  Building Espacenet-searchable appln_id from innos_pub.dsv...\n")
-pubs <- fread(file.path(fromPATSTAT, "innos_pub.dsv"),
-              select = c("docdb_family_id", "publn_auth", "publn_nr"))
+cat("  Building Espacenet-searchable appln_id from innos_pub...\n")
+pubs <- read_watson(
+  file.path(fromPATSTAT, "innos_pub.dsv"),
+  columns = c("docdb_family_id", "publn_auth", "publn_nr")
+)
 pubs <- pubs[!is.na(publn_auth) & nzchar(publn_auth) &
              !is.na(publn_nr)   & nzchar(publn_nr)]
 
