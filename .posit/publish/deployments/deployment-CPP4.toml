@@ -11,8 +11,8 @@ id = '019cdc4e-02b5-144d-71fe-74477e6abf2a'
 dashboard_url = 'https://connect.posit.cloud/mondpanther/content/019cdc4e-02b5-144d-71fe-74477e6abf2a'
 direct_url = 'https://019cdc4e-02b5-144d-71fe-74477e6abf2a.share.connect.posit.cloud'
 logs_url = 'https://connect.posit.cloud/mondpanther/content/019cdc4e-02b5-144d-71fe-74477e6abf2a/history'
-deployed_at = '2026-04-16T09:11:21+01:00'
-bundle_id = '019d9555-817d-20b9-206b-885eaeeb94e1'
+deployed_at = '2026-04-20T14:34:45+01:00'
+bundle_id = '019dab18-357a-69b1-37ad-69937d0f7b28'
 files = [
   '.posit/publish/deployments/deployment-CPP4.toml',
   '.posit/publish/iseapp2-9GQ2.toml',
@@ -30,6 +30,7 @@ files = [
   'R/module_globe.R',
   'R/module_landing.R',
   'R/module_region.R',
+  'R/module_welcome.R',
   'R/onLoadUnload.R',
   'R/runAppPackage.R',
   'R/server.R',
@@ -38,7 +39,9 @@ files = [
   'R/ui.R',
   'R/utils_download.R',
   'R/utils_url_restore.R',
+  'R/utils_version.R',
   'app.R',
+  'data-raw/02-build-app-sysdata.R',
   'inst/config.yml',
   'inst/extdata/country_lookup.parquet',
   'inst/extdata/firm_lookup.parquet',
@@ -117,12 +120,13 @@ files = [
   '/DESCRIPTION',
   '/NAMESPACE',
   '/inst',
-  '/man'
+  '/man',
+  '/data-raw/02-build-app-sysdata.R'
 ]
 title = 'iseapp2'
 
 [configuration.r]
-version = '4.5.2'
+version = '4.5.3'
 
 [renv]
 [renv.r]
