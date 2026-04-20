@@ -42,6 +42,7 @@ server <- function(input, output, session, con) {
 
   # Call Modules
   landing_ready <- landing_module_server("landing", waiter = startup_waiter, con = con)
+  welcome_module_server("welcome", parent_session = session)
   shiny::observeEvent(landing_ready(), once = TRUE, {
     country_module_server("country", session, con = con)
   })

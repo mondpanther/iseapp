@@ -154,7 +154,7 @@ country_module_sidebar <- function(id) {
         shiny::numericInput(
           ns("mininno"),
           "Minimum innovations",
-          value = 5,
+          value = 10,
           min = 1
         )
       )
@@ -175,7 +175,7 @@ country_module_sidebar <- function(id) {
         ),
         shiny::div(
           class = "side_input",
-          shiny::numericInput(ns("mininno_rta"), "Innovation count threshold:", value = 50, min = 0, max = 500)
+          shiny::numericInput(ns("mininno_rta"), "Innovation count threshold:", value = 0, min = 0, max = 500)
         ),
         shiny::div(
           class = "side_input",
