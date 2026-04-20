@@ -18,6 +18,8 @@ library(stringi)
 library(tidyr)
 library(tictoc)
 library(jsonlite)
+library(DBI)
+library(duckdb)
 
 # ============================================================================
 # STEP 0: Setup paths
@@ -146,19 +148,28 @@ ifc_expanded <- ifc |>
   filter(nchar(cpc_prefix) > 0) |>
   select(technology, cpc_prefix)
 
-# Prefix matching: find all innovations whose CPC symbol starts with each prefix
-techmap_ifc <- rbindlist(lapply(seq_len(nrow(ifc_expanded)), function(i) {
-  prefix <- ifc_expanded$cpc_prefix[i]
-  tech   <- ifc_expanded$technology[i]
-  matched <- cpcs[startsWith(cpc_class_symbol, prefix),
-                  .(docdb_family_id, technology = tech)]
-  unique(matched)
-}))
+# Prefix matching: find all innovations whose CPC symbol starts with each
+# prefix. Handled by a single DuckDB query instead of an R loop over
+# prefixes — DuckDB builds a prefix lookup structure and scans cpcs once in
+# parallel, which is ~10-50x faster than the previous O(N_prefixes × 25M)
+# approach.
+con <- dbConnect(duckdb::duckdb(), dbdir = ":memory:")
+dbExecute(con, sprintf("PRAGMA threads = %d",
+                       max(1L, parallel::detectCores() - 1L)))
+dbWriteTable(con, "cpcs",         as.data.frame(cpcs),         overwrite = TRUE)
+dbWriteTable(con, "ifc_expanded", as.data.frame(ifc_expanded), overwrite = TRUE)
 
-techmap <- unique(techmap_ifc)
+techmap <- setDT(dbGetQuery(con, "
+  SELECT DISTINCT c.docdb_family_id, p.technology
+  FROM cpcs c
+  JOIN ifc_expanded p
+    ON starts_with(c.cpc_class_symbol, p.cpc_prefix)
+"))
+dbDisconnect(con, shutdown = TRUE)
+
 cat("  ifcreport techmap:", nrow(techmap), "rows,",
     uniqueN(techmap$technology), "technologies\n")
-rm(techmap_ifc, ifc_expanded, ifc)
+rm(ifc_expanded, ifc)
 toc()
 
 
@@ -306,6 +317,10 @@ techmap <- rbindlist(list(techmap, section_map))
 cat("  CPC sections:", nrow(section_map), "rows\n")
 rm(section_map)
 
+# cpcs is no longer needed downstream — free it before building the huge
+# patent_data table in step 10.
+rm(cpcs); gc()
+
 
 # ============================================================================
 # STEP 8: Deduplicate techmap
@@ -356,11 +371,33 @@ toc()
 cat("\nComputing istraxes from fromWATSON...\n")
 tic("istraxes total")
 
+# Helper: read a Watson file, preferring its parquet sibling if it exists
+# (produced by data-raw/convert_watson_dsvs.R). Parquet reads with
+# col_select are an order of magnitude faster than fread on the wide DSVs.
+read_watson <- function(dsv_path, columns = NULL) {
+  pq_path <- sub("\\.dsv$", ".parquet", dsv_path)
+  if (file.exists(pq_path)) {
+    cat("    [parquet] ", basename(pq_path), "\n", sep = "")
+    if (!is.null(columns)) {
+      out <- arrow::read_parquet(pq_path, col_select = all_of(columns))
+    } else {
+      out <- arrow::read_parquet(pq_path)
+    }
+    return(as.data.table(out))
+  }
+  if (!file.exists(dsv_path)) return(NULL)
+  cat("    [dsv]     ", basename(dsv_path), "\n", sep = "")
+  fread(dsv_path, showProgress = FALSE,
+        select = if (is.null(columns)) NULL else columns)
+}
+
 # 10a: Build patchar (global-level per innovation)
 cat("  10a: Reading global istrax data...\n")
-patchar <- fread(file.path(fromWATSON, "innos_istraxfield_global_2009_2018.dsv"))
-patchar <- patchar[, .(docdb_family_id, pv, ev, costpvyear_2009_2018,
-                       alphapvyear_2009_2018, istrax)]
+patchar <- read_watson(
+  file.path(fromWATSON, "innos_istraxfield_global_2009_2018.dsv"),
+  columns = c("docdb_family_id", "pv", "ev",
+              "costpvyear_2009_2018", "alphapvyear_2009_2018", "istrax")
+)
 setnames(patchar, c("istrax", "costpvyear_2009_2018", "alphapvyear_2009_2018", "ev"),
                   c("istrax_global", "cost", "alpha", "ev_global"))
 patchar[, avstrax_global := (ev_global + pv) / cost]
@@ -394,18 +431,19 @@ ev_variants <- c("CN", "emde", "eu", "euplusuk", "g7", "IN",
                  "AT", "GB", "DE", "FR", "US")
 
 for (ff in ev_variants) {
-  ev_file <- file.path(fromWATSON,
-                       paste0("innos_ev_", tolower(ff), "_2009_2018.dsv"))
-  if (!file.exists(ev_file)) {
-    cat("    WARNING: Missing", ev_file, "- skipping\n")
+  ev_dsv <- file.path(fromWATSON,
+                      paste0("innos_ev_", tolower(ff), "_2009_2018.dsv"))
+  cat("    Reading ev_", toupper(ff), "...\n", sep = "")
+  ev_data <- read_watson(ev_dsv)  # prefers parquet sibling
+  if (is.null(ev_data)) {
+    cat("    WARNING: Missing ", ev_dsv, " - skipping\n", sep = "")
     next
   }
-  cat("    Reading ev_", toupper(ff), "...\n", sep = "")
-  ev_data <- fread(ev_file)
-  # Find the ev column (starts with "ev")
+  # Find the ev column (starts with "ev"). Per-country parquets store the
+  # value as "ev"; group DSVs/parquets store it as "ev_<group>_2009_2018".
   ev_src_col <- grep("^ev", names(ev_data), value = TRUE)[1]
   if (is.na(ev_src_col)) {
-    cat("    WARNING: No ev column found in", basename(ev_file), "- skipping\n")
+    cat("    WARNING: No ev column found in", basename(ev_dsv), "- skipping\n")
     next
   }
   ev_col_name <- paste0("ev_", toupper(ff))
@@ -467,6 +505,17 @@ for (dc in dup_cols) patent_data[, (dc) := NULL]
 cat("    patent_data:", nrow(patent_data), "rows,",
     uniqueN(patent_data$ctry_code), "countries\n")
 
+# Capture the final docdb + country universe (intersection of patchar and
+# countrymap). Bridge tables and lookups downstream are filtered to these
+# sets so they only reference entities that actually appear in the main
+# database — avoids shipping dead rows to the app.
+final_docdbs     <- unique(patent_data$docdb_family_id)
+final_ctry_codes <- unique(patent_data$ctry_code)
+cat("    final docdb universe:   ",
+    format(length(final_docdbs),     big.mark=","), "families\n")
+cat("    final country universe: ",
+    format(length(final_ctry_codes), big.mark=","), "countries\n")
+
 rm(patchar, pcm, pcm_national, patchar_slim)
 gc()
 toc()
@@ -504,9 +553,14 @@ setnames(patent_data, old_names, new_names)
 # Priority per family: EP > WO > US > any other office (most internationally
 # recognizable publication). Within a preferred office, first row wins
 # (matches the dev_test "first per family" pattern).
-cat("  Building Espacenet-searchable appln_id from innos_pub.dsv...\n")
-pubs <- fread(file.path(fromPATSTAT, "innos_pub.dsv"),
-              select = c("docdb_family_id", "publn_auth", "publn_nr"))
+cat("  Building Espacenet-searchable appln_id from innos_pub...\n")
+pubs <- read_watson(
+  file.path(fromPATSTAT, "innos_pub.dsv"),
+  columns = c("docdb_family_id", "publn_auth", "publn_nr")
+)
+# Filter to families that will actually end up in the database. Skips
+# ~10M publications that would otherwise be sorted + grouped for no reason.
+pubs <- pubs[docdb_family_id %in% final_docdbs]
 pubs <- pubs[!is.na(publn_auth) & nzchar(publn_auth) &
              !is.na(publn_nr)   & nzchar(publn_nr)]
 
@@ -517,8 +571,9 @@ appln_ids <- pubs[, .(appln_id = paste0(publn_auth[1], publn_nr[1])),
                   by = docdb_family_id]
 rm(pubs); gc()
 
-# Add appln_id to patent_data
+# Add appln_id to patent_data; free the small lookup
 patent_data <- appln_ids[patent_data, on = "docdb_family_id"]
+rm(appln_ids); gc()
 
 n_missing <- sum(is.na(patent_data$appln_id))
 if (n_missing > 0) {
@@ -538,26 +593,31 @@ cat("  patent_data:", nrow(patent_data), "rows,", ncol(patent_data), "columns\n"
 # Sort by ctry_code for optimal parquet predicate pushdown
 setorder(patent_data, ctry_code)
 
-# Convert to data.frame for arrow
-patent_data_df <- as.data.frame(patent_data)
-
-# Build schema
+# ---- Write parquet with minimal memory overhead ----
+# Build the float32 schema from the data.table directly (data.table inherits
+# from data.frame so `[[col]]` works identically). Avoids the prior
+# `as.data.frame(patent_data)` duplication.
+output_file <- "inst/extdata/patent_database.parquet"
 float_schema <- arrow::schema(
-  purrr::map(names(patent_data_df), \(col) {
+  purrr::map(names(patent_data), \(col) {
     if (col == "docdb_family_id") {
       arrow::field(col, arrow::int32())
-    } else if (is.double(patent_data_df[[col]])) {
+    } else if (is.double(patent_data[[col]])) {
       arrow::field(col, arrow::float32())
     } else {
-      arrow::field(col, arrow::infer_type(patent_data_df[[col]]))
+      arrow::field(col, arrow::infer_type(patent_data[[col]]))
     }
   })
 )
 
-output_file <- "inst/extdata/patent_database.parquet"
-patent_data_df |>
-  arrow::as_arrow_table(schema = float_schema) |>
-  arrow::write_parquet(output_file, compression = "zstd", compression_level = 3)
+# Convert to an Arrow Table, then drop the R-side data.table BEFORE writing
+# so we only hold one full copy during the zstd compression pass.
+at <- arrow::as_arrow_table(patent_data, schema = float_schema)
+rm(patent_data); gc()
+
+arrow::write_parquet(at, output_file,
+                     compression = "zstd", compression_level = 3)
+rm(at); gc()
 
 file_size <- file.info(output_file)$size / 1024^3
 cat("  Saved to", output_file, "(", round(file_size, 2), "GB)\n")
@@ -596,13 +656,17 @@ eu_countries <- c("AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","H
 hic          <- setdiff(all_iso2, lmics)
 
 # -- patents_x_tech --
+# Filter to families that actually end up in the main database. The full
+# techmap.fst cached in .bigdata/ contains mappings for every family in the
+# cpcs source, but only those in the countrymap x patchar intersection can
+# ever be queried by the app.
 cat("  Writing patents_x_tech.parquet...\n")
-patents_x_tech <- techmap[, .(docdb_family_id, technology)]
-patents_x_tech <- unique(patents_x_tech)
+patents_x_tech <- unique(techmap[docdb_family_id %in% final_docdbs,
+                                 .(docdb_family_id, technology)])
 write_parquet(as.data.frame(patents_x_tech),
               "inst/extdata/patents_x_tech.parquet",
               compression = "zstd", compression_level = 3)
-cat("    ", nrow(patents_x_tech), "rows\n")
+cat("    ", nrow(patents_x_tech), "rows (restricted to final docdbs)\n")
 
 # -- tech_lookup --
 cat("  Writing tech_lookup.parquet...\n")
@@ -618,55 +682,68 @@ cat("    ", nrow(tech_lookup), "rows\n")
 cat("  Writing patents_x_region.parquet...\n")
 regionmap <- read_fst(file.path(iseapp_dir, "regionmap.fst"))
 patents_x_region <- regionmap |>
+  dplyr::filter(docdb_family_id %in% final_docdbs) |>
   dplyr::select(docdb_family_id, region_code) |>
   dplyr::distinct()
 write_parquet(patents_x_region, "inst/extdata/patents_x_region.parquet",
               compression = "zstd", compression_level = 3)
-cat("    ", nrow(patents_x_region), "rows\n")
+cat("    ", nrow(patents_x_region), "rows (restricted to final docdbs)\n")
 
 # -- region_lookup --
+# Restrict to regions that actually appear in patents_x_region (which is
+# already filtered to final_docdbs). Drops regions with zero families.
 cat("  Writing region_lookup.parquet...\n")
+final_regions <- unique(patents_x_region$region_code)
 region_lookup <- regionmap |>
+  dplyr::filter(region_code %in% final_regions) |>
   dplyr::select(region_code, region_name) |>
   dplyr::distinct()
 write_parquet(region_lookup, "inst/extdata/region_lookup.parquet",
               compression = "zstd", compression_level = 3)
-cat("    ", nrow(region_lookup), "rows\n")
+cat("    ", nrow(region_lookup), "rows (restricted to regions with final docdbs)\n")
 
 # -- patents_x_firm (from old iseapp) --
+# Read firmmap ONCE (it's not tiny) and derive both top_companies and the
+# filtered bridge from the same in-memory copy.
 cat("  Writing patents_x_firm.parquet...\n")
-top_companies <- arrow::read_parquet(file.path(iseapp_dir, "firmmap.parquet")) |>
-  dplyr::group_by(company_raw) |>
-  dplyr::count() |>
-  dplyr::arrange(desc(n)) |>
-  dplyr::ungroup() |>
-  dplyr::slice_head(n = 100) |>
+firmmap_full <- arrow::read_parquet(file.path(iseapp_dir, "firmmap.parquet"))
+
+top_companies <- firmmap_full |>
+  dplyr::count(company_raw, name = "n") |>
+  dplyr::slice_max(n, n = 100, with_ties = FALSE) |>
   dplyr::pull(company_raw)
 
-firmmap_top100 <- arrow::read_parquet(file.path(iseapp_dir, "firmmap.parquet")) |>
-  dplyr::filter(company_raw %in% top_companies) |>
+patents_x_firm <- firmmap_full |>
+  dplyr::filter(company_raw %in% top_companies,
+                docdb_family_id %in% final_docdbs) |>
   dplyr::rename(firm = company_raw) |>
-  dplyr::select(docdb_family_id, firm)
-
-patents_x_firm <- firmmap_top100 |>
   dplyr::select(docdb_family_id, firm) |>
   dplyr::distinct()
+rm(firmmap_full); gc()
+
 write_parquet(patents_x_firm, "inst/extdata/patents_x_firm.parquet",
               compression = "zstd", compression_level = 3)
-cat("    ", nrow(patents_x_firm), "rows\n")
+cat("    ", nrow(patents_x_firm), "rows (restricted to final docdbs)\n")
 
 # -- firm_lookup --
+# Restrict to firms that actually appear in patents_x_firm (top companies
+# with at least one final-docdb family). Drops any top-100 company whose
+# families were filtered out by the Watson / countrymap intersection.
 cat("  Writing firm_lookup.parquet...\n")
+final_firms <- unique(patents_x_firm$firm)
 firmsectormap <- arrow::read_parquet(file.path(iseapp_dir, "firmsectormap.parquet")) |>
   dplyr::select(firm = company_raw, firm_sector = sector)
-firm_lookup <- firmsectormap |> dplyr::filter(firm %in% top_companies)
+firm_lookup <- firmsectormap |> dplyr::filter(firm %in% final_firms)
 write_parquet(firm_lookup, "inst/extdata/firm_lookup.parquet",
               compression = "zstd", compression_level = 3)
 cat("    ", nrow(firm_lookup), "rows\n")
 
 # -- country_lookup --
+# Use final_ctry_codes (countries surviving the patchar x countrymap inner
+# join) rather than countrymap's full 181-country set, so the lookup only
+# lists countries the app can actually query.
 cat("  Writing country_lookup.parquet...\n")
-country_lookup <- countrymap[, .(ctry_code = unique(ctry_code))]
+country_lookup <- data.table::data.table(ctry_code = sort(final_ctry_codes))
 country_lookup[, `:=`(
   is_lmic            = ctry_code %in% lmics,
   is_lmic_excl_china = ctry_code %in% setdiff(lmics, "CN"),
@@ -695,17 +772,17 @@ df_processed <- df_raw |>
       ifelse(is.na(tech_subgroup), "ALL", tech_subgroup), "_",
       sample_size, "_", source_id
     )
-  )
-
-df_processed <- df_processed |>
+  ) |>
   dplyr::select(
     sce_country, sce_tech_display, tech_group,
     sample_size, wave, source_lon, source_lat,
     target_lon, target_lat, chain_id
   )
+rm(df_raw); gc()
 
 arrow::write_parquet(df_processed, "inst/extdata/inglobe_processed.parquet")
 cat("  Written inglobe_processed.parquet:", nrow(df_processed), "rows\n")
+rm(df_processed); gc()
 
 # ============================================================================
 # SUMMARY

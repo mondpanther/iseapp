@@ -160,7 +160,7 @@ region_module_sidebar <- function(id) {
       ),
       shiny::div(
         class = "side_input",
-        shiny::numericInput(ns("mininno_region"), "Minimum innovations:", value = 100, min = 1, max = 500)
+        shiny::numericInput(ns("mininno_region"), "Minimum innovations:", value = 10, min = 1, max = 500)
       )
     ),
 
@@ -179,7 +179,7 @@ region_module_sidebar <- function(id) {
         ),
         shiny::div(
           class = "side_input",
-          shiny::numericInput(ns("mininno_rta_region"), "Innovation count threshold:", value = 50, min = 0, max = 500)
+          shiny::numericInput(ns("mininno_rta_region"), "Innovation count threshold:", value = 0, min = 0, max = 500)
         ),
         shiny::div(
           class = "side_input",

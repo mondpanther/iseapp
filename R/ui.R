@@ -88,6 +88,10 @@ ui <- function(req) {
     bslib::nav_spacer(),
 
     shiny::tabPanel(
+      "Home",
+      welcome_module_ui("welcome")
+    ),
+    shiny::tabPanel(
       "Country Explorer",
       country_module_ui("country")
     ),
@@ -197,6 +201,11 @@ ui <- function(req) {
             href = "https://github.com/mondpanther/iseapp",
             target = "_blank"
           )
+        ),
+        shiny::p(
+          style = "color: #888; font-size: 0.85em;",
+          "Version: ",
+          shiny::tags$code(app_version())
         )
       )
     )
