@@ -21,8 +21,16 @@
 #   S4. work                      — persons × appln rows with type in
 #                                   {inventor, holder}, restricted to scope
 #   S5. name_ctry_counts, name_top, cand_counts, fam_mode, tied_best
-#                                 — harmonization SQL (same semantics as the
-#                                   local DuckDB version)
+#                                 — harmonization SQL:
+#                                   - Unambiguous name -> single winner.
+#                                   - Tied name within a family: intersect
+#                                     tied candidates with the family mode(s)
+#                                     (majority country/ies across ALL persons
+#                                     in the family — both inventors and
+#                                     holders; multiple modes are kept when
+#                                     tied). If the intersection is non-empty
+#                                     those are retained; otherwise all tied
+#                                     candidates are kept.
 #   S6. inventor_countries_harm, holder_countries_harm — final tables
 #
 # Outputs: downloaded to .bigdata/{inventor,holder}_countries_harm.parquet so
@@ -439,27 +447,37 @@ bq_run(sprintf("
    fqtn("name_top"),
    fqtn("cand_counts")), "name_best_unambig")
 
-# 5b: family-level mode country
+# 5b: Family-level mode country/ies.
+# Counts person rows (both inventors AND holders) per (family, country) and
+# keeps all countries tied at the family max. A family can therefore have
+# MULTIPLE modes if several countries are equally common.
 bq_run(sprintf("
   CREATE OR REPLACE TABLE `%s` AS
-  SELECT docdb_family_id, person_ctry_code AS fam_mode
-  FROM (
-    SELECT docdb_family_id, person_ctry_code,
-           ROW_NUMBER() OVER (PARTITION BY docdb_family_id
-                              ORDER BY COUNT(*) DESC,
-                                       person_ctry_code ASC) AS rnk
+  WITH fam_ctry_counts AS (
+    SELECT docdb_family_id, person_ctry_code, COUNT(*) AS n
     FROM `%s`
     GROUP BY docdb_family_id, person_ctry_code
+  ),
+  fam_max AS (
+    SELECT docdb_family_id, MAX(n) AS max_n
+    FROM fam_ctry_counts
+    GROUP BY docdb_family_id
   )
-  WHERE rnk = 1
-", fqtn("fam_mode"), fqtn("work")), "fam_mode")
+  SELECT c.docdb_family_id, c.person_ctry_code AS fam_mode
+  FROM fam_ctry_counts c
+  JOIN fam_max m USING (docdb_family_id)
+  WHERE c.n = m.max_n
+", fqtn("fam_mode"),
+   fqtn("work")), "fam_mode")
 
 # 5c: tie resolution.
-# Tie-breaking rule:
-#   1. If any tied candidate equals the family_mode for that family -> pick it.
-#   2. Else pick deterministically from tied candidates using a hash of
-#      (psn_name, docdb_family_id, candidate) so that every run picks the
-#      same "random" candidate without needing a session seed.
+# Rule:
+#   1. For a psn_name with multiple tied top candidates within a family, keep
+#      only the tied candidates that are ALSO family-mode countries.
+#   2. If the family has multiple modes, any tied candidate that matches any
+#      of those modes is retained (all of them).
+#   3. If NONE of the tied candidates intersects the family modes, fall back
+#      to keeping all tied candidates (no tie-break).
 bq_run(sprintf("
   CREATE OR REPLACE TABLE `%s` AS
   WITH tied_names AS (
@@ -475,23 +493,24 @@ bq_run(sprintf("
       tf.psn_name,
       tf.docdb_family_id,
       nt.person_ctry_code,
-      CASE WHEN nt.person_ctry_code = fm.fam_mode THEN 1 ELSE 0 END AS match_flag,
-      ABS(FARM_FINGERPRINT(CONCAT(tf.psn_name, '|',
-                                  CAST(tf.docdb_family_id AS STRING), '|',
-                                  nt.person_ctry_code))) AS rnd
+      CASE WHEN fm.fam_mode IS NOT NULL THEN 1 ELSE 0 END AS match_flag
     FROM tied_fam tf
     JOIN `%s` nt USING (psn_name)
-    LEFT JOIN `%s` fm USING (docdb_family_id)
+    LEFT JOIN `%s` fm
+      ON fm.docdb_family_id = tf.docdb_family_id
+     AND fm.fam_mode        = nt.person_ctry_code
   ),
-  ranked AS (
-    SELECT *, ROW_NUMBER() OVER (
-              PARTITION BY psn_name, docdb_family_id
-              ORDER BY match_flag DESC, rnd ASC
-            ) AS rnk
+  per_group AS (
+    SELECT psn_name, docdb_family_id, MAX(match_flag) AS any_match
     FROM tied_cross
+    GROUP BY psn_name, docdb_family_id
   )
-  SELECT psn_name, docdb_family_id, person_ctry_code AS harm_ctry
-  FROM ranked WHERE rnk = 1
+  SELECT tc.psn_name, tc.docdb_family_id,
+         tc.person_ctry_code AS harm_ctry
+  FROM tied_cross tc
+  JOIN per_group pg USING (psn_name, docdb_family_id)
+  WHERE (pg.any_match = 1 AND tc.match_flag = 1)   -- intersect w/ family modes
+     OR (pg.any_match = 0)                         -- no intersection: keep all tied
 ", fqtn("tied_best"),
    fqtn("cand_counts"),
    fqtn("work"),

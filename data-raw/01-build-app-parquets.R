@@ -505,6 +505,17 @@ for (dc in dup_cols) patent_data[, (dc) := NULL]
 cat("    patent_data:", nrow(patent_data), "rows,",
     uniqueN(patent_data$ctry_code), "countries\n")
 
+# Capture the final docdb + country universe (intersection of patchar and
+# countrymap). Bridge tables and lookups downstream are filtered to these
+# sets so they only reference entities that actually appear in the main
+# database — avoids shipping dead rows to the app.
+final_docdbs     <- unique(patent_data$docdb_family_id)
+final_ctry_codes <- unique(patent_data$ctry_code)
+cat("    final docdb universe:   ",
+    format(length(final_docdbs),     big.mark=","), "families\n")
+cat("    final country universe: ",
+    format(length(final_ctry_codes), big.mark=","), "countries\n")
+
 rm(patchar, pcm, pcm_national, patchar_slim)
 gc()
 toc()
@@ -547,6 +558,9 @@ pubs <- read_watson(
   file.path(fromPATSTAT, "innos_pub.dsv"),
   columns = c("docdb_family_id", "publn_auth", "publn_nr")
 )
+# Filter to families that will actually end up in the database. Skips
+# ~10M publications that would otherwise be sorted + grouped for no reason.
+pubs <- pubs[docdb_family_id %in% final_docdbs]
 pubs <- pubs[!is.na(publn_auth) & nzchar(publn_auth) &
              !is.na(publn_nr)   & nzchar(publn_nr)]
 
@@ -642,13 +656,17 @@ eu_countries <- c("AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","H
 hic          <- setdiff(all_iso2, lmics)
 
 # -- patents_x_tech --
+# Filter to families that actually end up in the main database. The full
+# techmap.fst cached in .bigdata/ contains mappings for every family in the
+# cpcs source, but only those in the countrymap x patchar intersection can
+# ever be queried by the app.
 cat("  Writing patents_x_tech.parquet...\n")
-patents_x_tech <- techmap[, .(docdb_family_id, technology)]
-patents_x_tech <- unique(patents_x_tech)
+patents_x_tech <- unique(techmap[docdb_family_id %in% final_docdbs,
+                                 .(docdb_family_id, technology)])
 write_parquet(as.data.frame(patents_x_tech),
               "inst/extdata/patents_x_tech.parquet",
               compression = "zstd", compression_level = 3)
-cat("    ", nrow(patents_x_tech), "rows\n")
+cat("    ", nrow(patents_x_tech), "rows (restricted to final docdbs)\n")
 
 # -- tech_lookup --
 cat("  Writing tech_lookup.parquet...\n")
@@ -664,20 +682,25 @@ cat("    ", nrow(tech_lookup), "rows\n")
 cat("  Writing patents_x_region.parquet...\n")
 regionmap <- read_fst(file.path(iseapp_dir, "regionmap.fst"))
 patents_x_region <- regionmap |>
+  dplyr::filter(docdb_family_id %in% final_docdbs) |>
   dplyr::select(docdb_family_id, region_code) |>
   dplyr::distinct()
 write_parquet(patents_x_region, "inst/extdata/patents_x_region.parquet",
               compression = "zstd", compression_level = 3)
-cat("    ", nrow(patents_x_region), "rows\n")
+cat("    ", nrow(patents_x_region), "rows (restricted to final docdbs)\n")
 
 # -- region_lookup --
+# Restrict to regions that actually appear in patents_x_region (which is
+# already filtered to final_docdbs). Drops regions with zero families.
 cat("  Writing region_lookup.parquet...\n")
+final_regions <- unique(patents_x_region$region_code)
 region_lookup <- regionmap |>
+  dplyr::filter(region_code %in% final_regions) |>
   dplyr::select(region_code, region_name) |>
   dplyr::distinct()
 write_parquet(region_lookup, "inst/extdata/region_lookup.parquet",
               compression = "zstd", compression_level = 3)
-cat("    ", nrow(region_lookup), "rows\n")
+cat("    ", nrow(region_lookup), "rows (restricted to regions with final docdbs)\n")
 
 # -- patents_x_firm (from old iseapp) --
 # Read firmmap ONCE (it's not tiny) and derive both top_companies and the
@@ -691,7 +714,8 @@ top_companies <- firmmap_full |>
   dplyr::pull(company_raw)
 
 patents_x_firm <- firmmap_full |>
-  dplyr::filter(company_raw %in% top_companies) |>
+  dplyr::filter(company_raw %in% top_companies,
+                docdb_family_id %in% final_docdbs) |>
   dplyr::rename(firm = company_raw) |>
   dplyr::select(docdb_family_id, firm) |>
   dplyr::distinct()
@@ -699,20 +723,27 @@ rm(firmmap_full); gc()
 
 write_parquet(patents_x_firm, "inst/extdata/patents_x_firm.parquet",
               compression = "zstd", compression_level = 3)
-cat("    ", nrow(patents_x_firm), "rows\n")
+cat("    ", nrow(patents_x_firm), "rows (restricted to final docdbs)\n")
 
 # -- firm_lookup --
+# Restrict to firms that actually appear in patents_x_firm (top companies
+# with at least one final-docdb family). Drops any top-100 company whose
+# families were filtered out by the Watson / countrymap intersection.
 cat("  Writing firm_lookup.parquet...\n")
+final_firms <- unique(patents_x_firm$firm)
 firmsectormap <- arrow::read_parquet(file.path(iseapp_dir, "firmsectormap.parquet")) |>
   dplyr::select(firm = company_raw, firm_sector = sector)
-firm_lookup <- firmsectormap |> dplyr::filter(firm %in% top_companies)
+firm_lookup <- firmsectormap |> dplyr::filter(firm %in% final_firms)
 write_parquet(firm_lookup, "inst/extdata/firm_lookup.parquet",
               compression = "zstd", compression_level = 3)
 cat("    ", nrow(firm_lookup), "rows\n")
 
 # -- country_lookup --
+# Use final_ctry_codes (countries surviving the patchar x countrymap inner
+# join) rather than countrymap's full 181-country set, so the lookup only
+# lists countries the app can actually query.
 cat("  Writing country_lookup.parquet...\n")
-country_lookup <- countrymap[, .(ctry_code = unique(ctry_code))]
+country_lookup <- data.table::data.table(ctry_code = sort(final_ctry_codes))
 country_lookup[, `:=`(
   is_lmic            = ctry_code %in% lmics,
   is_lmic_excl_china = ctry_code %in% setdiff(lmics, "CN"),

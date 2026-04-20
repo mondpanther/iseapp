@@ -12,7 +12,11 @@
 #   .bigdata/inventor_countries_harm.parquet
 #   .bigdata/holder_countries_harm.parquet
 #       – harmonized per-person country assignments (one country per psn_name
-#         in PATSTAT; tied names resolved via family mode, else random)
+#         in PATSTAT; tied names within a family are resolved to the
+#         intersection with the family-mode country/ies — computed across
+#         all persons in the family, both inventors and holders, with
+#         multiple modes retained when tied; no intersection => all tied
+#         candidates are kept)
 #   .bigdata/countrymap.fst
 #   .bigdata/nationalkey.fst
 #       – family × country map restricted to the 185 countries with Watson
@@ -90,10 +94,12 @@ if (RUN_WATSON_CONVERT) {
 # 1. Harmonize per-person country codes (inventors + holders)
 # ----------------------------------------------------------------------------
 # For each psn_name in PATSTAT, pick one "best" country based on majority
-# vote across (inventor + holder) × family rows. Ties are broken using the
-# family mode when one of the tied candidates equals it; otherwise by a
-# deterministic hash. Invalid ISO2 codes (blanks, "SU", "DD", etc.) are
-# filtered out up front.
+# vote across (inventor + holder) × family rows. Ties within a family are
+# resolved by intersecting the tied candidates with the family-mode
+# country/ies (computed across ALL persons in the family — both inventors
+# and holders; multiple modes are retained when countries tie for the
+# family max). If the intersection is empty, all tied candidates are kept.
+# Invalid ISO2 codes (blanks, "SU", "DD", etc.) are filtered out up front.
 #
 # USE_BQ_HARMONIZATION = TRUE (default): BigQuery-native rebuild from
 #   tls201_appln, tls206_person, tls207_pers_appln; restricted to persons
