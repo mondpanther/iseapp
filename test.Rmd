@@ -468,7 +468,7 @@ pv_ev_df <- fread(
 pv_ev_df <- pv_ev_df[!is.na(docdb_family_id),
                       .(pv = sum(pv, na.rm = TRUE),
                         ev_global = sum(ev, na.rm = TRUE)),
-                      by = docdb_family_id]
+                        by = docdb_family_id]
 duckdb::duckdb_register(con, "pv_ev", pv_ev_df)
 
 # Family -> country pairs from harmonized inventor + harmonized holder (union).
@@ -510,7 +510,7 @@ country_shares <- dbGetQuery(con, "
              THEN 1 ELSE 0 END) AS green_n,
     COUNT(*) AS total_n
   FROM pairs
-  LEFT JOIN pv_ev v USING (docdb_family_id)
+  inner JOIN pv_ev v USING (docdb_family_id)
   GROUP BY pairs.ctry_code
 ") |>
   dplyr::mutate(EVshare_country = green_ev / total_ev,
@@ -534,7 +534,7 @@ global <- dbGetQuery(con, "
              THEN 1 ELSE 0 END) AS green_n_global,
     COUNT(*) AS total_n_global
   FROM fam_universe f
-  LEFT JOIN pv_ev v USING (docdb_family_id)
+  inner JOIN pv_ev v USING (docdb_family_id)
 ")
 EVshare_global <- global$green_ev_global / global$total_ev_global
 PVshare_global <- global$green_pv_global / global$total_pv_global
@@ -581,7 +581,7 @@ evrta_gdp <- evrta |>
 filtered_ev <- evrta_gdp |>
   dplyr::filter(!is.na(log_gdp_pc),
                 #pop_2015 > 1e6,
-                Allinnos > 100)
+                Allinnos > 50)
 
 ggplot(filtered_ev, aes(y = log_gdp_pc, x = EVRTA)) +
   geom_point(alpha = 0.6) +
