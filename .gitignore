@@ -18,6 +18,14 @@ inst/extdata/*
 inst/www/*
 
 .claude/
-.posit/
 .bigdata/
 nul
+
+# Posit Publisher: ignore everything under .posit/ by default, but track
+# the shareable deployment + configuration .toml files so team members /
+# other machines can deploy to the same Connect / Connect Cloud content.
+# Credentials live in the OS keychain, never in these files.
+.posit/
+!.posit/
+!.posit/publish/
+!.posit/publish/**/*.toml
