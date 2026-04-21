@@ -423,7 +423,8 @@ cat("Pre-computing tech x CPC-subclass counts...\n")
 # title-case, and cap at ~55 chars on a word boundary (append ellipsis if
 # truncated). Falls back to the subclass code for empty/NA titles.
 .short_title <- function(code, raw) {
-  if (!is.null(.cpc_title_overrides[[code]])) return(.cpc_title_overrides[[code]])
+  if (!is.na(code) && code %in% names(.cpc_title_overrides))
+    return(unname(.cpc_title_overrides[code]))
   if (is.na(raw) || !nzchar(raw)) return(code)
   s <- raw
   # Drop bracketed editorial content (already done at CSV-build, defensive).

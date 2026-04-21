@@ -20,6 +20,42 @@ library(tictoc)
 library(jsonlite)
 library(DBI)
 library(duckdb)
+library(bigrquery)
+
+# ---- Optional build-time family-size filter --------------------------------
+# Default is NO filter (keep every family regardless of docdb_family_size).
+# Override by EDITING this line (hard-coded reset on each source so stale
+# values from earlier R sessions can't silently keep a filter active):
+#
+#   FAMILY_SIZE_MIN <- 2L   # restrict to multi-application families
+#
+# Cascades to countrymap BEFORE the patchar join, so every downstream
+# parquet inherits the filter for free. Eligible-family set is pulled from
+# BigQuery (tls201_appln, fromPATSTAT2021) and cached in .bigdata/.
+#
+# The granted filter is NOT applied at build time — instead a per-family
+# `granted` boolean column is attached to patent_database, so the Shiny app
+# can filter by grant status at query time via a UI checkbox.
+FAMILY_SIZE_MIN <- 1L
+
+# ---- Atomic parquet writer -------------------------------------------------
+# Write to a temp sibling first, then rename on success. Prevents running
+# Shiny sessions (which hold DuckDB views over these parquets) from reading
+# a half-written file mid-build.
+write_parquet_atomic <- function(x, path, ...) {
+  tmp <- paste0(path, ".tmp-", Sys.getpid())
+  arrow::write_parquet(x, tmp, ...)
+  if (!file.rename(tmp, path)) {
+    for (i in 1:5) {
+      Sys.sleep(1)
+      if (file.rename(tmp, path)) return(invisible(path))
+    }
+    if (file.exists(tmp))
+      stop("Could not rename ", tmp, " to ", path,
+           " (is another process holding the file?).")
+  }
+  invisible(path)
+}
 
 # ============================================================================
 # STEP 0: Setup paths
@@ -56,13 +92,24 @@ find_dropbox_dir <- function() {
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
 dropbox_dir <- find_dropbox_dir()
-patbis_dir  <- file.path(dropbox_dir, "patbis2021", "data")
-fromPATSTAT <- file.path(patbis_dir, "fromPATSTAT")
-fromWATSON  <- file.path(patbis_dir, "fromWATSON")
-iseapp_dir  <- file.path(dropbox_dir, "apps", "iseapp")  # regionmap, firmmap, inglobe only
-bigdata_dir <- ".bigdata"
+# ---- 2025 data locations ----
+# fromWATSON: Watson-built value files (2013-2022 window).
+# patstat_clean: PATSTAT Autumn 2025 tables exported as parquet.
+# iseapp_dir: regionmap / firmmap / inglobe inputs (unchanged from 2021).
+patbis_dir   <- file.path(dropbox_dir, "patbis2025", "data")
+fromWATSON   <- file.path(patbis_dir, "fromWATSON")
+patstat_clean <- file.path(dropbox_dir,
+                           "PATSTAT autumn 2025 data",
+                           "patstat_clean")
+iseapp_dir   <- file.path(dropbox_dir, "apps", "iseapp")
+bigdata_dir  <- ".bigdata"
 
-for (d in c(patbis_dir, fromPATSTAT, fromWATSON, iseapp_dir)) {
+# PATSTAT table parquet paths (patstat_clean) — used in place of the old
+# fromPATSTAT DSV reads. Each is one row per appln / family.
+patstat_tls201 <- file.path(patstat_clean, "tls201_appln.parquet")
+patstat_tls211 <- file.path(patstat_clean, "tls211_pat_publn.parquet")
+
+for (d in c(patbis_dir, fromWATSON, patstat_clean, iseapp_dir)) {
   if (!dir.exists(d)) stop("Expected folder not found: ", d)
 }
 
@@ -70,15 +117,15 @@ dir.create(bigdata_dir, showWarnings = FALSE)
 dir.create(file.path(bigdata_dir, "istraxes"), showWarnings = FALSE)
 dir.create("inst/extdata", recursive = TRUE, showWarnings = FALSE)
 
-cat("=== ISE App Data Build ===\n")
-cat("dropbox_dir:", dropbox_dir, "\n")
-cat("fromPATSTAT:", fromPATSTAT, "\n")
-cat("fromWATSON: ", fromWATSON, "\n")
-cat("iseapp_dir: ", iseapp_dir, "\n\n")
+cat("=== ISE App Data Build (2025, 2013-2022 window) ===\n")
+cat("dropbox_dir:  ", dropbox_dir,  "\n")
+cat("fromWATSON:   ", fromWATSON,   "\n")
+cat("patstat_clean:", patstat_clean, "\n")
+cat("iseapp_dir:   ", iseapp_dir,   "\n\n")
 
 # ============================================================================
 # STEP 1: Build CPC base table from BigQuery
-# Source: patbis.fromPATSTAT2021.tls225_docdb_fam_cpc
+# Source: patbis.fromPATSTAT2025.tls225_docdb_fam_cpc
 # ============================================================================
 
 cpcs_cache <- file.path(bigdata_dir, "cpcs.fst")
@@ -363,6 +410,76 @@ cat("  countrymap:", nrow(countrymap), "rows,",
     uniqueN(countrymap$ctry_code), "countries\n")
 toc()
 
+# ---- Optional: filter to docdb_family_size >= FAMILY_SIZE_MIN --------------
+if (FAMILY_SIZE_MIN > 1L) {
+  cat(sprintf("\nApplying docdb_family_size >= %d filter ...\n",
+              FAMILY_SIZE_MIN))
+  tic("family-size filter")
+
+  cache <- file.path(bigdata_dir,
+                     sprintf("fam_size_min%d.parquet", FAMILY_SIZE_MIN))
+  if (file.exists(cache)) {
+    cat("  Reading cached eligible families from ", cache, "\n", sep = "")
+    eligible <- as.data.table(arrow::read_parquet(cache))
+  } else {
+    cat("  Querying BigQuery patbis.fromPATSTAT2021.tls201_appln ...\n")
+    sql <- sprintf("
+      SELECT DISTINCT docdb_family_id
+      FROM `patbis.fromPATSTAT2021.tls201_appln`
+      WHERE docdb_family_size >= %d
+        AND docdb_family_id IS NOT NULL
+    ", as.integer(FAMILY_SIZE_MIN))
+    eligible <- as.data.table(bq_table_download(
+      bq_project_query("patbis", sql),
+      page_size = 200000, bigint = "integer"
+    ))
+    arrow::write_parquet(eligible, cache,
+                         compression = "zstd", compression_level = 3)
+    cat("  Cached ", nrow(eligible), " eligible families -> ", cache, "\n",
+        sep = "")
+  }
+
+  before_fams <- uniqueN(countrymap$docdb_family_id)
+  countrymap  <- countrymap[docdb_family_id %in% eligible$docdb_family_id]
+  after_fams  <- uniqueN(countrymap$docdb_family_id)
+  cat(sprintf("  countrymap: %s -> %s families (%.1f%% kept), %s rows\n",
+              format(before_fams, big.mark = ","),
+              format(after_fams,  big.mark = ","),
+              100 * after_fams / before_fams,
+              format(nrow(countrymap), big.mark = ",")))
+  rm(eligible)
+  toc()
+} else {
+  cat("FAMILY_SIZE_MIN = 1 (no family-size filter applied).\n")
+}
+
+# ---- Pull granted-family set from BigQuery ---------------------------------
+# Used later to attach a per-family `granted` boolean column to
+# patent_database, so the Shiny UI can filter by grant status at query time.
+cat("\nFetching granted-family set from BigQuery ...\n")
+tic("granted-family fetch")
+granted_cache <- file.path(bigdata_dir, "fam_granted.parquet")
+if (file.exists(granted_cache)) {
+  cat("  Reading cached granted families from ", granted_cache, "\n", sep = "")
+  granted_fams <- as.data.table(arrow::read_parquet(granted_cache))
+} else {
+  cat("  Querying patbis.fromPATSTAT2021.tls201_appln ...\n")
+  granted_fams <- as.data.table(bq_table_download(
+    bq_project_query("patbis", "
+      SELECT DISTINCT docdb_family_id
+      FROM `patbis.fromPATSTAT2021.tls201_appln`
+      WHERE granted = TRUE
+        AND docdb_family_id IS NOT NULL
+    "),
+    page_size = 200000, bigint = "integer"
+  ))
+  arrow::write_parquet(granted_fams, granted_cache,
+                       compression = "zstd", compression_level = 3)
+  cat("  Cached ", nrow(granted_fams), " granted families -> ", granted_cache,
+      "\n", sep = "")
+}
+toc()
+
 
 # ============================================================================
 # STEP 10: Compute istraxes from fromWATSON
@@ -486,6 +603,16 @@ patchar_slim <- patchar[, c("docdb_family_id", measure_cols), with = FALSE]
 
 # Cross with countrymap to get innovation x country level
 patent_data <- patchar_slim[countrymap, on = "docdb_family_id", nomatch = 0L]
+
+# Attach per-family granted flag — allows runtime UI filter by grant status
+# without losing any docdbs from the base universe.
+patent_data[, granted := docdb_family_id %in% granted_fams$docdb_family_id]
+cat(sprintf("    granted families in patent_data: %s / %s (%.1f%%)\n",
+            format(uniqueN(patent_data[granted == TRUE]$docdb_family_id),
+                   big.mark = ","),
+            format(uniqueN(patent_data$docdb_family_id), big.mark = ","),
+            100 * uniqueN(patent_data[granted == TRUE]$docdb_family_id) /
+                  uniqueN(patent_data$docdb_family_id)))
 
 # Merge in national measures (only exist for a subset of innovation x country)
 national_cols <- c("ev_nationalkey_2009_2018", "istrax_nationalkey_2009_2018",
@@ -615,12 +742,12 @@ float_schema <- arrow::schema(
 at <- arrow::as_arrow_table(patent_data, schema = float_schema)
 rm(patent_data); gc()
 
-arrow::write_parquet(at, output_file,
+write_parquet_atomic(at, output_file,
                      compression = "zstd", compression_level = 3)
 rm(at); gc()
 
 file_size <- file.info(output_file)$size / 1024^3
-cat("  Saved to", output_file, "(", round(file_size, 2), "GB)\n")
+cat("  Saved to", output_file, "(", round(file_size, 2), "GB) [atomic rename]\n")
 toc()
 
 
@@ -663,9 +790,9 @@ hic          <- setdiff(all_iso2, lmics)
 cat("  Writing patents_x_tech.parquet...\n")
 patents_x_tech <- unique(techmap[docdb_family_id %in% final_docdbs,
                                  .(docdb_family_id, technology)])
-write_parquet(as.data.frame(patents_x_tech),
-              "inst/extdata/patents_x_tech.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(as.data.frame(patents_x_tech),
+                     "inst/extdata/patents_x_tech.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(patents_x_tech), "rows (restricted to final docdbs)\n")
 
 # -- tech_lookup --
@@ -673,9 +800,9 @@ cat("  Writing tech_lookup.parquet...\n")
 tech_lookup <- patents_x_tech[, .(technology = unique(technology))]
 tech_lookup[, tech_group := ifelse(technology %in% names(tech_group_map),
                                    tech_group_map[technology], "Other")]
-write_parquet(as.data.frame(tech_lookup),
-              "inst/extdata/tech_lookup.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(as.data.frame(tech_lookup),
+                     "inst/extdata/tech_lookup.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(tech_lookup), "rows\n")
 
 # -- patents_x_region (from old iseapp) --
@@ -685,8 +812,8 @@ patents_x_region <- regionmap |>
   dplyr::filter(docdb_family_id %in% final_docdbs) |>
   dplyr::select(docdb_family_id, region_code) |>
   dplyr::distinct()
-write_parquet(patents_x_region, "inst/extdata/patents_x_region.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(patents_x_region, "inst/extdata/patents_x_region.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(patents_x_region), "rows (restricted to final docdbs)\n")
 
 # -- region_lookup --
@@ -698,8 +825,8 @@ region_lookup <- regionmap |>
   dplyr::filter(region_code %in% final_regions) |>
   dplyr::select(region_code, region_name) |>
   dplyr::distinct()
-write_parquet(region_lookup, "inst/extdata/region_lookup.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(region_lookup, "inst/extdata/region_lookup.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(region_lookup), "rows (restricted to regions with final docdbs)\n")
 
 # -- patents_x_firm (from old iseapp) --
@@ -721,8 +848,8 @@ patents_x_firm <- firmmap_full |>
   dplyr::distinct()
 rm(firmmap_full); gc()
 
-write_parquet(patents_x_firm, "inst/extdata/patents_x_firm.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(patents_x_firm, "inst/extdata/patents_x_firm.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(patents_x_firm), "rows (restricted to final docdbs)\n")
 
 # -- firm_lookup --
@@ -734,8 +861,8 @@ final_firms <- unique(patents_x_firm$firm)
 firmsectormap <- arrow::read_parquet(file.path(iseapp_dir, "firmsectormap.parquet")) |>
   dplyr::select(firm = company_raw, firm_sector = sector)
 firm_lookup <- firmsectormap |> dplyr::filter(firm %in% final_firms)
-write_parquet(firm_lookup, "inst/extdata/firm_lookup.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(firm_lookup, "inst/extdata/firm_lookup.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(firm_lookup), "rows\n")
 
 # -- country_lookup --
@@ -750,9 +877,9 @@ country_lookup[, `:=`(
   is_eu              = ctry_code %in% eu_countries,
   is_hic             = ctry_code %in% hic
 )]
-write_parquet(as.data.frame(country_lookup),
-              "inst/extdata/country_lookup.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(as.data.frame(country_lookup),
+                     "inst/extdata/country_lookup.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(country_lookup), "rows\n")
 
 
@@ -780,7 +907,7 @@ df_processed <- df_raw |>
   )
 rm(df_raw); gc()
 
-arrow::write_parquet(df_processed, "inst/extdata/inglobe_processed.parquet")
+write_parquet_atomic(df_processed, "inst/extdata/inglobe_processed.parquet")
 cat("  Written inglobe_processed.parquet:", nrow(df_processed), "rows\n")
 rm(df_processed); gc()
 
