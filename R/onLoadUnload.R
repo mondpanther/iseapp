@@ -50,6 +50,17 @@
     )
   )
 
+  # Pre-rendered insight documents (bundled under inst/insights_html/).
+  # Files are served at {app_url}/insights/<file>.html so external readers
+  # can be linked directly without the note appearing in the app navigation.
+  insights_dir <- system.file("insights_html", package = pkgname)
+  if (nzchar(insights_dir) && dir.exists(insights_dir)) {
+    shiny::addResourcePath(
+      prefix        = "insights",
+      directoryPath = insights_dir
+    )
+  }
+
   # Bundle SASS into CSS
   sass_output_template <- sass::output_template(
     basename = "custom-styles",

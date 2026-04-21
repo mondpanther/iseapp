@@ -17,6 +17,9 @@ data_raw/big_files/*
 inst/extdata/*
 inst/www/*
 
+insights/data/*
+insights/*.html
+
 .claude/
 .bigdata/
 nul
