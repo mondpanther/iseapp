@@ -348,22 +348,18 @@ region_module_server <- function(id, parent_session, con) {
 
         if (nrow(out) == 0) return(NULL)
 
-        allinnos_data <- allinnos_region_baseline |>
-          dplyr::filter(region_code %in% selected_regions) |>
-          dplyr::filter(
-            if (no_firm_filter) TRUE
-            else firm %in% selected_firms
-          ) |>
-          dplyr::group_by(region_code) |>
-          dplyr::summarise(allinnos = sum(allinnos), .groups = "drop")
+        # Compute the RTA denominator with the SAME SQL path as `innos` but
+        # without the tech filter. Using COUNT(DISTINCT docdb_family_id)
+        # means firm mapping cannot inflate the count — a family matched by
+        # multiple selected firms still contributes exactly once. For "All
+        # Innovations" innos == allinnos row-for-row, so RTA collapses to 1.
+        allinnos_data <- DBI::dbGetQuery(
+          con,
+          sql_region_allinnos_v2(toflow, region_sql, firm_clause)
+        ) |>
+          dplyr::filter(region_code %in% selected_regions)
 
-        sum_allinnos_val <- sum_allinnos_region_firm_baseline |>
-          dplyr::filter(
-            if (no_firm_filter) TRUE
-            else firm %in% selected_firms
-          ) |>
-          dplyr::pull(sum_allinnos) |>
-          sum()
+        sum_allinnos_val <- sum(allinnos_data$allinnos)
 
         out <- out |>
           dplyr::rename(ctry_code = region_code) |>

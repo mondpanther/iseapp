@@ -20,23 +20,6 @@ library(tictoc)
 library(jsonlite)
 library(DBI)
 library(duckdb)
-library(bigrquery)
-
-# ---- Optional filter: keep only docdbs with docdb_family_size >= N ---------
-# Override by assigning before sourcing this script (or inside whole_databuild_
-# pipeline.R). Default = 1 (no filter — keep singletons).
-#
-# Example: restrict to multi-application families ("internationalised"):
-#   FAMILY_SIZE_MIN <- 2; source("data-raw/01-build-app-parquets.R")
-#
-# When > 1, an eligible-family set is pulled from BigQuery (tls201_appln,
-# fromPATSTAT2021) and cached in .bigdata/fam_size_min{N}.parquet; countrymap
-# is then restricted to it BEFORE the patchar join, so every downstream
-# parquet inherits the filter for free.
-#
-# NB: the filter OVERWRITES inst/extdata/*.parquet in place. If you want to
-# keep both builds side-by-side, rename inst/extdata/ between runs.
-if (!exists("FAMILY_SIZE_MIN")) FAMILY_SIZE_MIN <- 1L
 
 # ============================================================================
 # STEP 0: Setup paths
@@ -379,49 +362,6 @@ cat("  countrymap:", nrow(countrymap), "rows,",
     uniqueN(countrymap$docdb_family_id), "innovations,",
     uniqueN(countrymap$ctry_code), "countries\n")
 toc()
-
-# ---- Optional: filter to docdb_family_size >= FAMILY_SIZE_MIN --------------
-if (FAMILY_SIZE_MIN > 1L) {
-  cat(sprintf("\nApplying docdb_family_size >= %d filter ...\n",
-              FAMILY_SIZE_MIN))
-  tic("family-size filter")
-
-  cache <- file.path(bigdata_dir,
-                     sprintf("fam_size_min%d.parquet", FAMILY_SIZE_MIN))
-  if (file.exists(cache)) {
-    cat("  Reading cached eligible families from ", cache, "\n", sep = "")
-    eligible <- as.data.table(arrow::read_parquet(cache))
-  } else {
-    cat("  Querying BigQuery patbis.fromPATSTAT2021.tls201_appln ...\n")
-    sql <- sprintf("
-      SELECT DISTINCT docdb_family_id
-      FROM `patbis.fromPATSTAT2021.tls201_appln`
-      WHERE docdb_family_size >= %d
-        AND docdb_family_id IS NOT NULL
-    ", as.integer(FAMILY_SIZE_MIN))
-    eligible <- as.data.table(bq_table_download(
-      bq_project_query("patbis", sql),
-      page_size = 200000, bigint = "integer"
-    ))
-    arrow::write_parquet(eligible, cache,
-                         compression = "zstd", compression_level = 3)
-    cat("  Cached ", nrow(eligible), " eligible families -> ", cache, "\n",
-        sep = "")
-  }
-
-  before_fams <- uniqueN(countrymap$docdb_family_id)
-  countrymap  <- countrymap[docdb_family_id %in% eligible$docdb_family_id]
-  after_fams  <- uniqueN(countrymap$docdb_family_id)
-  cat(sprintf("  countrymap: %s -> %s families (%.1f%% kept), %s rows\n",
-              format(before_fams, big.mark = ","),
-              format(after_fams,  big.mark = ","),
-              100 * after_fams / before_fams,
-              format(nrow(countrymap), big.mark = ",")))
-  rm(eligible)
-  toc()
-} else {
-  cat("FAMILY_SIZE_MIN = 1 (no family-size filter applied).\n")
-}
 
 
 # ============================================================================

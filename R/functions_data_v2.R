@@ -193,6 +193,49 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause, top
   ")
 }
 
+#' RTA denominator: distinct-family count per country, ignoring any tech filter
+#'
+#' Mirrors the row-selection logic used by \code{sql_country_combined_v2}
+#' (same \code{full_patent_database} scan, same firm-filter CTE, same
+#' \code{ctry_code IN (...)} and non-null-\code{toflow} restrictions) but
+#' drops the tech-filter join. Using the same row base guarantees that
+#' \code{allinnos} is an honest superset of \code{innos}: when tech_bool is
+#' TRUE ("All Innovations") the two are equal row-for-row, so RTA collapses
+#' to 1. Firm filtering is applied via the same filtered_firm CTE, so a
+#' family matched by two selected firms still contributes exactly once —
+#' no inflation from firm mapping.
+#'
+#' @param toflow Character. Flow column (used for NOT NULL restriction only)
+#' @param country_sql Character. Comma-separated quoted country codes
+#' @param firm_clause Character. AND clause for firm filtering (may be empty)
+#' @return Character. SQL returning ctry_code, allinnos
+sql_ctry_allinnos_v2 <- function(toflow, country_sql, firm_clause) {
+  firm_filter_sql <- if (nchar(trimws(firm_clause)) == 0) {
+    ""
+  } else {
+    firm_condition <- gsub("^\\s*AND\\s+", "", firm_clause)
+    paste0("WHERE ", firm_condition)
+  }
+
+  glue::glue("
+    {if (nchar(trimws(firm_clause)) > 0) '
+    WITH filtered_firm AS (
+      SELECT DISTINCT docdb_family_id
+      FROM patents_x_firm f
+    ' else ''}
+    {if (nchar(trimws(firm_clause)) > 0) firm_filter_sql else ''}
+    {if (nchar(trimws(firm_clause)) > 0) ')' else ''}
+    SELECT
+      p.ctry_code,
+      COUNT(DISTINCT p.docdb_family_id) AS allinnos
+    FROM full_patent_database p
+    {if (nchar(trimws(firm_clause)) > 0) 'INNER JOIN filtered_firm ff ON p.docdb_family_id = ff.docdb_family_id' else ''}
+    WHERE p.ctry_code IN ({country_sql})
+      AND p.{toflow} IS NOT NULL
+    GROUP BY p.ctry_code
+  ")
+}
+
 #' Generate SQL combined query for country tech aggregation (v2)
 #'
 #' Joins slim bridge parquets for tech and firm at query time.
@@ -474,6 +517,48 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause, top_n
     SELECT * FROM summary
     UNION ALL
     SELECT * FROM overall
+  ")
+}
+
+#' RTA denominator for regions: distinct-family count per region, no tech filter
+#'
+#' Region analogue of \code{sql_ctry_allinnos_v2}. Mirrors the row-selection
+#' logic of \code{sql_region_combined_v2} — same \code{patents_x_region}
+#' bridge join, same \code{ctry_code = 'GB'} restriction, same firm-filter
+#' CTE — but omits the tech-filter join and uses
+#' \code{COUNT(DISTINCT docdb_family_id)} so firm mapping cannot inflate
+#' the count.
+#'
+#' @param toflow Character. Flow column (used for NOT NULL restriction only)
+#' @param region_sql Character. Comma-separated quoted region codes
+#' @param firm_clause Character. AND clause for firm filtering (may be empty)
+#' @return Character. SQL returning region_code, allinnos
+sql_region_allinnos_v2 <- function(toflow, region_sql, firm_clause) {
+  firm_filter_sql <- if (nchar(trimws(firm_clause)) == 0) {
+    ""
+  } else {
+    firm_condition <- gsub("^\\s*AND\\s+", "", firm_clause)
+    paste0("WHERE ", firm_condition)
+  }
+
+  glue::glue("
+    {if (nchar(trimws(firm_clause)) > 0) '
+    WITH filtered_firm AS (
+      SELECT DISTINCT docdb_family_id
+      FROM patents_x_firm f
+    ' else ''}
+    {if (nchar(trimws(firm_clause)) > 0) firm_filter_sql else ''}
+    {if (nchar(trimws(firm_clause)) > 0) ')' else ''}
+    SELECT
+      r.region_code,
+      COUNT(DISTINCT p.docdb_family_id) AS allinnos
+    FROM full_patent_database p
+    INNER JOIN patents_x_region r ON p.docdb_family_id = r.docdb_family_id
+    {if (nchar(trimws(firm_clause)) > 0) 'INNER JOIN filtered_firm ff ON p.docdb_family_id = ff.docdb_family_id' else ''}
+    WHERE r.region_code IN ({region_sql})
+      AND p.ctry_code = 'GB'
+      AND p.{toflow} IS NOT NULL
+    GROUP BY r.region_code
   ")
 }
 

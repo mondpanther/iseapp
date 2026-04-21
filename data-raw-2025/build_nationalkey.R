@@ -68,7 +68,7 @@ dir.create(bigdata_dir, showWarnings = FALSE)
 #                            inventor_countries_harm, carry over Watson's
 #                            (docdb, ctry) pairs as a fallback. Default TRUE.
 if (!exists("INCLUDE_HOLDERS"))     INCLUDE_HOLDERS     <- FALSE
-if (!exists("AUGMENT_WITH_WATSON")) AUGMENT_WITH_WATSON <- TRUE
+if (!exists("AUGMENT_WITH_WATSON")) AUGMENT_WITH_WATSON <- FALSE
 
 inv_harm_path  <- file.path(bigdata_dir, "inventor_countries_harm.parquet")
 hold_harm_path <- file.path(bigdata_dir, "holder_countries_harm.parquet")
@@ -172,6 +172,23 @@ cat("  countrymap (pre-country-filter):",
     uniqueN(countrymap$docdb_family_id), "families,",
     uniqueN(countrymap$ctry_code), "countries\n")
 gc()
+
+# ---- Snapshot the unfiltered countrymap to patstat_clean ------------------
+# Same Dropbox folder the upload_patstat2025_to_bq.R script reads from — makes
+# the harmonized (docdb_family_id, ctry_code) pairs available to downstream
+# work that doesn't need the per-country ev filter applied below.
+patstat_clean_dir <- file.path(dropbox_dir,
+                               "PATSTAT autumn 2025 data",
+                               "patstat_clean")
+if (!dir.exists(patstat_clean_dir)) {
+  warning("patstat_clean folder not found; skipping countrymap snapshot: ",
+          patstat_clean_dir)
+} else {
+  countrymap_parquet <- file.path(patstat_clean_dir, "countrymap.parquet")
+  arrow::write_parquet(countrymap, countrymap_parquet,
+                       compression = "zstd", compression_level = 3)
+  cat("  Wrote ", countrymap_parquet, "\n", sep = "")
+}
 
 # ============================================================================
 # 2. Restrict to countries for which an innos_ev_XX file exists

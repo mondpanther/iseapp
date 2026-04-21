@@ -392,14 +392,16 @@ country_module_server <- function(id, parent_session, con) {
 
         if (nrow(out) == 0) return(NULL)
 
-        allinnos_data <- allinnos_baseline |>
-          dplyr::filter(ctry_code %in% selected_countries) |>
-          dplyr::filter(
-            if (no_firm_filter) TRUE
-            else firm %in% selected_firms
-          ) |>
-          dplyr::group_by(ctry_code) |>
-          dplyr::summarise(allinnos = sum(allinnos), .groups = "drop")
+        # Compute the RTA denominator with the SAME SQL path as `innos` but
+        # without the tech filter. This guarantees that for "All Innovations"
+        # innos == allinnos and therefore RTA == 1 for every country — firm
+        # mapping cannot inflate the denominator because the COUNT(DISTINCT
+        # docdb_family_id) dedupes across matched firms.
+        allinnos_data <- DBI::dbGetQuery(
+          con,
+          sql_ctry_allinnos_v2(toflow, country_sql, firm_clause)
+        ) |>
+          dplyr::filter(ctry_code %in% selected_countries)
 
         sum_allinnos_val <- sum(allinnos_data$allinnos)
 
