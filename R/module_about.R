@@ -178,45 +178,46 @@ about_module_server <- function(id) {
     output$cloud <- wordcloud2::renderWordcloud2({
       rows <- selected_rows()
       shiny::req(!is.null(rows), nrow(rows) > 0)
+
+      # Flatten the size scale: wordcloud2 already applies sqrt internally,
+      # so a further sqrt on freq gives overall x^0.25 scaling — small
+      # subclasses stay readable while the largest don't dominate. `minSize`
+      # clamps the absolute floor.
       df <- data.frame(
         word = sprintf("%s \u2013 %s", rows$subclass, rows$title_short),
-        freq = as.numeric(rows$n_docdb),
+        freq = sqrt(as.numeric(rows$n_docdb)),
         stringsAsFactors = FALSE
       )
+
       wc <- wordcloud2::wordcloud2(
         df,
-        size          = 0.7,
-        minSize       = 6,
-        shape         = "circle",
-        gridSize      = 6,
-        rotateRatio   = 0,        # all labels horizontal
-        minRotation   = 0,
-        maxRotation   = 0,
-        hoverFunction = htmlwidgets::JS(
-          "function(item, dimension, event) {
-             window.__cpcHoverWord = item ? item[0] : null;
-           }"
-        )
+        size        = 0.55,
+        minSize     = 12,
+        shape       = "circle",
+        gridSize    = 6,
+        rotateRatio = 0,         # all labels horizontal
+        minRotation = 0,
+        maxRotation = 0
       )
-      # Click anywhere inside the hovered word -> open Espacenet's CPC browser
-      # for the subclass. Extract the 4-char code from the label prefix
-      # (format: 'H01M – Processes or means ...').
-      htmlwidgets::onRender(wc, "
-        function(el, x) {
-          el.style.cursor = 'pointer';
-          el.addEventListener('click', function() {
-            var w = window.__cpcHoverWord;
-            if (!w) return;
-            var code = w.split(/[\\s\\u2013\\-]+/)[0];
-            if (/^[A-Z]\\d{2}[A-Z]$/.test(code)) {
-              window.open(
-                'https://worldwide.espacenet.com/patent/cpc-browser#!/CPC=' + code,
-                '_blank'
-              );
-            }
-          });
+      # Attach a native click handler via wordcloud2's own `click` option
+      # (wordcloud2.js reads it and dispatches on word clicks — reliable
+      # across browsers, no hover-state tracking needed).
+      wc$x$click <- htmlwidgets::JS("
+        function(item, dimension, event) {
+          if (!item) return;
+          var code = String(item[0]).split(/[\\s\\u2013\\-]+/)[0];
+          if (/^[A-Z]\\d{2}[A-Z]$/.test(code)) {
+            window.open(
+              'https://worldwide.espacenet.com/patent/cpc-browser#!/CPC=' + code,
+              '_blank'
+            );
+          }
         }
       ")
+      # Cursor hint so users realise the words are clickable.
+      htmlwidgets::onRender(wc,
+        "function(el, x) { el.style.cursor = 'pointer'; }"
+      )
     })
 
     output$cloud_caption <- shiny::renderUI({
