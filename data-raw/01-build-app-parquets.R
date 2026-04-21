@@ -38,6 +38,25 @@ library(bigrquery)
 # can filter by grant status at query time via a UI checkbox.
 FAMILY_SIZE_MIN <- 1L
 
+# ---- Atomic parquet writer -------------------------------------------------
+# Write to a temp sibling first, then rename on success. Prevents running
+# Shiny sessions (which hold DuckDB views over these parquets) from reading
+# a half-written file mid-build.
+write_parquet_atomic <- function(x, path, ...) {
+  tmp <- paste0(path, ".tmp-", Sys.getpid())
+  arrow::write_parquet(x, tmp, ...)
+  if (!file.rename(tmp, path)) {
+    for (i in 1:5) {
+      Sys.sleep(1)
+      if (file.rename(tmp, path)) return(invisible(path))
+    }
+    if (file.exists(tmp))
+      stop("Could not rename ", tmp, " to ", path,
+           " (is another process holding the file?).")
+  }
+  invisible(path)
+}
+
 # ============================================================================
 # STEP 0: Setup paths
 # ============================================================================
@@ -712,12 +731,12 @@ float_schema <- arrow::schema(
 at <- arrow::as_arrow_table(patent_data, schema = float_schema)
 rm(patent_data); gc()
 
-arrow::write_parquet(at, output_file,
+write_parquet_atomic(at, output_file,
                      compression = "zstd", compression_level = 3)
 rm(at); gc()
 
 file_size <- file.info(output_file)$size / 1024^3
-cat("  Saved to", output_file, "(", round(file_size, 2), "GB)\n")
+cat("  Saved to", output_file, "(", round(file_size, 2), "GB) [atomic rename]\n")
 toc()
 
 
@@ -760,9 +779,9 @@ hic          <- setdiff(all_iso2, lmics)
 cat("  Writing patents_x_tech.parquet...\n")
 patents_x_tech <- unique(techmap[docdb_family_id %in% final_docdbs,
                                  .(docdb_family_id, technology)])
-write_parquet(as.data.frame(patents_x_tech),
-              "inst/extdata/patents_x_tech.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(as.data.frame(patents_x_tech),
+                     "inst/extdata/patents_x_tech.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(patents_x_tech), "rows (restricted to final docdbs)\n")
 
 # -- tech_lookup --
@@ -770,9 +789,9 @@ cat("  Writing tech_lookup.parquet...\n")
 tech_lookup <- patents_x_tech[, .(technology = unique(technology))]
 tech_lookup[, tech_group := ifelse(technology %in% names(tech_group_map),
                                    tech_group_map[technology], "Other")]
-write_parquet(as.data.frame(tech_lookup),
-              "inst/extdata/tech_lookup.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(as.data.frame(tech_lookup),
+                     "inst/extdata/tech_lookup.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(tech_lookup), "rows\n")
 
 # -- patents_x_region (from old iseapp) --
@@ -782,8 +801,8 @@ patents_x_region <- regionmap |>
   dplyr::filter(docdb_family_id %in% final_docdbs) |>
   dplyr::select(docdb_family_id, region_code) |>
   dplyr::distinct()
-write_parquet(patents_x_region, "inst/extdata/patents_x_region.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(patents_x_region, "inst/extdata/patents_x_region.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(patents_x_region), "rows (restricted to final docdbs)\n")
 
 # -- region_lookup --
@@ -795,8 +814,8 @@ region_lookup <- regionmap |>
   dplyr::filter(region_code %in% final_regions) |>
   dplyr::select(region_code, region_name) |>
   dplyr::distinct()
-write_parquet(region_lookup, "inst/extdata/region_lookup.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(region_lookup, "inst/extdata/region_lookup.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(region_lookup), "rows (restricted to regions with final docdbs)\n")
 
 # -- patents_x_firm (from old iseapp) --
@@ -818,8 +837,8 @@ patents_x_firm <- firmmap_full |>
   dplyr::distinct()
 rm(firmmap_full); gc()
 
-write_parquet(patents_x_firm, "inst/extdata/patents_x_firm.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(patents_x_firm, "inst/extdata/patents_x_firm.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(patents_x_firm), "rows (restricted to final docdbs)\n")
 
 # -- firm_lookup --
@@ -831,8 +850,8 @@ final_firms <- unique(patents_x_firm$firm)
 firmsectormap <- arrow::read_parquet(file.path(iseapp_dir, "firmsectormap.parquet")) |>
   dplyr::select(firm = company_raw, firm_sector = sector)
 firm_lookup <- firmsectormap |> dplyr::filter(firm %in% final_firms)
-write_parquet(firm_lookup, "inst/extdata/firm_lookup.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(firm_lookup, "inst/extdata/firm_lookup.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(firm_lookup), "rows\n")
 
 # -- country_lookup --
