@@ -1,0 +1,202 @@
+---
+title: "Spillovers to High-Income Countries — LMIC-origin vs HIC-origin innovations"
+author: "Innovation Strategy Explorer — insights"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    self_contained: true
+    toc: false
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      fig.width = 11, fig.height = 6.5, dpi = 150)
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(tidyr)
+library(scales)
+```
+
+## What this note shows
+
+How much per-innovation spillover value do different technologies generate **for High-Income Countries (HICs)** — and does this depend on where the innovation was filed? The grouped bar chart below compares three populations of innovations, all scored on the *same* destination flow (*Average Spillovers to HICs* = `ev_hic`):
+
+- **LMIC-origin** innovations, excluding China
+- **China-origin** innovations
+- **HIC-origin** innovations
+
+Technologies are on the x-axis; within each technology the three bars show the average spillover value per innovation that flows to HICs, for the three origin groups.
+
+## Data source
+
+Three downloads from the public Country Explorer tab of <https://mondpanther-iseapp2.share.connect.posit.cloud/>, with **Value flow = *Average Spillovers to HICs*** in all three cases and only the **Country / Group** filter changing. Click any "open in app" link below to jump directly to the bookmarked view used for that row:
+
+```{r build-app-urls, include=FALSE}
+build_app_url <- function(country, toflow,
+                          base = "https://mondpanther-iseapp2.share.connect.posit.cloud/",
+                          tech_categories = c(
+                            "Green Technology", "AI", "Green Transport",
+                            "Green Manufacturing", "GHG Capture",
+                            "Green Energy", "Adaptation", "Green Housing",
+                            "Circular Economy", "Green ICT",
+                            "Green Agriculture",
+                            "Any Agriculture & Food technology"
+                          )) {
+  q <- function(x) utils::URLencode(paste0('"', x, '"'), reserved = TRUE)
+  tech_arr <- paste0(
+    "%5B",
+    paste0(vapply(tech_categories,
+                  function(t) paste0("%22", utils::URLencode(t, reserved = TRUE), "%22"),
+                  character(1)),
+           collapse = "%2C"),
+    "%5D"
+  )
+  paste0(
+    base,
+    "?_inputs_",
+    "&navbar_page=", q("Country Explorer"),
+    "&country-inner_tabs=", q("Value flows by Technology"),
+    "&country-country=", q(country),
+    "&country-firm=", q("No firm filter"),
+    "&country-toflow=", q(toflow),
+    "&country-tech_categories_plot1=", tech_arr,
+    "&country-widthscale=", q("log"),
+    "&country-display_mode=", q("confidence"),
+    "&country-top_n_ids=10"
+  )
+}
+url_lmic  <- build_app_url("LMICs (excl. China)",   "ev_hic")
+url_china <- build_app_url("CN",                     "ev_hic")
+url_hic   <- build_app_url("High income countries", "ev_hic")
+```
+
+| File in `insights/data/` | `country-country` filter | `country-toflow` | App view |
+|---|---|---|---|
+| `flow_LMIC_to_HIC.csv`  | `LMICs (excl. China)`     | `ev_hic` | [open in app](`r url_lmic`)  |
+| `flow_China_to_HIC.csv` | `CN` (China)              | `ev_hic` | [open in app](`r url_china`) |
+| `flow_HIC_to_HIC.csv`   | `High income countries`   | `ev_hic` | [open in app](`r url_hic`)   |
+
+If any CSV is missing, the chunk below fetches it via headless Chrome using the [`chromote`](https://rstudio.github.io/chromote/) R package. No access to the underlying patent database is used at any point.
+
+```{r fetch-csvs, include=FALSE}
+source("R/fetch_flow_csv.R")
+
+specs <- list(
+  list(name = "LMIC_to_HIC",
+       country = "LMICs (excl. China)",
+       toflow  = "ev_hic"),
+  list(name = "China_to_HIC",
+       country = "CN",
+       toflow  = "ev_hic"),
+  list(name = "HIC_to_HIC",
+       country = "High income countries",
+       toflow  = "ev_hic")
+)
+
+missing <- vapply(specs, function(s)
+  !file.exists(file.path("data", paste0("flow_", s$name, ".csv"))),
+  logical(1))
+
+if (any(missing)) {
+  fetch_flow_csvs(specs[missing], out_dir = "data")
+}
+```
+
+```{r load-data}
+read_flow <- function(file, origin_label) {
+  readr::read_csv(file.path("data", file), show_col_types = FALSE) |>
+    dplyr::mutate(origin = origin_label)
+}
+
+lmic  <- read_flow("flow_LMIC_to_HIC.csv",  "LMIC-origin (excl. China)")
+china <- read_flow("flow_China_to_HIC.csv", "China-origin")
+hic   <- read_flow("flow_HIC_to_HIC.csv",   "HIC-origin")
+
+combined <- dplyr::bind_rows(lmic, china, hic) |>
+  dplyr::filter(technology != "All") |>
+  dplyr::mutate(
+    origin = factor(origin,
+                    levels = c("LMIC-origin (excl. China)",
+                               "China-origin",
+                               "HIC-origin"))
+  )
+```
+
+## Figure — average spillover value to HICs per innovation, by technology and origin
+
+```{r plot}
+tech_order <- combined |>
+  dplyr::filter(origin == "HIC-origin") |>
+  dplyr::arrange(dplyr::desc(mean)) |>
+  dplyr::pull(technology)
+
+plot_df <- combined |>
+  dplyr::mutate(technology = factor(technology, levels = tech_order))
+
+ggplot(plot_df, aes(x = technology, y = mean, fill = origin)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.75) +
+  geom_errorbar(
+    aes(ymin = pmax(mean - sem, 0), ymax = mean + sem),
+    position = position_dodge(width = 0.8),
+    width = 0.2, colour = "grey30", linewidth = 0.3
+  ) +
+  scale_y_continuous(labels = scales::comma) +
+  scale_fill_manual(values = c(
+    "LMIC-origin (excl. China)" = "#ff7f0e",
+    "China-origin"              = "#d62728",
+    "HIC-origin"                = "#1f77b4"
+  )) +
+  labs(
+    title    = "Average spillover value to HICs, per innovation",
+    subtitle = "By technology and origin — same destination flow (ev_hic) across all three bars",
+    x = NULL, y = "Spillover to HICs per innovation (\u00b1 1 SEM)",
+    fill = NULL,
+    caption = "Source: Innovation Strategy Explorer, Country Explorer CSV downloads"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x        = element_text(angle = 35, hjust = 1),
+    legend.position    = "top",
+    panel.grid.major.x = element_blank()
+  )
+```
+
+## Reading the chart
+
+- Within each technology group: **orange** = LMIC-origin (excl. China), **red** = China-origin, **blue** = HIC-origin — all measuring the average downstream spillover value per innovation that accrues to HICs.
+- Error bars are $\pm$ one standard error of the mean.
+- Technologies are sorted left-to-right by HIC-origin magnitude.
+
+China sits between the two comparison groups analytically: it's the world's largest patent-filer and accounts for the bulk of LMIC innovation volume, but its patents typically face weaker examiner citation links into HIC markets than HIC-origin patents do. Seeing where the red bar tracks orange (weak HIC absorption, like the broader LMIC pool) versus where it tracks or exceeds blue (HIC-comparable absorption) helps identify technology fields where Chinese innovation has already crossed into the HIC citation mainstream.
+
+## Summary table
+
+```{r table}
+summary_tbl <- combined |>
+  dplyr::select(technology, origin, mean, sem, innos) |>
+  tidyr::pivot_wider(
+    id_cols     = technology,
+    names_from  = origin,
+    values_from = c(mean, sem, innos)
+  ) |>
+  dplyr::arrange(dplyr::desc(`mean_HIC-origin`))
+
+knitr::kable(
+  summary_tbl,
+  digits = 2,
+  col.names = c("Technology",
+                "Mean LMIC\u2192HIC", "Mean China\u2192HIC", "Mean HIC\u2192HIC",
+                "SEM LMIC\u2192HIC",  "SEM China\u2192HIC",  "SEM HIC\u2192HIC",
+                "N LMIC-origin",      "N China-origin",       "N HIC-origin"),
+  caption = "Per-innovation HIC-spillover means by technology and origin."
+)
+```
+
+## Notes & caveats
+
+- Both bars use the same destination flow `ev_hic` — *Average Spillovers to HICs* — so the levels are directly comparable within a technology.
+- The sample size column `innos` is **not** the same across origins: LMIC innovator pools are smaller, so their SEMs are typically larger. Treat any orange/blue gap inside a large SEM with caution.
+- The origin-country filter selects patents filed from the relevant country group; downstream-citing patents can come from anywhere in the world, but only HIC-located citations count toward `ev_hic`.
+- Data acquisition uses only the app's public CSV-download endpoint (via `chromote`) — the patent database is never accessed directly.
