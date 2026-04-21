@@ -866,9 +866,9 @@ country_lookup[, `:=`(
   is_eu              = ctry_code %in% eu_countries,
   is_hic             = ctry_code %in% hic
 )]
-write_parquet(as.data.frame(country_lookup),
-              "inst/extdata/country_lookup.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(as.data.frame(country_lookup),
+                     "inst/extdata/country_lookup.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(country_lookup), "rows\n")
 
 
@@ -896,7 +896,7 @@ df_processed <- df_raw |>
   )
 rm(df_raw); gc()
 
-arrow::write_parquet(df_processed, "inst/extdata/inglobe_processed.parquet")
+write_parquet_atomic(df_processed, "inst/extdata/inglobe_processed.parquet")
 cat("  Written inglobe_processed.parquet:", nrow(df_processed), "rows\n")
 rm(df_processed); gc()
 
