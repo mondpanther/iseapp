@@ -35,6 +35,7 @@ Imports:
     duckdb,
     DBI,
     arrow,
-    svglite
+    svglite,
+    wordcloud2
 Depends: 
     R (>= 3.5)

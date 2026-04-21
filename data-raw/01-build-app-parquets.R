@@ -22,21 +22,40 @@ library(DBI)
 library(duckdb)
 library(bigrquery)
 
-# ---- Optional filter: keep only docdbs with docdb_family_size >= N ---------
-# Override by assigning before sourcing this script (or inside whole_databuild_
-# pipeline.R). Default = 1 (no filter — keep singletons).
+# ---- Optional build-time family-size filter --------------------------------
+# Default is NO filter (keep every family regardless of docdb_family_size).
+# Override by EDITING this line (hard-coded reset on each source so stale
+# values from earlier R sessions can't silently keep a filter active):
 #
-# Example: restrict to multi-application families ("internationalised"):
-#   FAMILY_SIZE_MIN <- 2; source("data-raw/01-build-app-parquets.R")
+#   FAMILY_SIZE_MIN <- 2L   # restrict to multi-application families
 #
-# When > 1, an eligible-family set is pulled from BigQuery (tls201_appln,
-# fromPATSTAT2021) and cached in .bigdata/fam_size_min{N}.parquet; countrymap
-# is then restricted to it BEFORE the patchar join, so every downstream
-# parquet inherits the filter for free.
+# Cascades to countrymap BEFORE the patchar join, so every downstream
+# parquet inherits the filter for free. Eligible-family set is pulled from
+# BigQuery (tls201_appln, fromPATSTAT2021) and cached in .bigdata/.
 #
-# NB: the filter OVERWRITES inst/extdata/*.parquet in place. If you want to
-# keep both builds side-by-side, rename inst/extdata/ between runs.
-if (!exists("FAMILY_SIZE_MIN")) FAMILY_SIZE_MIN <- 1L
+# The granted filter is NOT applied at build time — instead a per-family
+# `granted` boolean column is attached to patent_database, so the Shiny app
+# can filter by grant status at query time via a UI checkbox.
+FAMILY_SIZE_MIN <- 1L
+
+# ---- Atomic parquet writer -------------------------------------------------
+# Write to a temp sibling first, then rename on success. Prevents running
+# Shiny sessions (which hold DuckDB views over these parquets) from reading
+# a half-written file mid-build.
+write_parquet_atomic <- function(x, path, ...) {
+  tmp <- paste0(path, ".tmp-", Sys.getpid())
+  arrow::write_parquet(x, tmp, ...)
+  if (!file.rename(tmp, path)) {
+    for (i in 1:5) {
+      Sys.sleep(1)
+      if (file.rename(tmp, path)) return(invisible(path))
+    }
+    if (file.exists(tmp))
+      stop("Could not rename ", tmp, " to ", path,
+           " (is another process holding the file?).")
+  }
+  invisible(path)
+}
 
 # ============================================================================
 # STEP 0: Setup paths
@@ -423,6 +442,33 @@ if (FAMILY_SIZE_MIN > 1L) {
   cat("FAMILY_SIZE_MIN = 1 (no family-size filter applied).\n")
 }
 
+# ---- Pull granted-family set from BigQuery ---------------------------------
+# Used later to attach a per-family `granted` boolean column to
+# patent_database, so the Shiny UI can filter by grant status at query time.
+cat("\nFetching granted-family set from BigQuery ...\n")
+tic("granted-family fetch")
+granted_cache <- file.path(bigdata_dir, "fam_granted.parquet")
+if (file.exists(granted_cache)) {
+  cat("  Reading cached granted families from ", granted_cache, "\n", sep = "")
+  granted_fams <- as.data.table(arrow::read_parquet(granted_cache))
+} else {
+  cat("  Querying patbis.fromPATSTAT2021.tls201_appln ...\n")
+  granted_fams <- as.data.table(bq_table_download(
+    bq_project_query("patbis", "
+      SELECT DISTINCT docdb_family_id
+      FROM `patbis.fromPATSTAT2021.tls201_appln`
+      WHERE granted = TRUE
+        AND docdb_family_id IS NOT NULL
+    "),
+    page_size = 200000, bigint = "integer"
+  ))
+  arrow::write_parquet(granted_fams, granted_cache,
+                       compression = "zstd", compression_level = 3)
+  cat("  Cached ", nrow(granted_fams), " granted families -> ", granted_cache,
+      "\n", sep = "")
+}
+toc()
+
 
 # ============================================================================
 # STEP 10: Compute istraxes from fromWATSON
@@ -546,6 +592,16 @@ patchar_slim <- patchar[, c("docdb_family_id", measure_cols), with = FALSE]
 
 # Cross with countrymap to get innovation x country level
 patent_data <- patchar_slim[countrymap, on = "docdb_family_id", nomatch = 0L]
+
+# Attach per-family granted flag — allows runtime UI filter by grant status
+# without losing any docdbs from the base universe.
+patent_data[, granted := docdb_family_id %in% granted_fams$docdb_family_id]
+cat(sprintf("    granted families in patent_data: %s / %s (%.1f%%)\n",
+            format(uniqueN(patent_data[granted == TRUE]$docdb_family_id),
+                   big.mark = ","),
+            format(uniqueN(patent_data$docdb_family_id), big.mark = ","),
+            100 * uniqueN(patent_data[granted == TRUE]$docdb_family_id) /
+                  uniqueN(patent_data$docdb_family_id)))
 
 # Merge in national measures (only exist for a subset of innovation x country)
 national_cols <- c("ev_nationalkey_2009_2018", "istrax_nationalkey_2009_2018",
@@ -675,12 +731,12 @@ float_schema <- arrow::schema(
 at <- arrow::as_arrow_table(patent_data, schema = float_schema)
 rm(patent_data); gc()
 
-arrow::write_parquet(at, output_file,
+write_parquet_atomic(at, output_file,
                      compression = "zstd", compression_level = 3)
 rm(at); gc()
 
 file_size <- file.info(output_file)$size / 1024^3
-cat("  Saved to", output_file, "(", round(file_size, 2), "GB)\n")
+cat("  Saved to", output_file, "(", round(file_size, 2), "GB) [atomic rename]\n")
 toc()
 
 
@@ -723,9 +779,9 @@ hic          <- setdiff(all_iso2, lmics)
 cat("  Writing patents_x_tech.parquet...\n")
 patents_x_tech <- unique(techmap[docdb_family_id %in% final_docdbs,
                                  .(docdb_family_id, technology)])
-write_parquet(as.data.frame(patents_x_tech),
-              "inst/extdata/patents_x_tech.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(as.data.frame(patents_x_tech),
+                     "inst/extdata/patents_x_tech.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(patents_x_tech), "rows (restricted to final docdbs)\n")
 
 # -- tech_lookup --
@@ -733,9 +789,9 @@ cat("  Writing tech_lookup.parquet...\n")
 tech_lookup <- patents_x_tech[, .(technology = unique(technology))]
 tech_lookup[, tech_group := ifelse(technology %in% names(tech_group_map),
                                    tech_group_map[technology], "Other")]
-write_parquet(as.data.frame(tech_lookup),
-              "inst/extdata/tech_lookup.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(as.data.frame(tech_lookup),
+                     "inst/extdata/tech_lookup.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(tech_lookup), "rows\n")
 
 # -- patents_x_region (from old iseapp) --
@@ -745,8 +801,8 @@ patents_x_region <- regionmap |>
   dplyr::filter(docdb_family_id %in% final_docdbs) |>
   dplyr::select(docdb_family_id, region_code) |>
   dplyr::distinct()
-write_parquet(patents_x_region, "inst/extdata/patents_x_region.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(patents_x_region, "inst/extdata/patents_x_region.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(patents_x_region), "rows (restricted to final docdbs)\n")
 
 # -- region_lookup --
@@ -758,8 +814,8 @@ region_lookup <- regionmap |>
   dplyr::filter(region_code %in% final_regions) |>
   dplyr::select(region_code, region_name) |>
   dplyr::distinct()
-write_parquet(region_lookup, "inst/extdata/region_lookup.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(region_lookup, "inst/extdata/region_lookup.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(region_lookup), "rows (restricted to regions with final docdbs)\n")
 
 # -- patents_x_firm (from old iseapp) --
@@ -781,8 +837,8 @@ patents_x_firm <- firmmap_full |>
   dplyr::distinct()
 rm(firmmap_full); gc()
 
-write_parquet(patents_x_firm, "inst/extdata/patents_x_firm.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(patents_x_firm, "inst/extdata/patents_x_firm.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(patents_x_firm), "rows (restricted to final docdbs)\n")
 
 # -- firm_lookup --
@@ -794,8 +850,8 @@ final_firms <- unique(patents_x_firm$firm)
 firmsectormap <- arrow::read_parquet(file.path(iseapp_dir, "firmsectormap.parquet")) |>
   dplyr::select(firm = company_raw, firm_sector = sector)
 firm_lookup <- firmsectormap |> dplyr::filter(firm %in% final_firms)
-write_parquet(firm_lookup, "inst/extdata/firm_lookup.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(firm_lookup, "inst/extdata/firm_lookup.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(firm_lookup), "rows\n")
 
 # -- country_lookup --
@@ -810,9 +866,9 @@ country_lookup[, `:=`(
   is_eu              = ctry_code %in% eu_countries,
   is_hic             = ctry_code %in% hic
 )]
-write_parquet(as.data.frame(country_lookup),
-              "inst/extdata/country_lookup.parquet",
-              compression = "zstd", compression_level = 3)
+write_parquet_atomic(as.data.frame(country_lookup),
+                     "inst/extdata/country_lookup.parquet",
+                     compression = "zstd", compression_level = 3)
 cat("    ", nrow(country_lookup), "rows\n")
 
 
@@ -840,7 +896,7 @@ df_processed <- df_raw |>
   )
 rm(df_raw); gc()
 
-arrow::write_parquet(df_processed, "inst/extdata/inglobe_processed.parquet")
+write_parquet_atomic(df_processed, "inst/extdata/inglobe_processed.parquet")
 cat("  Written inglobe_processed.parquet:", nrow(df_processed), "rows\n")
 rm(df_processed); gc()
 

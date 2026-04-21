@@ -56,6 +56,14 @@ country_module_sidebar <- function(id) {
           )
         )
       ),
+      shiny::div(
+        class = "side_input",
+        shiny::checkboxInput(
+          inputId = ns("granted_only"),
+          label   = "Granted families only",
+          value   = TRUE
+        )
+      ),
 
     ),
 
@@ -336,7 +344,9 @@ country_module_server <- function(id, parent_session, con) {
         firm_clause  <- build_firm_clause_v2(selected_firms, no_filter = no_firm_filter)
         tech_filters <- build_tech_filter_v2(input$tech_categories_plot1)
 
-        sql <- sql_country_tech_combined_v2(toflow, country_sql, tech_filters, firm_clause, top_n_ids = input$top_n_ids)
+        sql <- sql_country_tech_combined_v2(toflow, country_sql, tech_filters, firm_clause,
+                                             top_n_ids   = input$top_n_ids,
+                                             granted_only = isTRUE(input$granted_only))
 
         out <- DBI::dbGetQuery(con, sql)
 
@@ -373,7 +383,8 @@ country_module_server <- function(id, parent_session, con) {
         out
 
       }) |> shiny::bindCache(input$toflow, input$country, input$tech_categories_plot1,
-                             sort(input$firm), input$top_n_ids)
+                             sort(input$firm), input$top_n_ids,
+                             isTRUE(input$granted_only))
 
       # DuckDB query for Plot 2 / World Map (by-country)
       fallback_by_country <- shiny::reactive({
@@ -388,7 +399,11 @@ country_module_server <- function(id, parent_session, con) {
 
         firm_clause <- build_firm_clause_v2(selected_firms, no_filter = no_firm_filter)
 
-        out <- DBI::dbGetQuery(con, sql_country_combined_v2(toflow, country_sql, techs, firm_clause, top_n_ids = input$top_n_ids))
+        out <- DBI::dbGetQuery(con, sql_country_combined_v2(
+          toflow, country_sql, techs, firm_clause,
+          top_n_ids   = input$top_n_ids,
+          granted_only = isTRUE(input$granted_only)
+        ))
 
         if (nrow(out) == 0) return(NULL)
 
@@ -399,7 +414,8 @@ country_module_server <- function(id, parent_session, con) {
         # docdb_family_id) dedupes across matched firms.
         allinnos_data <- DBI::dbGetQuery(
           con,
-          sql_ctry_allinnos_v2(toflow, country_sql, firm_clause)
+          sql_ctry_allinnos_v2(toflow, country_sql, firm_clause,
+                               granted_only = isTRUE(input$granted_only))
         ) |>
           dplyr::filter(ctry_code %in% selected_countries)
 
@@ -428,7 +444,8 @@ country_module_server <- function(id, parent_session, con) {
         out
 
       }) |> shiny::bindCache(input$toflow, input$country, input$techs,
-                             sort(input$firm), input$top_n_ids)
+                             sort(input$firm), input$top_n_ids,
+                             isTRUE(input$granted_only))
 
       # Chart 1: Main avstrax plot
       output$avstrax_plot1 <- ggiraph::renderGirafe({
