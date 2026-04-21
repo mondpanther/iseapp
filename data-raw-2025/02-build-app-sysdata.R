@@ -248,7 +248,7 @@ cat("Building toflow choices...\n")
 
 marginal <- list(
   "Marginal Global Returns"                              = "is_global",
-  "Marginal National Returns"                            = "is_nationalkey_2009_2018",
+  "Marginal National Returns"                            = "is_nationalkey_2013_2022",
   "Marginal Returns to LMICs"                            = "is_emde",
   "Marginal Returns to LMICs (excl. China)"              = "is_emdenocn",
   "Marginal Returns to LMICs (excl. China & India)"      = "is_emdenocnin",
@@ -264,7 +264,7 @@ marginal <- list(
 
 average <- list(
   "Average Global Returns"                               = "av_global",
-  "Average National Returns"                             = "av_nationalkey_2009_2018",
+  "Average National Returns"                             = "av_nationalkey_2013_2022",
   "Average Returns to LMICs"                             = "av_emde",
   "Average Returns to LMICs (excl. China)"               = "av_emdenocn",
   "Average Returns to LMICs (excl. China & India)"       = "av_emdenocnin",
@@ -281,7 +281,7 @@ average <- list(
 
 spillovers <- list(
   "Average Global Spillovers"                            = "ev_global",
-  "Average National Spillovers"                          = "ev_nationalkey_2009_2018",
+  "Average National Spillovers"                          = "ev_nationalkey_2013_2022",
   "Average Spillovers to LMICs"                          = "ev_emde",
   "Average Spillovers to LMICs (excl. China)"            = "ev_emdenocn",
   "Average Spillovers to LMICs (excl. China & India)"    = "ev_emdenocnin",
@@ -301,17 +301,24 @@ toflow_choices <- list(
   "Average Spillovers" = spillovers
 )
 
-# Warn if any declared value is missing from the actual parquet schema
+# Drop any declared toflow entry whose column is NOT in the parquet schema.
+# (Watson 2025 exposes a different supranational group set than 2021, so
+# some 2021-era labels don't have a matching column.)
 all_declared_cols <- unlist(toflow_choices, use.names = FALSE)
 missing_cols <- setdiff(all_declared_cols, flow_cols)
 if (length(missing_cols) > 0) {
-  warning(
-    "These toflow columns are declared but NOT found in parquet:\n  ",
-    paste(missing_cols, collapse = "\n  ")
-  )
-} else {
-  cat("  ✓ All toflow columns validated against parquet schema\n")
+  message("Dropping ", length(missing_cols),
+          " toflow entries absent from parquet:\n  ",
+          paste(missing_cols, collapse = "\n  "))
+  toflow_choices <- lapply(toflow_choices, function(grp) {
+    keep <- vapply(grp, function(col) col %in% flow_cols, logical(1))
+    grp[keep]
+  })
+  # Drop empty groups
+  toflow_choices <- toflow_choices[lengths(toflow_choices) > 0]
 }
+cat("  ✓", length(unlist(toflow_choices, use.names = FALSE)),
+    "toflow columns validated against parquet schema\n")
 
 # ============================================================
 # 9. HELPER VALUES

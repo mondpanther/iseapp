@@ -1,7 +1,8 @@
 # Build Single Parquet Database for ISE App
 # This script builds the complete database from raw PATSTAT and WATSON data.
 #
-# Primary data source: patbis2021/data/fromPATSTAT and fromWATSON
+# Primary data source (2025): patbis2025/data/fromWATSON +
+# PATSTAT autumn 2025 data/patstat_clean (parquets from the 2025 PATSTAT export)
 # Classification files: classifications/ folder in this repo
 # Legacy data (regionmap, firmmap, inglobe): Dropbox/apps/iseapp
 #
@@ -31,7 +32,7 @@ library(bigrquery)
 #
 # Cascades to countrymap BEFORE the patchar join, so every downstream
 # parquet inherits the filter for free. Eligible-family set is pulled from
-# BigQuery (tls201_appln, fromPATSTAT2021) and cached in .bigdata/.
+# BigQuery (tls201_appln, fromPATSTAT2025) and cached in .bigdata/.
 #
 # The granted filter is NOT applied at build time — instead a per-family
 # `granted` boolean column is attached to patent_database, so the Shiny app
@@ -105,7 +106,7 @@ iseapp_dir   <- file.path(dropbox_dir, "apps", "iseapp")
 bigdata_dir  <- ".bigdata"
 
 # PATSTAT table parquet paths (patstat_clean) — used in place of the old
-# fromPATSTAT DSV reads. Each is one row per appln / family.
+# legacy fromPATSTAT DSV reads. Each is one row per appln / family.
 patstat_tls201 <- file.path(patstat_clean, "tls201_appln.parquet")
 patstat_tls211 <- file.path(patstat_clean, "tls211_pat_publn.parquet")
 
@@ -141,7 +142,7 @@ if (file.exists(cpcs_cache)) {
   library(DBI)
 
   project_id <- "patbis"
-  dataset    <- "fromPATSTAT2021"
+  dataset    <- "fromPATSTAT2025"
   table      <- "tls225_docdb_fam_cpc"
 
   cpcs <- bq_table_download(
@@ -385,30 +386,45 @@ cat("  Saved to", techmap_cache, "\n\n")
 
 
 # ============================================================================
-# STEP 9: Load pre-built countrymap
+# STEP 9: Load countrymap + nationalkey from Watson 2025
 # ============================================================================
-# countrymap is produced by data-raw/build_nationalkey.R as the union of
-# harmonized inventor and holder country files, restricted to countries that
-# have an innos_ev_XX_2009_2018.dsv file in fromWATSON. Each (docdb_family_id,
-# ctry_code) pair is unique.
+# The 2025 Watson bundle provides pv/ev/cost/alpha/istrax at the (family,
+# ctry_code) level in a single parquet, so we skip the old build_nationalkey.R
+# pipeline. countrymap is just the DISTINCT (family, ctry_code) pairs from
+# that file.
 
-countrymap_path  <- file.path(bigdata_dir, "countrymap.fst")
-nationalkey_path <- file.path(bigdata_dir, "nationalkey.fst")
-for (p in c(countrymap_path, nationalkey_path)) {
-  if (!file.exists(p)) {
-    stop("Missing ", p,
-         "\nRun data-raw/build_nationalkey.R first to generate it (which in\n",
-         "turn requires data-raw/build_inventor_countries_harm.R).")
-  }
-}
+watson_national_path <- file.path(
+  fromWATSON, "innos_istraxfield_nationalkey_2013_2022.parquet"
+)
+if (!file.exists(watson_national_path))
+  stop("Missing ", watson_national_path,
+       "\nExpected in patbis2025/data/fromWATSON.")
 
-cat("Loading pre-built countrymap...\n")
-tic("countrymap")
-countrymap <- read_fst(countrymap_path, as.data.table = TRUE)
-cat("  countrymap:", nrow(countrymap), "rows,",
+cat("Loading Watson 2025 nationalkey (family x ctry pv/ev/cost/alpha/istrax)...\n")
+tic("nationalkey")
+ev_natl <- as.data.table(arrow::read_parquet(watson_national_path))
+# Rename year-suffixed cost/alpha to the generic names used downstream.
+data.table::setnames(ev_natl,
+                     c("costpvyear_2013_2022", "alphapvyear_2013_2022"),
+                     c("cost",                 "alpha"),
+                     skip_absent = TRUE)
+# istrax/avstrax per family x country for the nationalkey window.
+ev_natl[, `:=`(
+  istrax_nationalkey_2013_2022  = ((alpha + 1) / cost) * ev * as.integer(pv <= 2 * cost),
+  avstrax_nationalkey_2013_2022 = (pv + ev) / cost,
+  ev_nationalkey_2013_2022      = ev
+)]
+
+cat("  nationalkey rows:", nrow(ev_natl), ", distinct families:",
+    uniqueN(ev_natl$docdb_family_id),
+    ", distinct ctries:", uniqueN(ev_natl$ctry_code), "\n")
+toc()
+
+countrymap <- unique(ev_natl[, .(docdb_family_id, ctry_code)])
+cat("  countrymap (distinct family x ctry from nationalkey):",
+    nrow(countrymap), "rows,",
     uniqueN(countrymap$docdb_family_id), "innovations,",
     uniqueN(countrymap$ctry_code), "countries\n")
-toc()
 
 # ---- Optional: filter to docdb_family_size >= FAMILY_SIZE_MIN --------------
 if (FAMILY_SIZE_MIN > 1L) {
@@ -422,10 +438,10 @@ if (FAMILY_SIZE_MIN > 1L) {
     cat("  Reading cached eligible families from ", cache, "\n", sep = "")
     eligible <- as.data.table(arrow::read_parquet(cache))
   } else {
-    cat("  Querying BigQuery patbis.fromPATSTAT2021.tls201_appln ...\n")
+    cat("  Querying BigQuery patbis.fromPATSTAT2025.tls201_appln ...\n")
     sql <- sprintf("
       SELECT DISTINCT docdb_family_id
-      FROM `patbis.fromPATSTAT2021.tls201_appln`
+      FROM `patbis.fromPATSTAT2025.tls201_appln`
       WHERE docdb_family_size >= %d
         AND docdb_family_id IS NOT NULL
     ", as.integer(FAMILY_SIZE_MIN))
@@ -463,12 +479,12 @@ if (file.exists(granted_cache)) {
   cat("  Reading cached granted families from ", granted_cache, "\n", sep = "")
   granted_fams <- as.data.table(arrow::read_parquet(granted_cache))
 } else {
-  cat("  Querying patbis.fromPATSTAT2021.tls201_appln ...\n")
+  cat("  Querying patbis.fromPATSTAT2025.tls201_appln ...\n")
   granted_fams <- as.data.table(bq_table_download(
     bq_project_query("patbis", "
       SELECT DISTINCT docdb_family_id
-      FROM `patbis.fromPATSTAT2021.tls201_appln`
-      WHERE granted = TRUE
+      FROM `patbis.fromPATSTAT2025.tls201_appln`
+      WHERE granted = 'Y'
         AND docdb_family_id IS NOT NULL
     "),
     page_size = 200000, bigint = "integer"
@@ -510,77 +526,62 @@ read_watson <- function(dsv_path, columns = NULL) {
 
 # 10a: Build patchar (global-level per innovation)
 cat("  10a: Reading global istrax data...\n")
-patchar <- read_watson(
-  file.path(fromWATSON, "innos_istraxfield_global_2009_2018.dsv"),
-  columns = c("docdb_family_id", "pv", "ev",
-              "costpvyear_2009_2018", "alphapvyear_2009_2018", "istrax")
-)
-setnames(patchar, c("istrax", "costpvyear_2009_2018", "alphapvyear_2009_2018", "ev"),
-                  c("istrax_global", "cost", "alpha", "ev_global"))
+patchar <- as.data.table(arrow::read_parquet(
+  file.path(fromWATSON, "innos_istraxfield_global_2013_2022.parquet")
+))[, .(docdb_family_id, pv, ev,
+       costpvyear_2013_2022, alphapvyear_2013_2022, istrax)]
+setnames(patchar,
+         c("istrax", "costpvyear_2013_2022", "alphapvyear_2013_2022", "ev"),
+         c("istrax_global", "cost",           "alpha",                 "ev_global"))
 patchar[, avstrax_global := (ev_global + pv) / cost]
 
 cat("    patchar:", nrow(patchar), "innovations\n")
 
-# 10b: Load the custom-built nationalkey (produced by
-# data-raw/build_nationalkey.R) and compute istrax/avstrax from it.
-# This uses per-country innos_ev_XX files rather than the precomputed
-# innos_ev_nationalkey_2009_2018.dsv.
-cat("  10b: Loading custom-built nationalkey...\n")
-ev_natl <- read_fst(nationalkey_path, as.data.table = TRUE)
-
-# Join with patchar to get pv, cost, alpha for istrax formula
-pcm <- patchar[ev_natl, on = "docdb_family_id", nomatch = 0L]
-pcm[, `:=`(
-  istrax_nationalkey_2009_2018  = ((alpha + 1) / cost) * ev_nationalkey_2009_2018 * as.integer(pv <= 2 * cost),
-  avstrax_nationalkey_2009_2018 = (pv + ev_nationalkey_2009_2018) / cost
+# 10b: Nationalkey: already loaded in Step 9 from Watson 2025's
+# innos_istraxfield_nationalkey_2013_2022.parquet. ev/istrax/avstrax for the
+# nationalkey window were computed there; we now carry pcm forward as
+# (docdb_family_id, ctry_code, ev/istrax/avstrax_nationalkey_2013_2022).
+pcm <- ev_natl[, .(
+  docdb_family_id,
+  ctry_code,
+  ev_nationalkey_2013_2022,
+  istrax_nationalkey_2013_2022,
+  avstrax_nationalkey_2013_2022
 )]
+rm(ev_natl); gc()
 
 cat("    patchar_countrymap:", nrow(pcm), "rows,",
     uniqueN(pcm$ctry_code), "countries\n")
 
-# 10c: Add country/group EV columns
-# Note: ev files have inconsistent structures:
-#   Per-country files (AT, GB...): (row_index, docdb_family_id, pv, ev, v)
-#   Group files (emde, hic...):    (row_index, docdb_family_id, ev_xxx_2009_2018)
-# We read all columns and find the ev column by name pattern.
-ev_variants <- c("CN", "emde", "eu", "euplusuk", "g7", "IN",
-                 "emdenocn", "emdenocnin", "hic",
-                 "AT", "GB", "DE", "FR", "US")
-
-for (ff in ev_variants) {
-  ev_dsv <- file.path(fromWATSON,
-                      paste0("innos_ev_", tolower(ff), "_2009_2018.dsv"))
-  cat("    Reading ev_", toupper(ff), "...\n", sep = "")
-  ev_data <- read_watson(ev_dsv)  # prefers parquet sibling
-  if (is.null(ev_data)) {
-    cat("    WARNING: Missing ", ev_dsv, " - skipping\n", sep = "")
-    next
-  }
-  # Find the ev column (starts with "ev"). Per-country parquets store the
-  # value as "ev"; group DSVs/parquets store it as "ev_<group>_2009_2018".
-  ev_src_col <- grep("^ev", names(ev_data), value = TRUE)[1]
-  if (is.na(ev_src_col)) {
-    cat("    WARNING: No ev column found in", basename(ev_dsv), "- skipping\n")
-    next
-  }
-  ev_col_name <- paste0("ev_", toupper(ff))
-  ev_data <- ev_data[, .(docdb_family_id, ev_val = get(ev_src_col))]
-  setnames(ev_data, "ev_val", ev_col_name)
-  patchar <- patchar[ev_data, on = "docdb_family_id", (ev_col_name) := get(paste0("i.", ev_col_name))]
-  rm(ev_data)
+# 10c: Add supranational EV columns from innos_ev_supranational_2013_2022
+# (docdb_family_id x ctry_group). Pivot ctry_group values into wide columns
+# named ev_<GROUP>. Compute istrax/avstrax later.
+cat("  10c: Reading supranational ev data...\n")
+ev_supra_path <- file.path(fromWATSON, "innos_ev_supranational_2013_2022.parquet")
+if (file.exists(ev_supra_path)) {
+  ev_supra <- as.data.table(arrow::read_parquet(
+    ev_supra_path, col_select = c("docdb_family_id", "ctry_group", "ev")
+  ))
+  # Standardise group codes — uppercase, strip spaces
+  ev_supra[, ctry_group := toupper(gsub("\\s+", "", ctry_group))]
+  # Pivot wide
+  ev_supra_wide <- dcast(ev_supra, docdb_family_id ~ ctry_group,
+                         value.var = "ev", fill = NA_real_)
+  grp_cols <- setdiff(names(ev_supra_wide), "docdb_family_id")
+  setnames(ev_supra_wide, grp_cols, paste0("ev_", grp_cols))
+  cat("    ev_supra groups:", paste(grp_cols, collapse = ", "), "\n")
+  patchar <- ev_supra_wide[patchar, on = "docdb_family_id"]
+  rm(ev_supra, ev_supra_wide)
 }
 
-# 10d: Compute istrax and avstrax for each variant
-cat("  10d: Computing istrax and avstrax formulas...\n")
-
+# 10d: Compute istrax/avstrax for each supranational ev_<GROUP>
+cat("  10d: Computing istrax and avstrax for supranational groups...\n")
 ev_cols <- grep("^ev_", names(patchar), value = TRUE)
-ev_cols <- setdiff(ev_cols, "ev_global")  # global already computed
-
+ev_cols <- setdiff(ev_cols, "ev_global")
 for (evc in ev_cols) {
   suffix <- sub("^ev_", "", evc)
-  is_col <- paste0("istrax_", suffix)
+  is_col <- paste0("istrax_",  suffix)
   av_col <- paste0("avstrax_", suffix)
-
   patchar[, (is_col) := ((alpha + 1) / cost) * get(evc) * as.integer(pv <= 2 * cost)]
   patchar[, (av_col) := (pv + get(evc)) / cost]
 }
@@ -615,8 +616,8 @@ cat(sprintf("    granted families in patent_data: %s / %s (%.1f%%)\n",
                   uniqueN(patent_data$docdb_family_id)))
 
 # Merge in national measures (only exist for a subset of innovation x country)
-national_cols <- c("ev_nationalkey_2009_2018", "istrax_nationalkey_2009_2018",
-                   "avstrax_nationalkey_2009_2018")
+national_cols <- c("ev_nationalkey_2013_2022", "istrax_nationalkey_2013_2022",
+                   "avstrax_nationalkey_2013_2022")
 pcm_national <- pcm[, c("docdb_family_id", "ctry_code", national_cols), with = FALSE]
 patent_data <- pcm_national[patent_data, on = c("docdb_family_id", "ctry_code")]
 
@@ -668,28 +669,41 @@ new_names <- tolower(new_names)
 setnames(patent_data, old_names, new_names)
 
 # Get appln_id: build an Espacenet-searchable publication number per family
-# from PATSTAT innos_pub.dsv.
+# from the PATSTAT 2025 parquet tables in patstat_clean.
 #
 # Espacenet's `pn=` search accepts publication numbers in the form
 # `<publn_auth><publn_nr>` (e.g. EP1234567, WO2020123456, US20200123456).
-# Publication numbers are what Espacenet always displays and are definitively
-# searchable there. PATSTAT's internal integer appln_id is NOT searchable,
-# which is why the previous implementation (storing innos_pub$appln_id) gave
-# broken URLs.
+# Publication numbers are what Espacenet always displays and are
+# definitively searchable there. PATSTAT's internal integer appln_id is
+# NOT searchable.
 #
 # Priority per family: EP > WO > US > any other office (most internationally
-# recognizable publication). Within a preferred office, first row wins
-# (matches the dev_test "first per family" pattern).
-cat("  Building Espacenet-searchable appln_id from innos_pub...\n")
-pubs <- read_watson(
-  file.path(fromPATSTAT, "innos_pub.dsv"),
-  columns = c("docdb_family_id", "publn_auth", "publn_nr")
-)
-# Filter to families that will actually end up in the database. Skips
-# ~10M publications that would otherwise be sorted + grouped for no reason.
-pubs <- pubs[docdb_family_id %in% final_docdbs]
-pubs <- pubs[!is.na(publn_auth) & nzchar(publn_auth) &
-             !is.na(publn_nr)   & nzchar(publn_nr)]
+# recognizable publication). Within a preferred office, first row wins.
+cat("  Building Espacenet-searchable appln_id from PATSTAT 2025...\n")
+# Replaces the 2021 innos_pub.dsv read: join tls211_pat_publn (one row per
+# publication) with tls201_appln (one row per appln, carries
+# docdb_family_id) directly via DuckDB over the parquet files in
+# patstat_clean. DuckDB filters on docdb_family_id push down into the
+# parquet scan, so we only materialise the ~10-15M publications for
+# families in final_docdbs.
+con_pub <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
+DBI::dbExecute(con_pub, sprintf("PRAGMA threads = %d",
+                                 max(1L, parallel::detectCores() - 1L)))
+DBI::dbWriteTable(con_pub, "final_fams",
+                  data.frame(docdb_family_id = final_docdbs),
+                  overwrite = TRUE)
+
+pubs <- as.data.table(DBI::dbGetQuery(con_pub, sprintf("
+  SELECT a.docdb_family_id, p.publn_auth, p.publn_nr
+  FROM read_parquet('%s') a
+  INNER JOIN read_parquet('%s') p ON a.appln_id = p.appln_id
+  INNER JOIN final_fams f        ON a.docdb_family_id = f.docdb_family_id
+  WHERE p.publn_auth IS NOT NULL
+    AND LENGTH(TRIM(p.publn_auth)) > 0
+    AND p.publn_nr   IS NOT NULL
+    AND LENGTH(TRIM(p.publn_nr))   > 0
+", patstat_tls201, patstat_tls211)))
+DBI::dbDisconnect(con_pub, shutdown = TRUE)
 
 office_rank <- c(EP = 1L, WO = 2L, US = 3L)
 pubs[, prio := fcoalesce(office_rank[publn_auth], 99L)]
@@ -704,7 +718,7 @@ rm(appln_ids); gc()
 
 n_missing <- sum(is.na(patent_data$appln_id))
 if (n_missing > 0) {
-  cat("  WARNING:", n_missing, "rows have no publication match in innos_pub.dsv (",
+  cat("  WARNING:", n_missing, "rows have no publication match in tls211_pat_publn (",
       round(100 * n_missing / nrow(patent_data), 2), "%)\n")
 }
 
