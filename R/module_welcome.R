@@ -55,9 +55,55 @@ welcome_module_ui <- function(id) {
         class = "btn-primary btn-lg",
         style = "white-space: normal; min-height: 84px; font-weight: 500;"
       )
+    ),
+
+    # Scrolling message ticker (marquee) beneath the buttons. Each message
+    # lives in welcome_ticker_messages (declared below); horizontally
+    # scrolls right-to-left via pure CSS so no JS timer is needed.
+    shiny::tags$style(shiny::HTML("
+      .ise-ticker {
+        margin-top: 42px;
+        max-width: 720px;
+        margin-left: auto;
+        margin-right: auto;
+        overflow: hidden;
+        white-space: nowrap;
+        border-top: 1px solid #e4e4e4;
+        border-bottom: 1px solid #e4e4e4;
+        padding: 10px 0;
+        color: #555;
+        font-size: 0.95rem;
+        font-style: italic;
+      }
+      .ise-ticker-track {
+        display: inline-block;
+        padding-left: 100%;
+        animation: ise-ticker-scroll 28s linear infinite;
+      }
+      .ise-ticker-track:hover { animation-play-state: paused; }
+      .ise-ticker-msg { padding: 0 60px; }
+      @keyframes ise-ticker-scroll {
+        0%   { transform: translateX(0); }
+        100% { transform: translateX(-100%); }
+      }
+    ")),
+    shiny::div(
+      class = "ise-ticker",
+      shiny::div(
+        class = "ise-ticker-track",
+        lapply(welcome_ticker_messages, function(msg) {
+          shiny::span(class = "ise-ticker-msg", msg)
+        })
+      )
     )
   )
 }
+
+# Messages shown in the welcome-page ticker. Prepend newer entries so they
+# appear first in the scroll. Keep entries short (~1 line).
+welcome_ticker_messages <- c(
+  "Now based on innovation data from 2013 to 2022"
+)
 
 #' Preset query strings for the welcome-page metric buttons.
 #'
