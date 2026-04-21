@@ -56,6 +56,14 @@ region_module_sidebar <- function(id) {
           )
         )
       ),
+      shiny::div(
+        class = "side_input",
+        shiny::checkboxInput(
+          inputId = ns("granted_only"),
+          label   = "Granted families only",
+          value   = TRUE
+        )
+      ),
 
     ),
 
@@ -344,7 +352,11 @@ region_module_server <- function(id, parent_session, con) {
 
         firm_clause <- build_firm_clause_v2(selected_firms, no_filter = no_firm_filter)
 
-        out <- DBI::dbGetQuery(con, sql_region_combined_v2(toflow, region_sql, input$techs_region, firm_clause, top_n_ids = input$top_n_ids_region))
+        out <- DBI::dbGetQuery(con, sql_region_combined_v2(
+          toflow, region_sql, input$techs_region, firm_clause,
+          top_n_ids    = input$top_n_ids_region,
+          granted_only = isTRUE(input$granted_only)
+        ))
 
         if (nrow(out) == 0) return(NULL)
 
@@ -355,7 +367,8 @@ region_module_server <- function(id, parent_session, con) {
         # Innovations" innos == allinnos row-for-row, so RTA collapses to 1.
         allinnos_data <- DBI::dbGetQuery(
           con,
-          sql_region_allinnos_v2(toflow, region_sql, firm_clause)
+          sql_region_allinnos_v2(toflow, region_sql, firm_clause,
+                                 granted_only = isTRUE(input$granted_only))
         ) |>
           dplyr::filter(region_code %in% selected_regions)
 
@@ -386,7 +399,8 @@ region_module_server <- function(id, parent_session, con) {
         out
 
       }) |> shiny::bindCache(input$toflow_region, input$region, input$techs_region,
-                             sort(input$firm), input$top_n_ids_region)
+                             sort(input$firm), input$top_n_ids_region,
+                             isTRUE(input$granted_only))
 
       fallback_by_tech_region <- shiny::reactive({
         shiny::req(input$toflow_region, input$region, input$tech_categories_plot1_region)
@@ -403,7 +417,11 @@ region_module_server <- function(id, parent_session, con) {
 
         use_tech_group_labels <- length(tech_filters) == 1 && names(tech_filters) == "All"
 
-        out <- DBI::dbGetQuery(con, sql_region_tech_combined_v2(toflow, region_sql, tech_filters, firm_clause, top_n_ids = input$top_n_ids_region))
+        out <- DBI::dbGetQuery(con, sql_region_tech_combined_v2(
+          toflow, region_sql, tech_filters, firm_clause,
+          top_n_ids    = input$top_n_ids_region,
+          granted_only = isTRUE(input$granted_only)
+        ))
 
         if (nrow(out) == 0) return(NULL)
 
@@ -436,7 +454,8 @@ region_module_server <- function(id, parent_session, con) {
         out
 
       }) |> shiny::bindCache(input$toflow_region, input$region, input$tech_categories_plot1_region,
-                             sort(input$firm), input$top_n_ids_region)
+                             sort(input$firm), input$top_n_ids_region,
+                             isTRUE(input$granted_only))
       # ===== RENDER OUTPUTS =====
       
       # Plot 1: Returns by Technology

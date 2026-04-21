@@ -57,6 +57,19 @@ build_firm_clause_v2 <- function(firms, no_filter = TRUE) {
   glue::glue("AND f.firm IN ({firms_sql})")
 }
 
+#' Build a SQL clause restricting to granted families
+#'
+#' When \code{granted_only} is TRUE, returns the AND clause used in the main
+#' WHERE to keep only docdbs with \code{granted = TRUE} (the per-family
+#' boolean attached at build time — TRUE if any appln in the family was
+#' granted per patbis.fromPATSTAT2021.tls201_appln).
+#'
+#' @param granted_only Logical. Default FALSE (no filter).
+#' @return Character. Empty string, or an \code{AND p.granted = TRUE} clause.
+build_granted_clause_v2 <- function(granted_only = FALSE) {
+  if (isTRUE(granted_only)) "AND p.granted = TRUE" else ""
+}
+
 #' Generate SQL combined query for country aggregation (v2)
 #'
 #' Joins slim bridge parquets for tech and firm at query time.
@@ -68,9 +81,11 @@ build_firm_clause_v2 <- function(firms, no_filter = TRUE) {
 #' @param firm_clause Character. AND clause for firm filtering (may be empty string)
 #'
 #' @return Character. SQL query string
-sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause, top_n_ids = 10) {
+sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause,
+                                      top_n_ids = 10, granted_only = FALSE) {
 
-  tech_bool <- build_tech_bool_v2(techs)
+  tech_bool      <- build_tech_bool_v2(techs)
+  granted_clause <- build_granted_clause_v2(granted_only)
 
   # Build WHERE clause for tech filtering
   tech_filter_sql <- if (tech_bool == "TRUE") {
@@ -118,6 +133,7 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause, top
       {if (nchar(trimws(firm_clause)) > 0) 'INNER JOIN filtered_firm ff ON p.docdb_family_id = ff.docdb_family_id' else ''}
       WHERE p.ctry_code IN ({country_sql})
         AND p.{toflow} IS NOT NULL
+        {granted_clause}
     ),
 
     -- Deduplicate across countries: one row per distinct patent
@@ -209,13 +225,15 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause, top
 #' @param country_sql Character. Comma-separated quoted country codes
 #' @param firm_clause Character. AND clause for firm filtering (may be empty)
 #' @return Character. SQL returning ctry_code, allinnos
-sql_ctry_allinnos_v2 <- function(toflow, country_sql, firm_clause) {
+sql_ctry_allinnos_v2 <- function(toflow, country_sql, firm_clause,
+                                   granted_only = FALSE) {
   firm_filter_sql <- if (nchar(trimws(firm_clause)) == 0) {
     ""
   } else {
     firm_condition <- gsub("^\\s*AND\\s+", "", firm_clause)
     paste0("WHERE ", firm_condition)
   }
+  granted_clause <- build_granted_clause_v2(granted_only)
 
   glue::glue("
     {if (nchar(trimws(firm_clause)) > 0) '
@@ -232,6 +250,7 @@ sql_ctry_allinnos_v2 <- function(toflow, country_sql, firm_clause) {
     {if (nchar(trimws(firm_clause)) > 0) 'INNER JOIN filtered_firm ff ON p.docdb_family_id = ff.docdb_family_id' else ''}
     WHERE p.ctry_code IN ({country_sql})
       AND p.{toflow} IS NOT NULL
+      {granted_clause}
     GROUP BY p.ctry_code
   ")
 }
@@ -247,7 +266,8 @@ sql_ctry_allinnos_v2 <- function(toflow, country_sql, firm_clause) {
 #' @param firm_clause Character. AND clause for firm filtering (may be empty string)
 #'
 #' @return Character. SQL query string
-sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm_clause, top_n_ids = 10) {
+sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm_clause,
+                                           top_n_ids = 10, granted_only = FALSE) {
 
   filter_clauses <- unlist(tech_filters)
   filter_clauses <- filter_clauses[nchar(trimws(filter_clauses)) > 0]
@@ -265,6 +285,8 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
   } else {
     ""
   }
+
+  granted_clause <- build_granted_clause_v2(granted_only)
 
   # Build filtered_tech CTE:
   # "All innovations" = all patents regardless of tech mapping (single bar)
@@ -332,6 +354,7 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
       {firm_join}
       WHERE p.ctry_code IN ({country_sql})
         AND p.{toflow} IS NOT NULL
+        {granted_clause}
     ),
 
     ranked AS (
@@ -355,6 +378,7 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
         {firm_join}
         WHERE p.ctry_code IN ({country_sql})
           AND p.{toflow} IS NOT NULL
+          {granted_clause}
       ) t
     )
 
@@ -393,9 +417,11 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
 #' @param techs Character vector. Technology selection from the UI.
 #' @param firm_clause Character. AND clause from build_firm_clause_v2().
 #' @return Character. SQL query string.
-sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause, top_n_ids = 10) {
+sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause,
+                                     top_n_ids = 10, granted_only = FALSE) {
 
-  tech_bool <- build_tech_bool_v2(techs)
+  tech_bool      <- build_tech_bool_v2(techs)
+  granted_clause <- build_granted_clause_v2(granted_only)
 
   # Build WHERE clause for tech filtering
   tech_filter_sql <- if (tech_bool == "TRUE") {
@@ -445,6 +471,7 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause, top_n
       WHERE r.region_code IN ({region_sql})
         AND p.ctry_code = 'GB'
         AND p.{toflow} IS NOT NULL
+        {granted_clause}
     ),
 
     -- Deduplicate across regions: one row per distinct patent
@@ -533,13 +560,15 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause, top_n
 #' @param region_sql Character. Comma-separated quoted region codes
 #' @param firm_clause Character. AND clause for firm filtering (may be empty)
 #' @return Character. SQL returning region_code, allinnos
-sql_region_allinnos_v2 <- function(toflow, region_sql, firm_clause) {
+sql_region_allinnos_v2 <- function(toflow, region_sql, firm_clause,
+                                     granted_only = FALSE) {
   firm_filter_sql <- if (nchar(trimws(firm_clause)) == 0) {
     ""
   } else {
     firm_condition <- gsub("^\\s*AND\\s+", "", firm_clause)
     paste0("WHERE ", firm_condition)
   }
+  granted_clause <- build_granted_clause_v2(granted_only)
 
   glue::glue("
     {if (nchar(trimws(firm_clause)) > 0) '
@@ -558,6 +587,7 @@ sql_region_allinnos_v2 <- function(toflow, region_sql, firm_clause) {
     WHERE r.region_code IN ({region_sql})
       AND p.ctry_code = 'GB'
       AND p.{toflow} IS NOT NULL
+      {granted_clause}
     GROUP BY r.region_code
   ")
 }
@@ -573,7 +603,8 @@ sql_region_allinnos_v2 <- function(toflow, region_sql, firm_clause) {
 #' @param tech_filters Named list from build_tech_filter_v2().
 #' @param firm_clause Character. AND clause from build_firm_clause_v2().
 #' @return Character. SQL query string.
-sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_clause, top_n_ids = 10) {
+sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_clause,
+                                         top_n_ids = 10, granted_only = FALSE) {
 
   filter_clauses <- unlist(tech_filters)
   filter_clauses <- filter_clauses[nchar(trimws(filter_clauses)) > 0]
@@ -591,6 +622,8 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
   } else {
     ""
   }
+
+  granted_clause <- build_granted_clause_v2(granted_only)
 
   # Build filtered_tech CTE:
   # "All innovations" = all patents regardless of tech mapping (single bar)
@@ -655,6 +688,7 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
       WHERE r.region_code IN ({region_sql})
         AND p.ctry_code = 'GB'
         AND p.{toflow} IS NOT NULL
+        {granted_clause}
     ),
 
     ranked AS (
@@ -680,6 +714,7 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
         WHERE r.region_code IN ({region_sql})
           AND p.ctry_code = 'GB'
           AND p.{toflow} IS NOT NULL
+          {granted_clause}
       ) t
     )
 

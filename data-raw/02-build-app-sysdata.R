@@ -392,6 +392,112 @@ tech_group_definitions <- list(
 )
 
 # ============================================================
+# 12. PRE-COMPUTED TECH x CPC-SUBCLASS COUNTS (About page wordclouds)
+# ============================================================
+# For each technology label in the UI tree, count distinct docdbs per CPC
+# 4-letter subclass (e.g. "H01M") by joining techmap x cpcs bridge tables
+# from .bigdata/. Restricted to families that actually appear in the app's
+# patent_database.parquet. Subclass titles are shortened to <= 4 words for
+# wordcloud rendering.
+
+cat("Pre-computing tech x CPC-subclass counts...\n")
+
+# Manual overrides for subclasses whose CPC title is uninformative
+# (mostly umbrella codes that say "TECHNICAL SUBJECTS COVERED BY ...").
+.cpc_title_overrides <- c(
+  Y10S = "Legacy USPC cross-reference art",
+  Y10T = "Legacy USPC classification subjects",
+  Y02A = "Climate change adaptation",
+  Y02B = "Climate mitigation in buildings",
+  Y02C = "GHG capture, storage, sequestration",
+  Y02D = "ICT climate mitigation",
+  Y02E = "Clean energy generation",
+  Y02P = "Climate mitigation in production",
+  Y02T = "Transport climate mitigation",
+  Y02W = "Waste treatment climate mitigation",
+  Y04S = "Smart grids / power systems"
+)
+
+# Shorten a CPC title to a readable cloud label: drop boilerplate prefixes
+# like "TECHNICAL SUBJECTS COVERED BY", cut at the first semicolon/colon,
+# title-case, and cap at ~55 chars on a word boundary (append ellipsis if
+# truncated). Falls back to the subclass code for empty/NA titles.
+.short_title <- function(code, raw) {
+  if (!is.null(.cpc_title_overrides[[code]])) return(.cpc_title_overrides[[code]])
+  if (is.na(raw) || !nzchar(raw)) return(code)
+  s <- raw
+  # Drop bracketed editorial content (already done at CSV-build, defensive).
+  s <- gsub("\\{[^{}]*\\}", "", s)
+  s <- gsub("\\([^()]*\\)", "", s)
+  # Cut at the first semicolon/colon — rest is usually notes/refs.
+  s <- sub("[;:].*$", "", s)
+  # Drop generic leading boilerplate.
+  s <- sub("^\\s*TECHNICAL SUBJECTS COVERED BY[^A-Z]*", "", s,
+           ignore.case = TRUE, perl = TRUE)
+  s <- sub("^\\s*SPECIFIC USE[S]? OF\\s+", "", s, ignore.case = TRUE)
+  s <- gsub("\\s+", " ", trimws(s))
+  if (!nzchar(s)) return(code)
+  # Title case, but leave short all-caps acronyms (<=4 chars) alone.
+  parts <- strsplit(s, " ", fixed = TRUE)[[1]]
+  parts <- vapply(parts, function(w) {
+    if (nchar(w) <= 4 && toupper(w) == w && grepl("[A-Z]", w)) w
+    else paste0(toupper(substr(w, 1, 1)), tolower(substr(w, 2, nchar(w))))
+  }, character(1))
+  s <- paste(parts, collapse = " ")
+  # Cap at ~55 chars on a word boundary.
+  if (nchar(s) > 55) {
+    cut <- regmatches(s, regexpr("^.{1,55}\\b", s, perl = TRUE))
+    s <- paste0(trimws(cut), "\u2026")
+  }
+  s
+}
+
+subclass_titles <- data.table::fread(
+  "classifications/cpc_subclass_titles.csv",
+  data.table = TRUE
+)
+subclass_titles[, title_short := mapply(.short_title, subclass, title,
+                                        USE.NAMES = FALSE)]
+
+# Families in the app's final universe
+final_fams <- arrow::open_dataset("inst/extdata/patent_database.parquet") |>
+  dplyr::select(docdb_family_id) |>
+  dplyr::distinct() |>
+  dplyr::collect()
+final_fams <- final_fams$docdb_family_id
+
+techmap_dt <- fst::read_fst(".bigdata/techmap.fst", as.data.table = TRUE)
+cpcs_dt    <- fst::read_fst(".bigdata/cpcs.fst",    as.data.table = TRUE)
+techmap_dt <- techmap_dt[docdb_family_id %in% final_fams]
+cpcs_dt    <- cpcs_dt[docdb_family_id %in% final_fams]
+cpcs_dt[, subclass := substr(cpc_class_symbol, 1, 4)]
+cpcs_dt <- unique(cpcs_dt[, .(docdb_family_id, subclass)])
+
+setkey(techmap_dt, docdb_family_id)
+setkey(cpcs_dt,    docdb_family_id)
+joined <- cpcs_dt[techmap_dt, on = "docdb_family_id", allow.cartesian = TRUE]
+joined <- joined[!is.na(subclass)]
+
+tech_subclass_counts <- joined[, .(n_docdb = data.table::uniqueN(docdb_family_id)),
+                               by = .(technology, subclass)]
+tech_subclass_counts <- subclass_titles[, .(subclass, title_short)][
+  tech_subclass_counts, on = "subclass"]
+# Keep at most 50 subclasses per technology (wordcloud readability cap)
+data.table::setorder(tech_subclass_counts, technology, -n_docdb)
+tech_subclass_counts <- tech_subclass_counts[,
+  utils::head(.SD, 50), by = technology]
+data.table::setcolorder(tech_subclass_counts,
+  c("technology", "subclass", "title_short", "n_docdb"))
+# Fall back to the subclass code when no title matched
+tech_subclass_counts[is.na(title_short) | title_short == "",
+                     title_short := subclass]
+
+rm(techmap_dt, cpcs_dt, joined, final_fams, subclass_titles); gc()
+cat("  ✓", nrow(tech_subclass_counts),
+    "tech × subclass rows across",
+    data.table::uniqueN(tech_subclass_counts$technology), "technologies\n")
+
+# ============================================================
 # 13. SAVE AS INTERNAL PACKAGE DATA
 # usethis::use_data(internal = TRUE) writes ALL listed objects
 # into R/sysdata.rda, which is auto-loaded for every package function.
@@ -434,6 +540,8 @@ usethis::use_data(
   allinnos_region_baseline,
   sum_allinnos_region_baseline,
   sum_allinnos_region_firm_baseline,
+  # About-page tech definitions
+  tech_subclass_counts,
   # InGlobe
   metadata,
   wave_range,
