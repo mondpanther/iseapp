@@ -11,8 +11,8 @@ id = '019cdc4e-02b5-144d-71fe-74477e6abf2a'
 dashboard_url = 'https://connect.posit.cloud/mondpanther/content/019cdc4e-02b5-144d-71fe-74477e6abf2a'
 direct_url = 'https://019cdc4e-02b5-144d-71fe-74477e6abf2a.share.connect.posit.cloud'
 logs_url = 'https://connect.posit.cloud/mondpanther/content/019cdc4e-02b5-144d-71fe-74477e6abf2a/history'
-deployed_at = '2026-04-20T23:23:15+01:00'
-bundle_id = '019dacfc-2205-e73d-c804-0522f2af998f'
+deployed_at = '2026-04-21T20:07:40+01:00'
+bundle_id = '019db170-16e0-3c9a-088c-fdf699d6673c'
 files = [
   '.posit/publish/deployments/deployment-CPP4.toml',
   '.posit/publish/iseapp2-9GQ2.toml',
@@ -26,6 +26,7 @@ files = [
   'R/functions_istraxfunctions.R',
   'R/functions_istraxfunctions_processing.R',
   'R/innovationStrategyExplorer-package.R',
+  'R/module_about.R',
   'R/module_country.R',
   'R/module_globe.R',
   'R/module_landing.R',
@@ -52,6 +53,7 @@ files = [
   'inst/extdata/patents_x_tech.parquet',
   'inst/extdata/region_lookup.parquet',
   'inst/extdata/tech_lookup.parquet',
+  'inst/insights_html/.gitkeep',
   'inst/www/css/custom-styles.min.css',
   'inst/www/img/favicon.svg',
   'inst/www/img/ifc_logo.svg',
@@ -104,6 +106,11 @@ files = [
 
 [connect_cloud]
 account_name = 'mondpanther'
+
+[deployment_error]
+code = 'unknown'
+message = 'Runtime error: Unable to start the app due to a runtime error. Please check the logs for more information.'
+operation = 'publish/deployContent'
 
 [configuration]
 product_type = 'connect_cloud'

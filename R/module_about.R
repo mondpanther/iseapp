@@ -181,43 +181,74 @@ about_module_server <- function(id) {
 
       # Flatten the size scale: wordcloud2 already applies sqrt internally,
       # so a further sqrt on freq gives overall x^0.25 scaling — small
-      # subclasses stay readable while the largest don't dominate. `minSize`
-      # clamps the absolute floor.
+      # subclasses stay readable while the largest don't dominate.
+      # `minSize` clamps the absolute floor.
+      labels <- sprintf("%s \u2013 %s", rows$subclass, rows$title_short)
       df <- data.frame(
-        word = sprintf("%s \u2013 %s", rows$subclass, rows$title_short),
+        word = labels,
         freq = sqrt(as.numeric(rows$n_docdb)),
         stringsAsFactors = FALSE
       )
+      counts_map <- setNames(as.numeric(rows$n_docdb), labels)
+
+      # hoverFunction: set tooltip to the *actual* n_docdb (not the sqrt we
+      # passed as weight) and stash the currently hovered word on the canvas
+      # so the click handler below can find it.
+      hover_fn <- htmlwidgets::JS("
+        function(item, dimension, event) {
+          if (!event || !event.target) return;
+          var canvas = event.target;
+          if (!item) {
+            canvas.title = '';
+            canvas._cpcLastWord = null;
+            return;
+          }
+          var word = item[0];
+          var n = (canvas._cpcCounts || {})[word];
+          canvas.title = (n !== undefined)
+            ? word + ' \u2014 ' + Number(n).toLocaleString() + ' families'
+            : word;
+          canvas._cpcLastWord = word;
+        }
+      ")
 
       wc <- wordcloud2::wordcloud2(
         df,
-        size        = 0.55,
-        minSize     = 12,
-        shape       = "circle",
-        gridSize    = 6,
-        rotateRatio = 0,         # all labels horizontal
-        minRotation = 0,
-        maxRotation = 0
+        size          = 0.55,
+        minSize       = 12,
+        shape         = "circle",
+        gridSize      = 6,
+        rotateRatio   = 0,
+        minRotation   = 0,
+        maxRotation   = 0,
+        hoverFunction = hover_fn
       )
-      # Attach a native click handler via wordcloud2's own `click` option
-      # (wordcloud2.js reads it and dispatches on word clicks — reliable
-      # across browsers, no hover-state tracking needed).
-      wc$x$click <- htmlwidgets::JS("
-        function(item, dimension, event) {
-          if (!item) return;
-          var code = String(item[0]).split(/[\\s\\u2013\\-]+/)[0];
-          if (/^[A-Z]\\d{2}[A-Z]$/.test(code)) {
-            window.open(
-              'https://worldwide.espacenet.com/patent/cpc-browser#!/CPC=' + code,
-              '_blank'
-            );
-          }
+      # Ship the real counts to the client for the tooltip + click to read.
+      wc$x$cpcCounts <- as.list(counts_map)
+
+      # Click: wordcloud2 draws into a <canvas>, so we bind the listener
+      # directly on that canvas (bubbling from the canvas to the outer
+      # widget div can be spotty across versions). Uses the last-hovered
+      # word tracked by hover_fn above.
+      htmlwidgets::onRender(wc, "
+        function(el, x) {
+          el.style.cursor = 'pointer';
+          var canvas = el.querySelector('canvas');
+          if (!canvas) return;
+          canvas._cpcCounts = x.cpcCounts || {};
+          canvas.addEventListener('click', function() {
+            var w = canvas._cpcLastWord;
+            if (!w) return;
+            var code = String(w).split(/[\\s\\u2013\\-]+/)[0];
+            if (/^[A-Z]\\d{2}[A-Z]$/.test(code)) {
+              window.open(
+                'https://worldwide.espacenet.com/patent/cpc-browser#!/CPC=' + code,
+                '_blank'
+              );
+            }
+          });
         }
       ")
-      # Cursor hint so users realise the words are clickable.
-      htmlwidgets::onRender(wc,
-        "function(el, x) { el.style.cursor = 'pointer'; }"
-      )
     })
 
     output$cloud_caption <- shiny::renderUI({
