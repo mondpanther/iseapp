@@ -45,7 +45,7 @@ that calls these; Section 4 runs the pipeline for each technology.
 ```{r helpers}
 # ---- DuckDB connection & patent query ----------------------------------------
 
-open_patent_db <- function(parquet_dir = file.path("inst", "extdata")) {
+open_patent_db <- function(parquet_dir = file.path("..", "inst", "extdata")) {
   con <- DBI::dbConnect(duckdb::duckdb())
   DBI::dbExecute(con, glue::glue(
     "CREATE OR REPLACE VIEW full_patent_database AS
@@ -855,7 +855,7 @@ country_group1 <- "LMICs (excl. China)"
 country_group2 <- "High income countries"
 
 # Load country group definitions from the package's sysdata
-load("R/sysdata.rda")
+load(file.path("..", "R", "sysdata.rda"))
 
 # Open shared DuckDB connection
 con <- open_patent_db()
