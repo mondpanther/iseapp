@@ -18,6 +18,7 @@ library(ggplot2)
 library(readr)
 library(tidyr)
 library(scales)
+library(ggrepel)
 ```
 
 ## What this note shows
@@ -253,10 +254,13 @@ mm_df <- to_hic$combined |>
 
 mm_df <- mm_df |>
   dplyr::mutate(
-    w    = innos / sum(innos),
-    xmax = cumsum(w),
-    xmin = xmax - w,
-    xmid = (xmin + xmax) / 2
+    w           = innos / sum(innos),
+    xmax        = cumsum(w),
+    xmin        = xmax - w,
+    xmid        = (xmin + xmax) / 2,
+    total_value = mean * innos,                                   # in $M
+    total_label = sprintf("$%s M",
+                          formatC(round(total_value), format = "d", big.mark = ","))
   )
 
 ggplot(mm_df) +
@@ -268,6 +272,23 @@ ggplot(mm_df) +
   geom_errorbar(
     aes(x = xmid, ymin = pmax(mean - sem, 0), ymax = mean + sem),
     width = 0.005, colour = "grey30", linewidth = 0.4
+  ) +
+  ggrepel::geom_label_repel(
+    aes(x = xmid, y = mean / 2, label = total_label),
+    colour        = "grey20",
+    fill          = "white",
+    label.size    = 0.25,
+    label.padding = grid::unit(0.2, "lines"),
+    label.r       = grid::unit(0.08, "lines"),
+    size          = 3,
+    min.segment.length = 0,
+    segment.colour     = "grey40",
+    segment.size       = 0.3,
+    box.padding        = 0.4,
+    force              = 2,
+    max.overlaps       = Inf,
+    direction          = "both",
+    seed               = 1
   ) +
   scale_x_continuous(
     breaks = mm_df$xmid,
@@ -291,7 +312,7 @@ ggplot(mm_df) +
 ## Reading the charts
 
 - **Figures 1 & 2** — Within each technology group, the **blue** bar is the average destination-bound spillover per HIC-origin innovation; the **orange** bar is the same figure for LMIC-origin innovations (excl. China). The **open circle** is the LMIC share of total innovation in the category (right axis). Error bars are $\pm$ 1 SEM. Technologies are sorted left-to-right by HIC-origin spillover magnitude within each figure.
-- **Figure 3** — Only LMIC-origin bars, spillover *to HICs*. Width proportional to the number of LMIC-origin innovations in the category: this deliberately combines intensity (height) and volume (width), so the total area of each bar is proportional to the **aggregate spillover value flowing to HICs from LMIC innovation in that technology**.
+- **Figure 3** — Only LMIC-origin bars, spillover *to HICs*. Width proportional to the number of LMIC-origin innovations in the category: this deliberately combines intensity (height) and volume (width), so the total area of each bar is proportional to the **aggregate spillover value flowing to HICs from LMIC innovation in that technology**. Each white-boxed label reports that aggregate (per-innovation mean × number of innovations) in millions of USD; labels are offset by `ggrepel` with a leader line pointing to the bar they describe.
 
 ## Summary table
 
