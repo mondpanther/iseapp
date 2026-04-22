@@ -21,17 +21,16 @@ library(scales)
 
 ## What this note shows
 
-How much per-innovation spillover value do different technologies generate **for High-Income Countries (HICs)** — and does this depend on where the innovation was filed and on whether we restrict to *granted* families? The faceted grouped bar chart below compares three populations of innovations, all scored on the *same* destination flow (*Average Spillovers to HICs* = `ev_hic`):
+How much per-innovation spillover value do different technologies generate **for High-Income Countries (HICs)** — and does this depend on where the innovation was filed? The grouped bar chart below compares two populations of innovations, both scored on the *same* destination flow (*Average Spillovers to HICs* = `ev_hic`) and both restricted to **granted** patent families (the app's default):
 
 - **LMIC-origin** innovations, excluding China
-- **China-origin** innovations
 - **HIC-origin** innovations
 
-It shows each origin group twice — once restricted to *granted* patent families (the app's default) and once including *all* families regardless of grant status. Technologies are on the x-axis.
+Technologies are on the x-axis; within each technology the two bars show the average spillover value per innovation that flows to HICs, for the two origin groups.
 
 ## Data source
 
-Six downloads from the public Country Explorer tab of <https://mondpanther-iseapp2.share.connect.posit.cloud/>, with **Value flow = *Average Spillovers to HICs*** in all six cases. Three origins × two grant statuses. Click any "open in app" link below to jump directly to the bookmarked view used for that row:
+Two downloads from the public Country Explorer tab of <https://mondpanther-iseapp2.share.connect.posit.cloud/>, with **Value flow = *Average Spillovers to HICs*** and **Granted families only** in both cases, and only the **Country / Group** filter changing. Click any "open in app" link below to jump directly to the bookmarked view used for that row:
 
 ```{r build-app-urls, include=FALSE}
 build_app_url <- function(country, toflow, granted_only = TRUE,
@@ -68,22 +67,14 @@ build_app_url <- function(country, toflow, granted_only = TRUE,
     "&country-top_n_ids=10"
   )
 }
-url_lmic_g  <- build_app_url("LMICs (excl. China)",   "ev_hic", granted_only = TRUE)
-url_china_g <- build_app_url("CN",                     "ev_hic", granted_only = TRUE)
-url_hic_g   <- build_app_url("High income countries", "ev_hic", granted_only = TRUE)
-url_lmic_a  <- build_app_url("LMICs (excl. China)",   "ev_hic", granted_only = FALSE)
-url_china_a <- build_app_url("CN",                     "ev_hic", granted_only = FALSE)
-url_hic_a   <- build_app_url("High income countries", "ev_hic", granted_only = FALSE)
+url_lmic <- build_app_url("LMICs (excl. China)",   "ev_hic", granted_only = TRUE)
+url_hic  <- build_app_url("High income countries", "ev_hic", granted_only = TRUE)
 ```
 
 | File in `insights/data/` | `country-country` filter | Granted only? | App view |
 |---|---|---|---|
-| `flow_LMIC_to_HIC_granted.csv`  | `LMICs (excl. China)`     | yes | [open in app](`r url_lmic_g`)  |
-| `flow_China_to_HIC_granted.csv` | `CN` (China)              | yes | [open in app](`r url_china_g`) |
-| `flow_HIC_to_HIC_granted.csv`   | `High income countries`   | yes | [open in app](`r url_hic_g`)   |
-| `flow_LMIC_to_HIC_all.csv`      | `LMICs (excl. China)`     | **no** | [open in app](`r url_lmic_a`)  |
-| `flow_China_to_HIC_all.csv`     | `CN` (China)              | **no** | [open in app](`r url_china_a`) |
-| `flow_HIC_to_HIC_all.csv`       | `High income countries`   | **no** | [open in app](`r url_hic_a`)   |
+| `flow_LMIC_to_HIC_granted.csv` | `LMICs (excl. China)`   | yes | [open in app](`r url_lmic`) |
+| `flow_HIC_to_HIC_granted.csv`  | `High income countries` | yes | [open in app](`r url_hic`)  |
 
 If any CSV is missing, the chunk below fetches it via headless Chrome using the [`chromote`](https://rstudio.github.io/chromote/) R package. No access to the underlying patent database is used at any point.
 
@@ -94,21 +85,9 @@ specs <- list(
   list(name = "LMIC_to_HIC_granted",
        country = "LMICs (excl. China)",
        toflow  = "ev_hic", granted_only = TRUE),
-  list(name = "China_to_HIC_granted",
-       country = "CN",
-       toflow  = "ev_hic", granted_only = TRUE),
   list(name = "HIC_to_HIC_granted",
        country = "High income countries",
-       toflow  = "ev_hic", granted_only = TRUE),
-  list(name = "LMIC_to_HIC_all",
-       country = "LMICs (excl. China)",
-       toflow  = "ev_hic", granted_only = FALSE),
-  list(name = "China_to_HIC_all",
-       country = "CN",
-       toflow  = "ev_hic", granted_only = FALSE),
-  list(name = "HIC_to_HIC_all",
-       country = "High income countries",
-       toflow  = "ev_hic", granted_only = FALSE)
+       toflow  = "ev_hic", granted_only = TRUE)
 )
 
 missing <- vapply(specs, function(s)
@@ -121,36 +100,27 @@ if (any(missing)) {
 ```
 
 ```{r load-data}
-read_flow <- function(file, origin_label, grant_label) {
+read_flow <- function(file, origin_label) {
   readr::read_csv(file.path("data", file), show_col_types = FALSE) |>
-    dplyr::mutate(origin = origin_label, grant_status = grant_label)
+    dplyr::mutate(origin = origin_label)
 }
 
 combined <- dplyr::bind_rows(
-  read_flow("flow_LMIC_to_HIC_granted.csv", "LMIC-origin (excl. China)", "Granted families only"),
-  read_flow("flow_China_to_HIC_granted.csv","China-origin",              "Granted families only"),
-  read_flow("flow_HIC_to_HIC_granted.csv",  "HIC-origin",                "Granted families only"),
-  read_flow("flow_LMIC_to_HIC_all.csv",     "LMIC-origin (excl. China)", "All families"),
-  read_flow("flow_China_to_HIC_all.csv",    "China-origin",              "All families"),
-  read_flow("flow_HIC_to_HIC_all.csv",      "HIC-origin",                "All families")
+  read_flow("flow_LMIC_to_HIC_granted.csv", "LMIC-origin (excl. China)"),
+  read_flow("flow_HIC_to_HIC_granted.csv",  "HIC-origin")
 ) |>
   dplyr::filter(technology != "All") |>
   dplyr::mutate(
     origin = factor(origin,
-                    levels = c("LMIC-origin (excl. China)",
-                               "China-origin",
-                               "HIC-origin")),
-    grant_status = factor(grant_status,
-                          levels = c("Granted families only", "All families"))
+                    levels = c("LMIC-origin (excl. China)", "HIC-origin"))
   )
 ```
 
 ## Figure — average spillover value to HICs per innovation, by technology and origin
 
-```{r plot, fig.height=8}
+```{r plot}
 tech_order <- combined |>
-  dplyr::filter(origin == "HIC-origin",
-                grant_status == "Granted families only") |>
+  dplyr::filter(origin == "HIC-origin") |>
   dplyr::arrange(dplyr::desc(mean)) |>
   dplyr::pull(technology)
 
@@ -164,16 +134,14 @@ ggplot(plot_df, aes(x = technology, y = mean, fill = origin)) +
     position = position_dodge(width = 0.8),
     width = 0.2, colour = "grey30", linewidth = 0.3
   ) +
-  facet_wrap(~ grant_status, ncol = 1, scales = "fixed") +
   scale_y_continuous(labels = scales::comma) +
   scale_fill_manual(values = c(
     "LMIC-origin (excl. China)" = "#ff7f0e",
-    "China-origin"              = "#d62728",
     "HIC-origin"                = "#1f77b4"
   )) +
   labs(
-    title    = "Average spillover value to HICs, per innovation",
-    subtitle = "By technology, origin, and grant filter — same destination flow (ev_hic) throughout",
+    title    = "Average spillover value to HICs, per innovation (granted families only)",
+    subtitle = "By technology and origin — same destination flow (ev_hic) in both bars",
     x = NULL, y = "Spillover to HICs per innovation (\u00b1 1 SEM)",
     fill = NULL,
     caption = "Source: Innovation Strategy Explorer, Country Explorer CSV downloads"
@@ -182,46 +150,49 @@ ggplot(plot_df, aes(x = technology, y = mean, fill = origin)) +
   theme(
     axis.text.x        = element_text(angle = 35, hjust = 1),
     legend.position    = "top",
-    strip.text         = element_text(face = "bold"),
     panel.grid.major.x = element_blank()
   )
 ```
 
 ## Reading the chart
 
-- Within each technology group: **orange** = LMIC-origin (excl. China), **red** = China-origin, **blue** = HIC-origin — all measuring the average downstream spillover value per innovation that accrues to HICs.
+- Within each technology group, the **blue** bar is the average HIC-bound spillover per HIC-origin innovation; the **orange** bar is the same figure for LMIC-origin innovations (excl. China).
 - Error bars are $\pm$ one standard error of the mean.
-- Technologies are sorted (consistently across both facets) by HIC-origin magnitude in the *Granted families only* panel.
-- The top facet keeps only **granted** families (the app's default). The bottom facet uses **all** families regardless of grant status — so it includes pending or abandoned applications. Differences between the facets show how much of the gap between origins is driven by grant selectivity versus by innovation quality itself.
+- Technologies are sorted left-to-right by HIC-origin magnitude.
 
-China sits between the two comparison groups analytically: it's the world's largest patent-filer and accounts for the bulk of LMIC innovation volume, but its patents typically face weaker examiner citation links into HIC markets than HIC-origin patents do. Seeing where the red bar tracks orange (weak HIC absorption, like the broader LMIC pool) versus where it tracks or exceeds blue (HIC-comparable absorption) helps identify technology fields where Chinese innovation has already crossed into the HIC citation mainstream. Moving from the *Granted* facet to the *All families* facet typically shrinks HIC-origin and LMIC-origin averages unevenly — a useful test for how sensitive the ordering is to grant selection.
+If orange sits *above* blue for a technology, LMIC-filed innovations in that field — once they happen — punch above their weight in how much downstream value they inject into HIC markets, relative to HIC-filed innovations in the same field. Persistent blue-above-orange gaps, by contrast, suggest HIC-origin innovations enjoy stronger HIC-side absorption (possibly reflecting the local citation bias of HIC patent examiners and HIC-dense citation networks).
 
 ## Summary table
 
 ```{r table}
 summary_tbl <- combined |>
-  dplyr::select(technology, origin, grant_status, mean, innos) |>
+  dplyr::select(technology, origin, mean, sem, innos) |>
   tidyr::pivot_wider(
-    id_cols     = c(technology, grant_status),
+    id_cols     = technology,
     names_from  = origin,
-    values_from = c(mean, innos)
+    values_from = c(mean, sem, innos)
   ) |>
-  dplyr::arrange(grant_status, dplyr::desc(`mean_HIC-origin`))
+  dplyr::mutate(
+    ratio_LMIC_over_HIC = `mean_LMIC-origin (excl. China)` / `mean_HIC-origin`
+  ) |>
+  dplyr::arrange(dplyr::desc(`mean_HIC-origin`))
 
 knitr::kable(
   summary_tbl,
   digits = 2,
-  col.names = c("Technology", "Grant filter",
-                "Mean LMIC\u2192HIC", "Mean China\u2192HIC", "Mean HIC\u2192HIC",
-                "N LMIC-origin",      "N China-origin",       "N HIC-origin"),
-  caption = "Per-innovation HIC-spillover means by technology, origin, and grant filter."
+  col.names = c("Technology",
+                "Mean LMIC\u2192HIC", "Mean HIC\u2192HIC",
+                "SEM LMIC\u2192HIC",  "SEM HIC\u2192HIC",
+                "N LMIC-origin",      "N HIC-origin",
+                "Ratio LMIC / HIC"),
+  caption = "Per-innovation HIC-spillover means by technology and origin (granted families only)."
 )
 ```
 
 ## Notes & caveats
 
-- All six bars use the same destination flow `ev_hic` — *Average Spillovers to HICs* — so the levels are directly comparable within a technology facet.
+- Both bars use the same destination flow `ev_hic` — *Average Spillovers to HICs* — so the levels are directly comparable within a technology.
 - The sample size column `innos` is **not** the same across origins: LMIC innovator pools are smaller, so their SEMs are typically larger. Treat any orange/blue gap inside a large SEM with caution.
-- Grant rates differ by origin (HIC applicants are granted at higher rates than LMIC applicants on average). Mean changes between the *Granted only* and *All families* facets therefore mix two effects — average innovation quality in the population and the selectivity of the grant filter. Use the two panels together, not in isolation.
+- Only **granted** patent families are included (the app's default). An earlier version of this note also showed an "all families" comparison; it has been removed for clarity.
 - The origin-country filter selects patents filed from the relevant country group; downstream-citing patents can come from anywhere in the world, but only HIC-located citations count toward `ev_hic`.
 - Data acquisition uses only the app's public CSV-download endpoint (via `chromote`) — the patent database is never accessed directly.
