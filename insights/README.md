@@ -4,7 +4,8 @@ Self-contained analytical notes built **only** from CSV files that any public us
 
 ## Current notes
 
-- [`flowstoHICs.Rmd`](flowstoHICs.Rmd) — HIC-bound spillover per innovation, compared across LMIC-origin (excl. China), China-origin, and HIC-origin filings, by technology.
+- [`flowstoHICs.Rmd`](flowstoHICs.Rmd) — HIC-bound spillover per innovation, LMIC-origin (excl. China) vs HIC-origin, by technology.
+- [`flowstoLMICs.Rmd`](flowstoLMICs.Rmd) — LMIC (excl. China) bound spillover per innovation, LMIC-origin vs HIC-origin, by technology.
 
 ## One-time setup
 
