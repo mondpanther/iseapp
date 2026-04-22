@@ -388,42 +388,76 @@ cat("  Saved to", techmap_cache, "\n\n")
 # ============================================================================
 # STEP 9: Load countrymap + nationalkey from Watson 2025
 # ============================================================================
-# The 2025 Watson bundle provides pv/ev/cost/alpha/istrax at the (family,
-# ctry_code) level in a single parquet, so we skip the old build_nationalkey.R
-# pipeline. countrymap is just the DISTINCT (family, ctry_code) pairs from
-# that file.
+# Watson's two nationalkey-relevant files have different universes:
+#   innos_ev_nationalkey_2013_2022.parquet           (~27.2M fams)
+#     — (docdb_family_id, ctry_code, pv, ev, v): the broad per-country
+#        expected-value surface.
+#   innos_istraxfield_nationalkey_2013_2022.parquet  (~5.8M fams)
+#     — same columns plus pre-computed cost / alpha / istrax, but a
+#        restricted subset of families.
+# Using only the istrax file caps the app's universe at ~6M, which is why
+# we'd otherwise drop ~21M nationalkey docdbs. Since cost and alpha are
+# family-level parameters (verified: zero within-family variance across
+# ctry_code rows), we recover the full 27M universe by:
+#   1. Taking per-country (pv, ev) from innos_ev_nationalkey.
+#   2. Joining cost/alpha from innos_istraxfield_global (family-level).
+#   3. Computing istrax/avstrax with the standard formulas.
 
-watson_national_path <- file.path(
-  fromWATSON, "innos_istraxfield_nationalkey_2013_2022.parquet"
+watson_ev_national_path <- file.path(
+  fromWATSON, "innos_ev_nationalkey_2013_2022.parquet"
 )
-if (!file.exists(watson_national_path))
-  stop("Missing ", watson_national_path,
-       "\nExpected in patbis2025/data/fromWATSON.")
+watson_global_path <- file.path(
+  fromWATSON, "innos_istraxfield_global_2013_2022.parquet"
+)
+for (p in c(watson_ev_national_path, watson_global_path)) {
+  if (!file.exists(p))
+    stop("Missing ", p, "\nExpected in patbis2025/data/fromWATSON.")
+}
 
-cat("Loading Watson 2025 nationalkey (family x ctry pv/ev/cost/alpha/istrax)...\n")
+cat("Loading Watson 2025 nationalkey (ev + joined global cost/alpha)...\n")
 tic("nationalkey")
-ev_natl <- as.data.table(arrow::read_parquet(watson_national_path))
-# Rename year-suffixed cost/alpha to the generic names used downstream.
-data.table::setnames(ev_natl,
+
+# (1) family x ctry ev surface
+ev_natl <- as.data.table(arrow::read_parquet(
+  watson_ev_national_path,
+  col_select = c("docdb_family_id", "ctry_code", "pv", "ev")
+))
+
+# (2) family-level cost / alpha from the global istrax file
+fam_params <- as.data.table(arrow::read_parquet(
+  watson_global_path,
+  col_select = c("docdb_family_id",
+                 "costpvyear_2013_2022", "alphapvyear_2013_2022")
+))
+data.table::setnames(fam_params,
                      c("costpvyear_2013_2022", "alphapvyear_2013_2022"),
-                     c("cost",                 "alpha"),
-                     skip_absent = TRUE)
-# istrax/avstrax per family x country for the nationalkey window.
+                     c("cost",                 "alpha"))
+
+# (3) join and compute istrax/avstrax per (family, ctry_code)
+ev_natl <- fam_params[ev_natl, on = "docdb_family_id"]
+rm(fam_params); gc()
+
 ev_natl[, `:=`(
-  istrax_nationalkey_2013_2022  = ((alpha + 1) / cost) * ev * as.integer(pv <= 2 * cost),
+  istrax_nationalkey_2013_2022  = ((alpha + 1) / cost) * ev *
+                                   as.integer(pv <= 2 * cost),
   avstrax_nationalkey_2013_2022 = (pv + ev) / cost,
   ev_nationalkey_2013_2022      = ev
 )]
 
-cat("  nationalkey rows:", nrow(ev_natl), ", distinct families:",
-    uniqueN(ev_natl$docdb_family_id),
+# Rows where cost/alpha were missing (family absent from global istrax) will
+# have NA istrax/avstrax; keep the ev column regardless.
+cat("  nationalkey rows:", format(nrow(ev_natl), big.mark = ","),
+    ", distinct families:",
+    format(uniqueN(ev_natl$docdb_family_id), big.mark = ","),
     ", distinct ctries:", uniqueN(ev_natl$ctry_code), "\n")
+cat("  families with cost/alpha available for istrax:",
+    format(uniqueN(ev_natl[!is.na(cost)]$docdb_family_id), big.mark = ","), "\n")
 toc()
 
 countrymap <- unique(ev_natl[, .(docdb_family_id, ctry_code)])
 cat("  countrymap (distinct family x ctry from nationalkey):",
-    nrow(countrymap), "rows,",
-    uniqueN(countrymap$docdb_family_id), "innovations,",
+    format(nrow(countrymap), big.mark = ","), "rows,",
+    format(uniqueN(countrymap$docdb_family_id), big.mark = ","), "innovations,",
     uniqueN(countrymap$ctry_code), "countries\n")
 
 # ---- Optional: filter to docdb_family_size >= FAMILY_SIZE_MIN --------------
