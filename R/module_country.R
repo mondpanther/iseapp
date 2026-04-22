@@ -303,6 +303,11 @@ country_module_server <- function(id, parent_session, con) {
 
       # Expand "All categories" into all individual broad techs in the selectizeInput
       shiny::observeEvent(input$tech_categories_plot1, {
+        if ("__CLEAR_TECHS__" %in% input$tech_categories_plot1) {
+          shiny::updateSelectizeInput(session, "tech_categories_plot1",
+                                      selected = character(0))
+          return()
+        }
         if ("All categories" %in% input$tech_categories_plot1) {
           new_sel <- unique(c(setdiff(input$tech_categories_plot1, "All categories"),
                               all_broad_techs))
@@ -312,6 +317,13 @@ country_module_server <- function(id, parent_session, con) {
       })
 
       shiny::observeEvent(input$techs, {
+        # "Clear all categories" (value "__CLEAR_TECHS__"): wipe the field.
+        if ("__CLEAR_TECHS__" %in% input$techs) {
+          shiny::updateSelectizeInput(session, "techs",
+                                      selected = character(0))
+          return()
+        }
+        # "Include all categories" (value "All categories"): expand.
         if ("All categories" %in% input$techs) {
           new_sel <- unique(c(setdiff(input$techs, "All categories"),
                               all_broad_techs))

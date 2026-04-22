@@ -169,9 +169,13 @@ broad_techs <- unique(c(
 # "All categories" expands to every selectable broad tech (minus "All categories" itself)
 all_broad_techs <- setdiff(broad_techs, "All categories")
 
+# Remove "All categories" from the main Broad group — it's re-added as a
+# relabelled "Include all categories" entry in the Actions group at the end.
+broad_techs_display <- setdiff(broad_techs, "All categories")
+
 grouped_techs <- list(
   "Broad Technology Categories" =
-    as.list(setNames(broad_techs, broad_techs)),
+    as.list(setNames(broad_techs_display, broad_techs_display)),
   "Detailed Green technologies" =
     as.list(setNames(green_classes_d, green_classes_d)),
   "AI subcategories" =
@@ -183,7 +187,16 @@ grouped_techs <- list(
   "Agriculture & Food technology" =
     as.list(setNames(agrifood_classes_d, agrifood_classes_d)),
   "CPC Sections & Other Categories" =
-    as.list(setNames(cpc_sections, cpc_sections))
+    as.list(setNames(cpc_sections, cpc_sections)),
+  # Bulk-action pseudo-group at the very end. selectize renders the group
+  # name as a bold header, which visually separates it from the categories.
+  "\u2500\u2500\u2500 Actions" = list(
+    # Label shown in dropdown -> internal value used by the server.
+    # Keeping the internal value "All categories" preserves the existing
+    # expansion logic in build_tech_filter_v2 / build_tech_bool_v2.
+    "Include all categories" = "All categories",
+    "Clear all categories"   = "__CLEAR_TECHS__"
+  )
 )
 
 colorings <- list(
