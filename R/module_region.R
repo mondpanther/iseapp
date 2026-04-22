@@ -302,8 +302,14 @@ region_module_server <- function(id, parent_session, con) {
       # Reactive store for ggplot objects and data (for download handlers)
       plot_store <- shiny::reactiveValues()
 
-      # Expand "All categories" into all individual broad techs in the selectizeInput
+      # Expand "All categories" / handle "Clear all categories" in both
+      # tech inputs.
       shiny::observeEvent(input$tech_categories_plot1_region, {
+        if ("__CLEAR_TECHS__" %in% input$tech_categories_plot1_region) {
+          shiny::updateSelectizeInput(session, "tech_categories_plot1_region",
+                                      selected = character(0))
+          return()
+        }
         if ("All categories" %in% input$tech_categories_plot1_region) {
           new_sel <- unique(c(setdiff(input$tech_categories_plot1_region, "All categories"),
                               all_broad_techs))
@@ -313,6 +319,11 @@ region_module_server <- function(id, parent_session, con) {
       })
 
       shiny::observeEvent(input$techs_region, {
+        if ("__CLEAR_TECHS__" %in% input$techs_region) {
+          shiny::updateSelectizeInput(session, "techs_region",
+                                      selected = character(0))
+          return()
+        }
         if ("All categories" %in% input$techs_region) {
           new_sel <- unique(c(setdiff(input$techs_region, "All categories"),
                               all_broad_techs))
