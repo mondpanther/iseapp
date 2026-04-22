@@ -53,6 +53,7 @@ render_insights <- function(
   invisible(written)
 }
 
-if (sys.nframe() == 0L) {
-  render_insights()
-}
+# Run the renderer whenever this file is sourced or executed. If you want
+# to pass custom arguments, call render_insights(...) explicitly after
+# sourcing — the auto-call below is just the no-args default.
+render_insights()
