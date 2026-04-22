@@ -553,25 +553,42 @@ rm(ev_natl); gc()
 cat("    patchar_countrymap:", nrow(pcm), "rows,",
     uniqueN(pcm$ctry_code), "countries\n")
 
-# 10c: Add supranational EV columns from innos_ev_supranational_2013_2022
-# (docdb_family_id x ctry_group). Pivot ctry_group values into wide columns
-# named ev_<GROUP>. Compute istrax/avstrax later.
-cat("  10c: Reading supranational ev data...\n")
-ev_supra_path <- file.path(fromWATSON, "innos_ev_supranational_2013_2022.parquet")
-if (file.exists(ev_supra_path)) {
-  ev_supra <- as.data.table(arrow::read_parquet(
-    ev_supra_path, col_select = c("docdb_family_id", "ctry_group", "ev")
-  ))
-  # Standardise group codes — uppercase, strip spaces
-  ev_supra[, ctry_group := toupper(gsub("\\s+", "", ctry_group))]
-  # Pivot wide
-  ev_supra_wide <- dcast(ev_supra, docdb_family_id ~ ctry_group,
-                         value.var = "ev", fill = NA_real_)
-  grp_cols <- setdiff(names(ev_supra_wide), "docdb_family_id")
-  setnames(ev_supra_wide, grp_cols, paste0("ev_", grp_cols))
-  cat("    ev_supra groups:", paste(grp_cols, collapse = ", "), "\n")
-  patchar <- ev_supra_wide[patchar, on = "docdb_family_id"]
-  rm(ev_supra, ev_supra_wide)
+# 10c: Add per-target EV columns from Watson's innos_ev_to_<target>_2013_2022
+# parquets. `<target>` is either a 2-letter ISO country code (US, CN, GB, ...)
+# or a group code (emde, hic, eu, g7, euplusuk, oecd, ...). One file per
+# target, each (docdb_family_id, ev_to_<target>). We explicitly do NOT
+# pivot from innos_ev_supranational — individual files are the authoritative
+# source.
+ev_targets <- c(
+  # Supranational / group cuts
+  "emde", "emdenocn", "hic", "eu", "euplusuk", "g7", "oecd",
+  "cenasia", "ceneur", "easteur", "eca", "southcau", "wesbal",
+  # Individual countries (upper-case to match toflow_choices keys)
+  "US", "CN", "GB", "DE", "FR", "AT", "IN"
+)
+cat("  10c: Reading per-target ev files (",
+    length(ev_targets), " targets)...\n", sep = "")
+for (tgt in ev_targets) {
+  f <- file.path(fromWATSON,
+                 sprintf("innos_ev_to_%s_2013_2022.parquet", tgt))
+  if (!file.exists(f)) {
+    cat("    SKIP missing: ", basename(f), "\n", sep = "")
+    next
+  }
+  ev_tgt  <- as.data.table(arrow::read_parquet(f))
+  src_col <- grep("^ev", names(ev_tgt), value = TRUE)[1]
+  if (is.na(src_col)) {
+    cat("    SKIP (no ev column): ", basename(f), "\n", sep = "")
+    next
+  }
+  new_col <- paste0("ev_", tgt)
+  ev_tgt <- ev_tgt[, .(docdb_family_id, val = get(src_col))]
+  setnames(ev_tgt, "val", new_col)
+  patchar <- ev_tgt[patchar, on = "docdb_family_id"]
+  cat("    +", new_col, "(",
+      format(sum(!is.na(patchar[[new_col]])), big.mark = ","),
+      "non-null)\n")
+  rm(ev_tgt)
 }
 
 # 10d: Compute istrax/avstrax for each supranational ev_<GROUP>
