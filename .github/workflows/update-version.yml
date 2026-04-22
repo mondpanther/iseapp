@@ -1,0 +1,56 @@
+name: Update inst/VERSION
+
+# Regenerate inst/VERSION on every push so the deployed Shiny app on Posit
+# Connect Cloud (which reads inst/VERSION via app_version()) always reflects
+# the git branch + commit that triggered the deploy, not the
+# DESCRIPTION's 0.0.0.9000 fallback.
+#
+# Uses the built-in GITHUB_TOKEN which deliberately does NOT re-trigger
+# workflows, so there's no risk of a push-loop.
+
+on:
+  push:
+    branches:
+      - main
+      - production
+
+permissions:
+  contents: write
+
+jobs:
+  update-version:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the triggering branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          # Need enough history for git rev-parse --short to emit the
+          # canonical 7-char form.
+          fetch-depth: 0
+          # Use the default token; its pushes won't re-trigger workflows.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Write inst/VERSION
+        id: write
+        run: |
+          mkdir -p inst
+          BRANCH="${GITHUB_REF_NAME}"
+          SHA=$(git rev-parse --short HEAD)
+          DATE=$(date -u +"%Y-%m-%d %H:%M UTC")
+          echo "${BRANCH}@${SHA} · built ${DATE}" > inst/VERSION
+          echo "Content:"
+          cat inst/VERSION
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet inst/VERSION 2>/dev/null; then
+            echo "inst/VERSION already up to date — no commit."
+            exit 0
+          fi
+          git add inst/VERSION
+          git commit -m "Auto-update inst/VERSION [skip ci]"
+          git push origin HEAD:${GITHUB_REF_NAME}
