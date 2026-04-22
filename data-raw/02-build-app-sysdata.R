@@ -404,6 +404,17 @@ tech_group_definitions <- list(
   "Non-Green" = sort(unique(metadata$sce_tech_display[metadata$tech_group == "Non-Green"]))
 )
 
+# Precompute distinct docdb count — used in the welcome-page ticker.
+cat("Counting distinct docdbs in patent_database...\n")
+n_docdbs_total <- as.numeric(
+  arrow::open_dataset("inst/extdata/patent_database.parquet") |>
+    dplyr::summarise(n = dplyr::n_distinct(docdb_family_id)) |>
+    dplyr::collect() |>
+    dplyr::pull(n)
+)
+cat(sprintf("  ✓ n_docdbs_total = %s\n",
+            format(n_docdbs_total, big.mark = ",")))
+
 # ============================================================
 # 12. PRE-COMPUTED TECH x CPC-SUBCLASS COUNTS (About page wordclouds)
 # ============================================================
@@ -556,6 +567,8 @@ usethis::use_data(
   sum_allinnos_region_firm_baseline,
   # About-page tech definitions
   tech_subclass_counts,
+  # Welcome-page ticker stats
+  n_docdbs_total,
   # InGlobe
   metadata,
   wave_range,

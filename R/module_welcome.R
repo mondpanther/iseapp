@@ -91,7 +91,7 @@ welcome_module_ui <- function(id) {
       class = "ise-ticker",
       shiny::div(
         class = "ise-ticker-track",
-        lapply(welcome_ticker_messages, function(msg) {
+        lapply(welcome_ticker_messages(), function(msg) {
           shiny::span(class = "ise-ticker-msg", msg)
         })
       )
@@ -101,9 +101,21 @@ welcome_module_ui <- function(id) {
 
 # Messages shown in the welcome-page ticker. Prepend newer entries so they
 # appear first in the scroll. Keep entries short (~1 line).
-welcome_ticker_messages <- c(
-  "Now based on innovation data from 2013 to 2022"
-)
+# Uses `n_docdbs_total` precomputed in data-raw/02-build-app-sysdata.R —
+# falls back to a silent drop if sysdata hasn't been rebuilt yet.
+welcome_ticker_messages <- function() {
+  msgs <- "Now based on innovation data from 2013 to 2022"
+  if (exists("n_docdbs_total") && is.finite(n_docdbs_total) &&
+      n_docdbs_total > 0) {
+    n_m <- n_docdbs_total / 1e6
+    fmt <- if (n_m >= 10) sprintf("%.0f", n_m) else sprintf("%.1f", n_m)
+    msgs <- c(
+      sprintf("Drawing on data from %s million innovations", fmt),
+      msgs
+    )
+  }
+  msgs
+}
 
 #' Preset query strings for the welcome-page metric buttons.
 #'

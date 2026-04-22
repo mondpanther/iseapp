@@ -204,27 +204,29 @@ about_module_server <- function(id) {
       shiny::req(!is.null(rows), nrow(rows) > 0)
 
       # Sort by count descending so biggest subclasses appear first.
-      ord <- order(-rows$n_docdb)
+      ord  <- order(-rows$n_docdb)
       rows <- rows[ord, , drop = FALSE]
 
-      # Size scale: map sqrt(n_docdb) linearly to a font-size range that
+      counts <- as.numeric(rows$n_docdb)
+
+      # Size scale: sqrt(count) mapped linearly to a font-size range that
       # keeps both ends readable. Compressed enough that a 100x count
       # difference becomes ~3x font-size.
-      counts <- as.numeric(rows$n_docdb)
-      s <- sqrt(counts)
+      s  <- sqrt(counts)
       lo <- min(s); hi <- max(s)
-      # Guard against single-row (hi == lo)
-      scaled <- if (hi == lo) rep(1, length(s)) else (s - lo) / (hi - lo)
+      scaled <- if (hi == lo) rep(0.5, length(s)) else (s - lo) / (hi - lo)
       MIN_PT <- 11
       MAX_PT <- 32
       px <- round(MIN_PT + scaled * (MAX_PT - MIN_PT))
 
-      # Colour ramp: low counts in mid-blue-grey, high counts in deeper blue.
-      col_lo <- grDevices::col2rgb("#7fa0c0")
-      col_hi <- grDevices::col2rgb("#143d6b")
-      rgb_mix <- col_lo + scaled * (col_hi - col_lo)
-      cols <- grDevices::rgb(rgb_mix[1, ], rgb_mix[2, ], rgb_mix[3, ],
-                             maxColorValue = 255)
+      # Colour ramp: low counts in mid-blue-grey, high counts in deep blue.
+      # Channel-wise interpolation (vectorised, no matrix shape surprises).
+      lo_rgb <- as.integer(grDevices::col2rgb("#7fa0c0"))
+      hi_rgb <- as.integer(grDevices::col2rgb("#143d6b"))
+      r <- round(lo_rgb[1] + scaled * (hi_rgb[1] - lo_rgb[1]))
+      g <- round(lo_rgb[2] + scaled * (hi_rgb[2] - lo_rgb[2]))
+      b <- round(lo_rgb[3] + scaled * (hi_rgb[3] - lo_rgb[3]))
+      cols <- grDevices::rgb(r, g, b, maxColorValue = 255)
 
       anchors <- lapply(seq_along(counts), function(i) {
         code  <- rows$subclass[i]
