@@ -60,10 +60,34 @@ about_module_ui <- function(id) {
         options  = list(`live-search` = TRUE, size = 15),
         width    = "100%"
       ),
-      shiny::div(
-        style = "min-height: 420px; border: 1px solid #eee; padding: 12px; border-radius: 6px;",
-        wordcloud2::wordcloud2Output(ns("cloud"), height = "400px")
-      ),
+      shiny::tags$style(shiny::HTML("
+        .cpc-cloud {
+          border: 1px solid #eee;
+          border-radius: 6px;
+          padding: 18px;
+          min-height: 380px;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px 14px;
+          align-content: flex-start;
+          justify-content: center;
+          line-height: 1.1;
+          background: #fafafa;
+        }
+        .cpc-cloud a {
+          color: #2b5a8c;
+          text-decoration: none;
+          padding: 2px 4px;
+          border-radius: 3px;
+          white-space: nowrap;
+          transition: background 0.1s;
+        }
+        .cpc-cloud a:hover {
+          background: #eef3f9;
+          text-decoration: underline;
+        }
+      ")),
+      shiny::uiOutput(ns("cloud")),
       shiny::uiOutput(ns("cloud_caption"))
     )
   }
@@ -175,80 +199,52 @@ about_module_server <- function(id) {
       rows
     })
 
-    output$cloud <- wordcloud2::renderWordcloud2({
+    output$cloud <- shiny::renderUI({
       rows <- selected_rows()
       shiny::req(!is.null(rows), nrow(rows) > 0)
 
-      # Flatten the size scale: wordcloud2 already applies sqrt internally,
-      # so a further sqrt on freq gives overall x^0.25 scaling — small
-      # subclasses stay readable while the largest don't dominate.
-      # `minSize` clamps the absolute floor.
-      labels <- sprintf("%s \u2013 %s", rows$subclass, rows$title_short)
-      df <- data.frame(
-        word = labels,
-        freq = sqrt(as.numeric(rows$n_docdb)),
-        stringsAsFactors = FALSE
-      )
-      counts_map <- setNames(as.numeric(rows$n_docdb), labels)
+      # Sort by count descending so biggest subclasses appear first.
+      ord <- order(-rows$n_docdb)
+      rows <- rows[ord, , drop = FALSE]
 
-      # hoverFunction: set tooltip to the *actual* n_docdb (not the sqrt we
-      # passed as weight) and stash the currently hovered word on the canvas
-      # so the click handler below can find it.
-      hover_fn <- htmlwidgets::JS("
-        function(item, dimension, event) {
-          if (!event || !event.target) return;
-          var canvas = event.target;
-          if (!item) {
-            canvas.title = '';
-            canvas._cpcLastWord = null;
-            return;
-          }
-          var word = item[0];
-          var n = (canvas._cpcCounts || {})[word];
-          canvas.title = (n !== undefined)
-            ? word + ' \u2014 ' + Number(n).toLocaleString() + ' families'
-            : word;
-          canvas._cpcLastWord = word;
-        }
-      ")
+      # Size scale: map sqrt(n_docdb) linearly to a font-size range that
+      # keeps both ends readable. Compressed enough that a 100x count
+      # difference becomes ~3x font-size.
+      counts <- as.numeric(rows$n_docdb)
+      s <- sqrt(counts)
+      lo <- min(s); hi <- max(s)
+      # Guard against single-row (hi == lo)
+      scaled <- if (hi == lo) rep(1, length(s)) else (s - lo) / (hi - lo)
+      MIN_PT <- 11
+      MAX_PT <- 32
+      px <- round(MIN_PT + scaled * (MAX_PT - MIN_PT))
 
-      wc <- wordcloud2::wordcloud2(
-        df,
-        size          = 0.55,
-        minSize       = 12,
-        shape         = "circle",
-        gridSize      = 6,
-        rotateRatio   = 0,
-        minRotation   = 0,
-        maxRotation   = 0,
-        hoverFunction = hover_fn
-      )
-      # Ship the real counts to the client for the tooltip + click to read.
-      wc$x$cpcCounts <- as.list(counts_map)
+      # Colour ramp: low counts in mid-blue-grey, high counts in deeper blue.
+      col_lo <- grDevices::col2rgb("#7fa0c0")
+      col_hi <- grDevices::col2rgb("#143d6b")
+      rgb_mix <- col_lo + scaled * (col_hi - col_lo)
+      cols <- grDevices::rgb(rgb_mix[1, ], rgb_mix[2, ], rgb_mix[3, ],
+                             maxColorValue = 255)
 
-      # Click: wordcloud2 draws into a <canvas>, so we bind the listener
-      # directly on that canvas (bubbling from the canvas to the outer
-      # widget div can be spotty across versions). Uses the last-hovered
-      # word tracked by hover_fn above.
-      htmlwidgets::onRender(wc, "
-        function(el, x) {
-          el.style.cursor = 'pointer';
-          var canvas = el.querySelector('canvas');
-          if (!canvas) return;
-          canvas._cpcCounts = x.cpcCounts || {};
-          canvas.addEventListener('click', function() {
-            var w = canvas._cpcLastWord;
-            if (!w) return;
-            var code = String(w).split(/[\\s\\u2013\\-]+/)[0];
-            if (/^[A-Z]\\d{2}[A-Z]$/.test(code)) {
-              window.open(
-                'https://worldwide.espacenet.com/patent/cpc-browser#!/CPC=' + code,
-                '_blank'
-              );
-            }
-          });
-        }
-      ")
+      anchors <- lapply(seq_along(counts), function(i) {
+        code  <- rows$subclass[i]
+        label <- sprintf("%s \u2013 %s", code, rows$title_short[i])
+        tip   <- sprintf("%s \u2014 %s families",
+                         label, format(counts[i], big.mark = ","))
+        url   <- sprintf(
+          "https://worldwide.espacenet.com/patent/cpc-browser#!/CPC=%s", code
+        )
+        shiny::tags$a(
+          label,
+          href   = url,
+          target = "_blank",
+          rel    = "noopener noreferrer",
+          title  = tip,
+          style  = sprintf("font-size: %dpx; color: %s;", px[i], cols[i])
+        )
+      })
+
+      shiny::div(class = "cpc-cloud", anchors)
     })
 
     output$cloud_caption <- shiny::renderUI({
