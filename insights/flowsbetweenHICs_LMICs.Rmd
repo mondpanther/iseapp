@@ -1,0 +1,372 @@
+---
+title: "Spillover flows between HICs and LMICs (excl. China)"
+author: "Innovation Strategy Explorer — insights"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    self_contained: true
+    toc: true
+    toc_depth: 2
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      fig.width = 11, fig.height = 6.5, dpi = 150)
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(tidyr)
+library(scales)
+library(ggrepel)
+```
+
+## What this note shows
+
+How much per-innovation spillover value flows between High-Income Countries (HICs) and LMICs (excl. China) — and how it varies by technology and by where the innovation was filed. All figures use **granted** patent families only.
+
+Three views:
+
+1. **Spillovers to HICs** — LMIC-origin vs HIC-origin innovations.
+2. **Spillovers to LMICs (excl. China)** — LMIC-origin vs HIC-origin innovations.
+3. **Spillovers to HICs, LMIC-origin only, Marimekko-style** — bar *width* encodes how many innovations LMICs contribute in each technology (so wide bars are categories where LMIC innovation volume is substantial, narrow ones where it is thin), bar *height* is the per-innovation spillover to HICs.
+
+In figures 1 and 2, an overlaid **circle marker** reports the **LMIC share of total innovation in each category** (LMIC-origin family count ÷ all-origin family count) on a secondary axis.
+
+## Data source
+
+Six CSVs from the public Country Explorer tab of <https://mondpanther-iseapp2.share.connect.posit.cloud/>, all with **Granted families only**. Two destination flows × three country filters. Click any "open in app" link to jump to the bookmarked view.
+
+```{r build-app-urls, include=FALSE}
+build_app_url <- function(country, toflow, granted_only = TRUE,
+                          base = "https://mondpanther-iseapp2.share.connect.posit.cloud/",
+                          tech_categories = c(
+                            "Green Technology", "AI", "Green Transport",
+                            "Green Manufacturing", "GHG Capture",
+                            "Green Energy", "Adaptation", "Green Housing",
+                            "Circular Economy", "Green ICT",
+                            "Green Agriculture",
+                            "Any Agriculture & Food technology"
+                          )) {
+  q <- function(x) utils::URLencode(paste0('"', x, '"'), reserved = TRUE)
+  tech_arr <- paste0(
+    "%5B",
+    paste0(vapply(tech_categories,
+                  function(t) paste0("%22", utils::URLencode(t, reserved = TRUE), "%22"),
+                  character(1)),
+           collapse = "%2C"),
+    "%5D"
+  )
+  paste0(
+    base,
+    "?_inputs_",
+    "&navbar_page=", q("Country Explorer"),
+    "&country-inner_tabs=", q("Value flows by Technology"),
+    "&country-country=", q(country),
+    "&country-firm=", q("No firm filter"),
+    "&country-toflow=", q(toflow),
+    "&country-tech_categories_plot1=", tech_arr,
+    "&country-granted_only=", tolower(as.character(granted_only)),
+    "&country-widthscale=", q("log"),
+    "&country-display_mode=", q("confidence"),
+    "&country-top_n_ids=10"
+  )
+}
+url_L_H <- build_app_url("LMICs (excl. China)",   "ev_hic",      granted_only = TRUE)
+url_H_H <- build_app_url("High income countries", "ev_hic",      granted_only = TRUE)
+url_A_H <- build_app_url("All countries",         "ev_hic",      granted_only = TRUE)
+url_L_L <- build_app_url("LMICs (excl. China)",   "ev_emdenocn", granted_only = TRUE)
+url_H_L <- build_app_url("High income countries", "ev_emdenocn", granted_only = TRUE)
+url_A_L <- build_app_url("All countries",         "ev_emdenocn", granted_only = TRUE)
+```
+
+| CSV in `insights/data/` | Origin filter | Destination flow | App view |
+|---|---|---|---|
+| `flow_LMIC_to_HIC_granted.csv`  | `LMICs (excl. China)`   | to HICs (`ev_hic`)         | [open in app](`r url_L_H`) |
+| `flow_HIC_to_HIC_granted.csv`   | `High income countries` | to HICs (`ev_hic`)         | [open in app](`r url_H_H`) |
+| `flow_All_to_HIC_granted.csv`   | `All countries`         | to HICs (`ev_hic`)         | [open in app](`r url_A_H`) |
+| `flow_LMIC_to_LMIC_granted.csv` | `LMICs (excl. China)`   | to LMICs (`ev_emdenocn`)   | [open in app](`r url_L_L`) |
+| `flow_HIC_to_LMIC_granted.csv`  | `High income countries` | to LMICs (`ev_emdenocn`)   | [open in app](`r url_H_L`) |
+| `flow_All_to_LMIC_granted.csv`  | `All countries`         | to LMICs (`ev_emdenocn`)   | [open in app](`r url_A_L`) |
+
+Missing CSVs are fetched automatically via headless Chrome (`chromote`). No direct database access is used.
+
+```{r fetch-csvs, include=FALSE}
+source("R/fetch_flow_csv.R")
+
+specs <- list(
+  list(name = "LMIC_to_HIC_granted",
+       country = "LMICs (excl. China)",
+       toflow  = "ev_hic", granted_only = TRUE),
+  list(name = "HIC_to_HIC_granted",
+       country = "High income countries",
+       toflow  = "ev_hic", granted_only = TRUE),
+  list(name = "All_to_HIC_granted",
+       country = "All countries",
+       toflow  = "ev_hic", granted_only = TRUE),
+  list(name = "LMIC_to_LMIC_granted",
+       country = "LMICs (excl. China)",
+       toflow  = "ev_emdenocn", granted_only = TRUE),
+  list(name = "HIC_to_LMIC_granted",
+       country = "High income countries",
+       toflow  = "ev_emdenocn", granted_only = TRUE),
+  list(name = "All_to_LMIC_granted",
+       country = "All countries",
+       toflow  = "ev_emdenocn", granted_only = TRUE)
+)
+
+missing <- vapply(specs, function(s)
+  !file.exists(file.path("data", paste0("flow_", s$name, ".csv"))),
+  logical(1))
+
+if (any(missing)) {
+  fetch_flow_csvs(specs[missing], out_dir = "data")
+}
+```
+
+```{r load-data}
+read_flow <- function(file, origin_label) {
+  readr::read_csv(file.path("data", file), show_col_types = FALSE) |>
+    dplyr::mutate(origin = origin_label)
+}
+
+# Helper: assemble dataset for one destination (HIC or LMIC)
+build_combined <- function(lmic_csv, hic_csv, all_csv) {
+  combined <- dplyr::bind_rows(
+    read_flow(lmic_csv, "LMIC-origin (excl. China)"),
+    read_flow(hic_csv,  "HIC-origin")
+  ) |>
+    dplyr::filter(technology != "All") |>
+    dplyr::mutate(
+      origin = factor(origin,
+                      levels = c("LMIC-origin (excl. China)", "HIC-origin"))
+    )
+
+  all_countries <- read_flow(all_csv, "All countries") |>
+    dplyr::filter(technology != "All") |>
+    dplyr::select(technology, innos_all = innos)
+
+  lmic_share <- combined |>
+    dplyr::filter(origin == "LMIC-origin (excl. China)") |>
+    dplyr::select(technology, innos_lmic = innos) |>
+    dplyr::left_join(all_countries, by = "technology") |>
+    dplyr::mutate(share = innos_lmic / innos_all)
+
+  list(combined = combined, lmic_share = lmic_share)
+}
+
+to_hic  <- build_combined("flow_LMIC_to_HIC_granted.csv",
+                          "flow_HIC_to_HIC_granted.csv",
+                          "flow_All_to_HIC_granted.csv")
+to_lmic <- build_combined("flow_LMIC_to_LMIC_granted.csv",
+                          "flow_HIC_to_LMIC_granted.csv",
+                          "flow_All_to_LMIC_granted.csv")
+```
+
+```{r plot-helper}
+# Shared grouped-bar + share-circle renderer
+plot_flows <- function(combined, lmic_share, destination_label,
+                       flow_code,
+                       origin_colors = c(
+                         "LMIC-origin (excl. China)" = "#ff7f0e",
+                         "HIC-origin"                = "#1f77b4"
+                       )) {
+  tech_order <- combined |>
+    dplyr::filter(origin == "HIC-origin") |>
+    dplyr::arrange(dplyr::desc(mean)) |>
+    dplyr::pull(technology)
+
+  plot_df  <- combined   |> dplyr::mutate(technology = factor(technology, levels = tech_order))
+  share_df <- lmic_share |> dplyr::mutate(technology = factor(technology, levels = tech_order))
+
+  bar_ymax  <- max(plot_df$mean + plot_df$sem, na.rm = TRUE)
+  share_max <- max(share_df$share, na.rm = TRUE)
+  axis_cap  <- ceiling(share_max * 20) / 20
+  scale_k   <- bar_ymax / axis_cap
+
+  ggplot(plot_df, aes(x = technology, y = mean, fill = origin)) +
+    geom_col(position = position_dodge(width = 0.8), width = 0.75) +
+    geom_errorbar(
+      aes(ymin = pmax(mean - sem, 0), ymax = mean + sem),
+      position = position_dodge(width = 0.8),
+      width = 0.2, colour = "grey30", linewidth = 0.3
+    ) +
+    geom_point(
+      data = share_df,
+      aes(x = technology, y = share * scale_k, shape = "LMIC share of innovation"),
+      inherit.aes = FALSE,
+      colour = "grey15", fill = "white", size = 4, stroke = 1.2
+    ) +
+    scale_shape_manual(name = NULL, values = c("LMIC share of innovation" = 21)) +
+    scale_y_continuous(
+      labels   = scales::comma,
+      sec.axis = sec_axis(
+        transform = ~ . / scale_k,
+        name      = paste0("LMIC share of total innovation in category (axis capped at ",
+                           scales::percent(axis_cap, accuracy = 0.1), ")"),
+        labels    = scales::percent_format(accuracy = 0.1),
+        breaks    = scales::pretty_breaks(n = 5)
+      )
+    ) +
+    scale_fill_manual(values = origin_colors) +
+    labs(
+      title    = sprintf("Average spillover value to %s, per innovation (granted families only)",
+                         destination_label),
+      subtitle = sprintf("By technology and origin — destination flow: %s · bars: spillover \u00b1 SEM · circles: LMIC share of total innovation",
+                         flow_code),
+      x = NULL, y = sprintf("Spillover to %s per innovation (\u00b1 1 SEM)", destination_label),
+      fill = NULL,
+      caption = "Source: Innovation Strategy Explorer, Country Explorer CSV downloads"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      axis.text.x        = element_text(angle = 35, hjust = 1),
+      legend.position    = "top",
+      panel.grid.major.x = element_blank()
+    )
+}
+```
+
+## Figure 1 — Spillovers to HICs
+
+```{r fig-hic}
+plot_flows(to_hic$combined, to_hic$lmic_share,
+           destination_label = "HICs",
+           flow_code         = "ev_hic")
+```
+
+## Figure 2 — Spillovers to LMICs (excl. China)
+
+```{r fig-lmic}
+plot_flows(to_lmic$combined, to_lmic$lmic_share,
+           destination_label = "LMICs (excl. China)",
+           flow_code         = "ev_emdenocn")
+```
+
+## Figure 3 — LMIC-origin only, bar width ∝ number of innovations
+
+Same LMIC-origin bars as in Figure 1 (spillovers to HICs) but rendered **Marimekko-style**: bar *width* is proportional to the count of LMIC-origin innovations in that technology category (so you immediately see which technologies contribute meaningful volume, not just meaningful per-innovation value). Bar *height* is the average spillover to HICs per innovation.
+
+```{r fig-hic-lmiconly-marimekko, fig.height=6}
+mm_df <- to_hic$combined |>
+  dplyr::filter(origin == "LMIC-origin (excl. China)") |>
+  dplyr::arrange(dplyr::desc(mean))
+
+mm_df <- mm_df |>
+  dplyr::mutate(
+    w           = innos / sum(innos),
+    xmax        = cumsum(w),
+    xmin        = xmax - w,
+    xmid        = (xmin + xmax) / 2,
+    total_value = mean * innos,                                   # in $M
+    total_label = sprintf("$%s M",
+                          formatC(round(total_value), format = "d", big.mark = ","))
+  )
+
+ggplot(mm_df) +
+  geom_rect(
+    aes(xmin = xmin, xmax = xmax,
+        ymin = 0,    ymax = mean),
+    fill = "#ff7f0e", colour = "white", linewidth = 0.3
+  ) +
+  geom_errorbar(
+    aes(x = xmid, ymin = pmax(mean - sem, 0), ymax = mean + sem),
+    width = 0.005, colour = "grey30", linewidth = 0.4
+  ) +
+  ggrepel::geom_label_repel(
+    aes(x = xmid, y = mean / 2, label = total_label),
+    colour        = "grey20",
+    fill          = "white",
+    label.size    = 0.25,
+    label.padding = grid::unit(0.2, "lines"),
+    label.r       = grid::unit(0.08, "lines"),
+    size          = 3,
+    min.segment.length = 0,
+    segment.colour     = "grey40",
+    segment.size       = 0.3,
+    box.padding        = 0.4,
+    force              = 2,
+    max.overlaps       = Inf,
+    direction          = "both",
+    seed               = 1
+  ) +
+  scale_x_continuous(
+    breaks = mm_df$xmid,
+    labels = mm_df$technology,
+    expand = expansion(mult = c(0.01, 0.01))
+  ) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title    = "Spillovers to HICs per LMIC-origin innovation — bar width \u221d N innovations",
+    subtitle = "Wider bars = more LMIC-origin innovations in that category · height = mean spillover",
+    x = NULL, y = "Spillover to HICs per innovation (\u00b1 1 SEM)",
+    caption = "Source: Innovation Strategy Explorer, Country Explorer CSV downloads"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x        = element_text(angle = 35, hjust = 1),
+    panel.grid.major.x = element_blank()
+  )
+```
+
+## Reading the charts
+
+- **Figures 1 & 2** — Within each technology group, the **blue** bar is the average destination-bound spillover per HIC-origin innovation; the **orange** bar is the same figure for LMIC-origin innovations (excl. China). The **open circle** is the LMIC share of total innovation in the category (right axis). Error bars are $\pm$ 1 SEM. Technologies are sorted left-to-right by HIC-origin spillover magnitude within each figure.
+- **Figure 3** — Only LMIC-origin bars, spillover *to HICs*. Width proportional to the number of LMIC-origin innovations in the category: this deliberately combines intensity (height) and volume (width), so the total area of each bar is proportional to the **aggregate spillover value flowing to HICs from LMIC innovation in that technology**. Each white-boxed label reports that aggregate (per-innovation mean × number of innovations) in millions of USD; labels are offset by `ggrepel` with a leader line pointing to the bar they describe.
+
+## Summary table
+
+```{r table}
+bind_tbl <- function(x, destination_label) {
+  x$combined |>
+    dplyr::select(technology, origin, mean, sem, innos) |>
+    tidyr::pivot_wider(
+      id_cols     = technology,
+      names_from  = origin,
+      values_from = c(mean, sem, innos)
+    ) |>
+    dplyr::mutate(destination = destination_label, .before = 1)
+}
+
+summary_tbl <- dplyr::bind_rows(
+  bind_tbl(to_hic,  "HICs"),
+  bind_tbl(to_lmic, "LMICs (excl. China)")
+) |>
+  dplyr::mutate(
+    ratio_LMIC_over_HIC = `mean_LMIC-origin (excl. China)` / `mean_HIC-origin`
+  ) |>
+  dplyr::arrange(destination, dplyr::desc(`mean_HIC-origin`))
+
+knitr::kable(
+  summary_tbl,
+  digits = 2,
+  col.names = c("Destination", "Technology",
+                "Mean LMIC\u2192dest", "Mean HIC\u2192dest",
+                "SEM LMIC\u2192dest",  "SEM HIC\u2192dest",
+                "N LMIC-origin",        "N HIC-origin",
+                "Ratio LMIC / HIC"),
+  caption = "Per-innovation spillover means by destination, technology, and origin (granted families only)."
+)
+```
+
+## Notes & caveats
+
+- Bars in Figures 1 and 2 use the same destination flow within each figure, so the levels are directly comparable within a technology.
+- The sample size column `innos` is **not** the same across origins: LMIC innovator pools are smaller, so their SEMs are typically larger. Treat any orange/blue gap inside a large SEM with caution.
+- Only **granted** patent families are included (the app's default).
+- The origin-country filter selects patents filed from the relevant country group; downstream-citing patents can come from anywhere in the world, but only destination-country citations count toward the `ev_*` flow.
+- Data acquisition uses only the app's public CSV-download endpoint (via `chromote`) — the patent database is never accessed directly.
+
+---
+
+```{r version-stamp, results='asis'}
+local({
+  util <- "../R/utils_version.R"
+  if (file.exists(util)) source(util, local = TRUE)
+})
+v <- tryCatch(app_version(), error = function(e) "unknown")
+cat(sprintf(
+  "<p style='font-size:0.85em; color:#666;'>Rendered %s &middot; app version <code>%s</code></p>",
+  format(Sys.time(), "%Y-%m-%d %H:%M %Z"), v
+))
+```
