@@ -8,9 +8,11 @@
 #' Fetch one or more Value-flows-by-Technology CSVs
 #'
 #' @param specs A list of named lists. Each element must contain:
-#'   * `name`     — file tag; output will be `flow_<name>.csv`
-#'   * `country`  — value for the `country-country` selectize input
-#'   * `toflow`   — value for the `country-toflow` select input
+#'   * `name`         — file tag; output will be `flow_<name>.csv`
+#'   * `country`      — value for the `country-country` selectize input
+#'   * `toflow`       — value for the `country-toflow` select input
+#'   * `granted_only` — optional logical (default `TRUE`) for the
+#'                       "Granted families only" checkbox
 #' @param out_dir Directory where CSVs will be written
 #' @param app_url Base URL of the deployed app
 #' @param tech_categories Character vector for `country-tech_categories_plot1`
@@ -55,6 +57,9 @@ fetch_flow_csvs <- function(specs,
     "%5D"
   )
 
+  spec_granted <- function(s) isTRUE(s$granted_only %||% TRUE)
+  `%||%` <- function(a, b) if (is.null(a)) b else a
+
   initial_url <- paste0(
     app_url,
     "?_inputs_",
@@ -64,6 +69,7 @@ fetch_flow_csvs <- function(specs,
     "&country-firm=", q("No firm filter"),
     "&country-toflow=", q(needed[[1]]$toflow),
     "&country-tech_categories_plot1=", tech_arr,
+    "&country-granted_only=", tolower(as.character(spec_granted(needed[[1]]))),
     "&country-widthscale=", q("log"),
     "&country-display_mode=", q("confidence"),
     "&country-top_n_ids=10"
@@ -116,12 +122,15 @@ fetch_flow_csvs <- function(specs,
     out_path <- file.path(out_dir, paste0("flow_", spec$name, ".csv"))
 
     if (i > 1) {
-      message("Setting country='", spec$country, "', toflow='", spec$toflow, "' ...")
+      message("Setting country='", spec$country, "', toflow='", spec$toflow,
+              "', granted_only=", spec_granted(spec), " ...")
       # country-country is a multi-select (selectizeInput multiple=TRUE) — pass an array
       set_input("country-country",
                 jsonlite::toJSON(spec$country, auto_unbox = FALSE))
       set_input("country-toflow",
                 jsonlite::toJSON(spec$toflow, auto_unbox = TRUE))
+      set_input("country-granted_only",
+                if (spec_granted(spec)) "true" else "false")
       Sys.sleep(reflow_wait)
     }
     wait_for_download_href()
