@@ -3,7 +3,25 @@ title: "Patent Cluster Comparison — LMICs vs HICs"
 output:
   html_document:
     df_print: paged
+    code_folding: hide
+    toc: true
+    toc_float: true
 ---
+
+```{r knitr-defaults, include=FALSE}
+# Keep code in the output but collapsed behind a "Show code" toggle (via
+# `code_folding: hide` in the YAML header). Suppress messages, warnings,
+# and text output by default so the rendered HTML shows only figures and
+# tables. Chunks that intentionally print a table or progress text
+# override locally with `results='asis'` / `results='markup'` (see the
+# per-technology display chunk).
+knitr::opts_chunk$set(
+  message   = FALSE,
+  warning   = FALSE,
+  results   = "hide",
+  fig.align = "center"
+)
+```
 
 This notebook compares two sets of patents (LMICs vs HICs) for each technology
 in a configurable list, by embedding their titles and abstracts, clustering
@@ -752,18 +770,23 @@ make_wordcloud_plot <- function(embed_data, tech_name, max_per_source = 60) {
 
   ggplot(counts, aes(label = simple_title, size = n, colour = source)) +
     geom_text_wordcloud_area(rm_outside = TRUE, shape = "square",
-                             eccentricity = 1) +
-    scale_size_area(max_size = 28) +
+                             eccentricity = 1.4) +
+    scale_size_area(max_size = 44) +
     scale_colour_manual(values = c("LMIC" = "#e41a1c", "HIC" = "#377eb8")) +
     facet_wrap(~source, ncol = 2) +
-    theme_minimal() +
+    theme_void() +
     labs(
       title = paste0("Patent Innovation Themes — ", tech_name),
       subtitle = "Top canonical themes by source"
     ) +
-    theme(strip.text = element_text(size = 14, face = "bold"),
-          plot.margin = margin(5, 5, 5, 5),
-          panel.spacing = unit(0.5, "lines"))
+    theme(strip.text        = element_text(size = 14, face = "bold"),
+          plot.title        = element_text(size = 16, face = "bold",
+                                            margin = margin(0, 0, 2, 0)),
+          plot.subtitle     = element_text(size = 11,
+                                            margin = margin(0, 0, 4, 0)),
+          plot.margin       = margin(2, 2, 2, 2),
+          panel.spacing     = unit(0.15, "lines"),
+          legend.position   = "none")
 }
 
 make_top_titles_bar <- function(title_counts, tech_name) {
@@ -807,18 +830,22 @@ make_assignee_wordcloud <- function(assignees_df, tech_name, max_per_source = 60
 
   ggplot(counts, aes(label = canonical, size = n, colour = entity_type)) +
     geom_text_wordcloud_area(rm_outside = TRUE, shape = "square",
-                             eccentricity = 1) +
-    scale_size_area(max_size = 24) +
+                             eccentricity = 1.4) +
+    scale_size_area(max_size = 38) +
     scale_colour_manual(values = entity_type_colors, name = "Entity type") +
     facet_wrap(~source, ncol = 2) +
-    theme_minimal() +
+    theme_void() +
     labs(
       title = paste0("Harmonized Assignees — ", tech_name),
       subtitle = "Firms and institutions only (persons filtered out); colored by entity type"
     ) +
     theme(strip.text = element_text(size = 14, face = "bold"),
+          plot.title        = element_text(size = 16, face = "bold",
+                                            margin = margin(0, 0, 2, 0)),
+          plot.subtitle     = element_text(size = 11,
+                                            margin = margin(0, 0, 4, 0)),
           legend.position = "bottom",
-          plot.margin = margin(5, 5, 5, 5),
+          plot.margin = margin(2, 2, 2, 2),
           panel.spacing = unit(0.5, "lines"))
 }
 
@@ -855,7 +882,7 @@ produces its own full set of plots in Section 5.
 tech_selections <- c("Any Agriculture & Food technology" )#, "Green Technology")
 
 toflow         <- "av_global"
-top_n_ids      <- 150
+top_n_ids      <- 250
 country_group1 <- "LMICs (excl. China)"
 country_group2 <- "High income countries"
 
@@ -1051,7 +1078,7 @@ results_by_tech <- results_by_tech[!sapply(results_by_tech, is.null)]
 
 ## 5 — Results per technology
 
-```{r results_display, results='asis', fig.width=12, fig.height=10, dpi=150}
+```{r results_display, results='asis', fig.width=14, fig.height=11, dpi=150, out.width='100%'}
 for (tech in names(results_by_tech)) {
   res <- results_by_tech[[tech]]
 
