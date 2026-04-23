@@ -11,8 +11,8 @@ id = '019cdc4e-02b5-144d-71fe-74477e6abf2a'
 dashboard_url = 'https://connect.posit.cloud/mondpanther/content/019cdc4e-02b5-144d-71fe-74477e6abf2a'
 direct_url = 'https://019cdc4e-02b5-144d-71fe-74477e6abf2a.share.connect.posit.cloud'
 logs_url = 'https://connect.posit.cloud/mondpanther/content/019cdc4e-02b5-144d-71fe-74477e6abf2a/history'
-deployed_at = '2026-04-23T09:12:48+01:00'
-bundle_id = '019db962-d788-6366-a2dc-88b8b7554274'
+deployed_at = '2026-04-23T14:12:31+01:00'
+bundle_id = '019dba75-9067-ab53-34a8-5047088de566'
 files = [
   '.posit/publish/deployments/deployment-CPP4.toml',
   '.posit/publish/iseapp2-9GQ2.toml',
@@ -56,6 +56,7 @@ files = [
   'inst/extdata/tech_lookup.parquet',
   'inst/insights_html/.gitkeep',
   'inst/insights_html/flowsbetweenHICs_LMICs.html',
+  'inst/insights_html/patent_cluster_compare.html',
   'inst/www/css/custom-styles.min.css',
   'inst/www/img/favicon.svg',
   'inst/www/img/ifc_logo.svg',
