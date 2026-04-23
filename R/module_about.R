@@ -44,13 +44,22 @@ about_module_ui <- function(id) {
       shiny::h2("Technology Definitions"),
       shiny::p(
         "Each technology label in the ISE Explorer maps to one or more CPC ",
-        "subclasses. The word cloud below shows, for the selected technology, ",
-        "the subclasses assigned to it \u2014 sized by the number of patent ",
-        "families (docdbs) in the app's universe that carry at least one CPC ",
-        "code in that subclass. Hover any word to see the exact family count; ",
-        shiny::tags$strong("click a word to open its Espacenet CPC entry"),
-        " in a new tab. The selector groups technologies exactly as in the ",
-        "main 'Technologies Included' input."
+        "codes. Two views below:"
+      ),
+      shiny::tags$ul(
+        shiny::tags$li(
+          shiny::tags$strong("Defining CPC codes"),
+          " \u2014 the codes that constitute the category's definition, as ",
+          "configured in the classification source files in ",
+          shiny::tags$code("classifications/"), "."
+        ),
+        shiny::tags$li(
+          shiny::tags$strong("Co-tagged CPC subclasses"),
+          " \u2014 the subclasses that the docdbs belonging to this category ",
+          "happen to share via PATSTAT's CPC tagging, sized by the number of ",
+          "patent families in each. Clicking a word opens Espacenet's CPC ",
+          "browser; hover for the exact family count."
+        )
       ),
       shinyWidgets::pickerInput(
         inputId  = ns("tech_pick"),
@@ -86,7 +95,38 @@ about_module_ui <- function(id) {
           background: #eef3f9;
           text-decoration: underline;
         }
+        .cpc-defining {
+          border: 1px solid #eee;
+          border-radius: 6px;
+          padding: 14px 18px;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px 10px;
+          background: #f3f6fa;
+          margin-bottom: 14px;
+        }
+        .cpc-defining a {
+          color: #2b5a8c;
+          text-decoration: none;
+          background: #ffffff;
+          border: 1px solid #cfd8e3;
+          padding: 2px 8px;
+          border-radius: 10px;
+          font-size: 0.92rem;
+          font-family: monospace;
+        }
+        .cpc-defining a:hover {
+          background: #eef3f9;
+          border-color: #2b5a8c;
+        }
       ")),
+
+      shiny::h4("Defining CPC codes",
+                style = "margin-top: 14px; margin-bottom: 6px;"),
+      shiny::uiOutput(ns("defining")),
+
+      shiny::h4("Co-tagged CPC subclasses",
+                style = "margin-top: 14px; margin-bottom: 6px;"),
       shiny::uiOutput(ns("cloud")),
       shiny::uiOutput(ns("cloud_caption"))
     )
@@ -197,6 +237,40 @@ about_module_server <- function(id) {
       rows <- tsc[tsc$technology == input$tech_pick &
                     !is.na(tsc$n_docdb) & tsc$n_docdb > 0, , drop = FALSE]
       rows
+    })
+
+    defining_rows <- shiny::reactive({
+      shiny::req(input$tech_pick)
+      if (!exists("tech_defining_cpcs")) return(NULL)
+      tdc <- tech_defining_cpcs
+      rows <- tdc[tdc$technology == input$tech_pick, , drop = FALSE]
+      if (nrow(rows) == 0) return(NULL)
+      rows[order(rows$cpc_code), , drop = FALSE]
+    })
+
+    output$defining <- shiny::renderUI({
+      rows <- defining_rows()
+      if (is.null(rows) || nrow(rows) == 0) {
+        return(shiny::p(shiny::em(
+          "No defining CPC codes recorded for this category. ",
+          "(Categories like CPC sections or novel technologies from the ",
+          "database may not have explicit code-list entries.)"
+        ), style = "color: #888;"))
+      }
+      chips <- lapply(seq_len(nrow(rows)), function(i) {
+        code <- rows$cpc_code[i]
+        tip  <- paste0(code, " \u2014 ", rows$title_short[i])
+        url  <- sprintf(
+          "https://worldwide.espacenet.com/patent/cpc-browser#!/CPC=%s", code
+        )
+        shiny::tags$a(code,
+          href   = url,
+          target = "_blank",
+          rel    = "noopener noreferrer",
+          title  = tip
+        )
+      })
+      shiny::div(class = "cpc-defining", chips)
     })
 
     output$cloud <- shiny::renderUI({

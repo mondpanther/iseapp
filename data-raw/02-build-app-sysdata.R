@@ -503,8 +503,47 @@ setkey(cpcs_dt,    docdb_family_id)
 joined <- cpcs_dt[techmap_dt, on = "docdb_family_id", allow.cartesian = TRUE]
 joined <- joined[!is.na(subclass)]
 
+# Per-technology counts (sub-techs and CPC sections as they appear in techmap).
 tech_subclass_counts <- joined[, .(n_docdb = data.table::uniqueN(docdb_family_id)),
                                by = .(technology, subclass)]
+
+# Umbrella-level rollups: techmap only stores sub-technologies (Green Energy,
+# Machine Learning, ...), so labels like "Green Technology", "Battery
+# Technology", "AI" — shown in the UI's Broad group — need synthetic rows.
+# Use tech_umbrella_map (sub_tech -> umbrella) and keep distinct-family
+# counts (docdbs mapped by multiple sub-techs in the same umbrella count
+# once, not sum-of-subs).
+umbrella_pairs <- data.table::data.table(
+  technology = names(tech_umbrella_map),
+  umbrella   = unname(tech_umbrella_map)
+)
+umbrella_pairs <- umbrella_pairs[umbrella != technology]  # skip self-maps
+umbrella_counts <- umbrella_pairs[joined, on = "technology",
+                                   nomatch = 0L, allow.cartesian = TRUE]
+umbrella_counts <- umbrella_counts[
+  !is.na(umbrella),
+  .(n_docdb = data.table::uniqueN(docdb_family_id)),
+  by = .(technology = umbrella, subclass)
+]
+tech_subclass_counts <- rbind(tech_subclass_counts, umbrella_counts)
+# Dedupe: techmap may already carry an umbrella-shaped label (e.g.
+# "Any Agriculture & Food technology") so per-tech + rollup can produce two
+# rows. Both represent the same docdb set; take the max.
+tech_subclass_counts <- tech_subclass_counts[,
+  .(n_docdb = max(n_docdb)), by = .(technology, subclass)]
+
+# Diagnostic: which UI labels from grouped_techs still lack coverage?
+ui_labels <- unique(unlist(lapply(grouped_techs, names), use.names = FALSE))
+ui_labels <- setdiff(ui_labels,
+                     c("All categories", "All innovations",
+                       "Include all categories", "Clear all categories"))
+uncovered <- setdiff(ui_labels, unique(tech_subclass_counts$technology))
+if (length(uncovered))
+  cat("  NOTE: ", length(uncovered),
+      " UI technology labels have no tech_subclass_counts rows:\n    ",
+      paste(uncovered, collapse = ", "), "\n", sep = "")
+
+# Attach titles
 tech_subclass_counts <- subclass_titles[, .(subclass, title_short)][
   tech_subclass_counts, on = "subclass"]
 # Keep at most 50 subclasses per technology (wordcloud readability cap)
@@ -517,7 +556,127 @@ data.table::setcolorder(tech_subclass_counts,
 tech_subclass_counts[is.na(title_short) | title_short == "",
                      title_short := subclass]
 
-rm(techmap_dt, cpcs_dt, joined, final_fams, subclass_titles); gc()
+rm(techmap_dt, cpcs_dt, joined, final_fams,
+   umbrella_pairs, umbrella_counts); gc()
+
+# ----------------------------------------------------------------------------
+# tech_defining_cpcs — the CPC codes / prefixes that DEFINE each technology
+# (read directly from the classification sources in classifications/). This
+# is distinct from tech_subclass_counts: that one says what subclasses the
+# docdbs IN a category happen to be co-tagged with; this says what codes
+# constitute the category's definition.
+# ----------------------------------------------------------------------------
+cat("Building tech_defining_cpcs...\n")
+
+# --- ifcreport: (technology, cpc_prefix) rows. Labels get the same renames
+#     as 01-build-app-parquets.R so UI labels match techmap keys.
+ifc_def <- readxl::read_excel("classifications/ifcreport.xlsx", skip = 1)
+names(ifc_def) <- c("technology", "cpc_code", "source")
+ifc_def <- ifc_def[!is.na(ifc_def$technology) & !is.na(ifc_def$cpc_code), ]
+ifc_def$technology <- trimws(ifc_def$technology)
+ifc_def$technology[ifc_def$technology == "Green Technology"]        <- "Any Green technology"
+ifc_def$technology[ifc_def$technology == "Green Buildings"]         <- "Green Housing"
+ifc_def$technology[ifc_def$technology == "Green Transport"]         <- "Green Transport"
+ifc_def$technology[ifc_def$technology == "Artificial Intelligence"] <- "AI"
+ifc_def$cpc_code <- gsub("YO2", "Y02", ifc_def$cpc_code)
+ifc_def <- ifc_def |>
+  tidyr::separate_rows(cpc_code, sep = "\\|") |>
+  dplyr::mutate(cpc_code = stringi::stri_replace_all_fixed(trimws(cpc_code), " ", "")) |>
+  dplyr::filter(nchar(cpc_code) > 0) |>
+  dplyr::select(technology, cpc_code)
+
+# --- Battery (same logic as 01-build)
+source("R/functions_extrasectorshelper.R")
+bat_def <- battery_df |>
+  tidyr::separate_rows(CPC, sep = ";") |>
+  dplyr::mutate(cpc_code = stringi::stri_replace_all_fixed(trimws(CPC), " ", "")) |>
+  dplyr::filter(nchar(cpc_code) > 0) |>
+  dplyr::select(technology, cpc_code)
+
+# --- Hard-to-Abate
+hta_def <- readxl::read_excel("classifications/New_Sector_Mapping.xlsx",
+                               sheet = "hta_sector") |>
+  dplyr::rename(detail = technology, technology = sector) |>
+  dplyr::mutate(technology = paste0(technology, " Decarbonisation")) |>
+  tidyr::separate_rows(CPC, sep = ";") |>
+  dplyr::mutate(cpc_code = stringi::stri_replace_all_fixed(trimws(CPC), " ", "")) |>
+  dplyr::filter(nchar(cpc_code) > 0) |>
+  dplyr::select(technology, cpc_code)
+
+# --- AI
+ai_def <- readxl::read_excel("classifications/New_Sector_Mapping.xlsx",
+                              sheet = "AI") |>
+  dplyr::rename(CPC = `CPC/IPC Codes`, technology = `Sub-Technology`) |>
+  dplyr::filter(!is.na(technology), !is.na(CPC)) |>
+  tidyr::separate_rows(CPC, sep = ",") |>
+  dplyr::mutate(cpc_code = stringi::stri_replace_all_fixed(trimws(CPC), " ", "")) |>
+  dplyr::filter(nchar(cpc_code) > 0) |>
+  dplyr::select(technology, cpc_code)
+
+# --- Agriculture & Food
+agri_def <- readxl::read_excel(
+    "classifications/Agriculture_Food_CPC_Patents_2026-01-22.xlsx", sheet = 1) |>
+  dplyr::rename(CPC = `CPC Group/Subgroup`, technology = `Value Chain`) |>
+  dplyr::filter(!is.na(technology), !is.na(CPC)) |>
+  tidyr::separate_rows(CPC, sep = ";") |>
+  dplyr::mutate(cpc_code = stringi::stri_replace_all_fixed(trimws(CPC), " ", "")) |>
+  dplyr::filter(nchar(cpc_code) > 0) |>
+  dplyr::select(technology, cpc_code)
+
+# --- CPC section umbrellas map to their single-letter prefix.
+cpc_section_letter <- c(
+  `Human Necessities`                                            = "A",
+  `Performing Operations; Transporting`                          = "B",
+  `Chemistry; Metallurgy`                                        = "C",
+  `Textiles; Paper`                                              = "D",
+  `Fixed Constructions`                                          = "E",
+  `Mechanical Engineering; Lighting; Heating; Weapons; Blasting` = "F",
+  `Physics`                                                      = "G",
+  `Electricity`                                                  = "H",
+  `General tagging of new or cross-sectional technology`         = "Y"
+)
+sec_def <- data.frame(
+  technology = names(cpc_section_letter),
+  cpc_code   = unname(cpc_section_letter),
+  stringsAsFactors = FALSE
+)
+
+tech_defining_cpcs <- data.table::rbindlist(list(
+  ifc_def, bat_def, hta_def, ai_def, agri_def, sec_def
+), use.names = TRUE)
+data.table::setDT(tech_defining_cpcs)
+tech_defining_cpcs <- unique(tech_defining_cpcs[, .(technology, cpc_code)])
+
+# Umbrella rollup: for each sub-tech mapping to an umbrella, add an umbrella
+# row with the sub-tech's cpc_code. Uses tech_umbrella_map.
+umb_map_dt <- data.table::data.table(
+  technology = names(tech_umbrella_map),
+  umbrella   = unname(tech_umbrella_map)
+)[umbrella != technology]
+umb_roll <- umb_map_dt[tech_defining_cpcs, on = "technology",
+                        nomatch = 0L, allow.cartesian = TRUE]
+umb_roll <- umb_roll[, .(technology = umbrella, cpc_code)]
+tech_defining_cpcs <- unique(rbind(tech_defining_cpcs, umb_roll))
+
+# Attach a short title for each code. Two cases:
+#   * 4-char subclass match ("A01B", "Y02E"): use subclass_titles directly.
+#   * Deeper codes ("Y02P10/14"): derive the 4-char parent subclass and reuse
+#     the parent title (the CPC titles dataset only goes to subclass level).
+tech_defining_cpcs[, subclass := substr(cpc_code, 1, 4)]
+tech_defining_cpcs <- subclass_titles[, .(subclass, title_short)][
+  tech_defining_cpcs, on = "subclass"]
+tech_defining_cpcs[is.na(title_short) | title_short == "",
+                   title_short := subclass]
+data.table::setorder(tech_defining_cpcs, technology, cpc_code)
+data.table::setcolorder(tech_defining_cpcs,
+  c("technology", "cpc_code", "title_short", "subclass"))
+
+cat("  ✓", nrow(tech_defining_cpcs),
+    "defining CPC code rows across",
+    data.table::uniqueN(tech_defining_cpcs$technology), "technologies\n")
+
+rm(ifc_def, bat_def, hta_def, ai_def, agri_def, sec_def,
+   umb_map_dt, umb_roll, subclass_titles); gc()
 cat("  ✓", nrow(tech_subclass_counts),
     "tech × subclass rows across",
     data.table::uniqueN(tech_subclass_counts$technology), "technologies\n")
@@ -567,6 +726,7 @@ usethis::use_data(
   sum_allinnos_region_firm_baseline,
   # About-page tech definitions
   tech_subclass_counts,
+  tech_defining_cpcs,
   # Welcome-page ticker stats
   n_docdbs_total,
   # InGlobe

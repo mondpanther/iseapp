@@ -29,16 +29,98 @@ server <- function(input, output, session, con) {
 
   shiny::observe({
     query <- shiny::parseQueryString(session$clientData$url_search)
-    
+
     # Restore main navbar tab
     if (!is.null(query$navbar_page)) {
       tab_name <- gsub('^"|"$', '', query$navbar_page)
       bslib::nav_select(id = "navbar_page", selected = tab_name, session = session)
     }
-    
+
     # Store all params for modules to access
     session$userData$restore_params <- query
   })
+
+  # --------------------------------------------------------------------------
+  # Custom URL-parameter API (orthogonal to Shiny's native URL bookmarking).
+  #
+  # Lets external callers open the app pre-configured with a short, hand-
+  # written query string, e.g.
+  #   https://<app>/?tab=Country+Explorer
+  #                 &ctry=US,CN,DE
+  #                 &tech=Green+Technology
+  #                 &flow=is_global
+  #                 &granted=1
+  #
+  # Recognised params (all optional, all case-sensitive for values):
+  #   tab        Navbar tab: "Country Explorer" | "Region Explorer" |
+  #              "Globe" | "About"
+  #   ctry       Comma-separated country codes or predefined group names
+  #              (uses country-tab input).
+  #   region     Comma-separated UK region names (region-tab input).
+  #   tech       Comma-separated technology labels; applied to BOTH the
+  #              country-tab and region-tab tech inputs.
+  #   firm       Comma-separated firm names or "No firm filter"; applied
+  #              to both country and region firm inputs.
+  #   flow       Flow column name (e.g. "is_global", "ev_emde").
+  #   granted    "1" / "true" / "yes" to tick the "Granted families only"
+  #              checkbox; anything else unticks it.
+  #   top_n_ids  Integer — number of top patents to list.
+  #
+  # Fires once per session. Module inputs updated via the global session
+  # with full namespaced IDs ("country-country", "region-toflow_region",
+  # ...). Shiny queues the updates if the input isn't yet realised, so the
+  # order of arrival (params vs lazy module init) doesn't matter.
+  # --------------------------------------------------------------------------
+  shiny::observeEvent(session$clientData$url_search, once = TRUE,
+                      ignoreNULL = FALSE, {
+    q <- shiny::parseQueryString(session$clientData$url_search %||% "")
+    if (!length(q)) return()
+
+    csv <- function(x) if (is.null(x) || !nzchar(x)) character() else
+                         trimws(strsplit(x, ",", fixed = TRUE)[[1]])
+    as_bool <- function(x) !is.null(x) &&
+                           tolower(x) %in% c("1", "true", "yes", "on")
+
+    # --- Country tab inputs (namespaced as "country-<id>") ------------------
+    if (!is.null(q$ctry))
+      shiny::updateSelectizeInput(session, "country-country",
+                                  selected = csv(q$ctry))
+    if (!is.null(q$tech))
+      shiny::updateSelectizeInput(session, "country-techs",
+                                  selected = csv(q$tech))
+    if (!is.null(q$firm))
+      shiny::updateSelectizeInput(session, "country-firm",
+                                  selected = csv(q$firm))
+    if (!is.null(q$flow))
+      shiny::updateSelectizeInput(session, "country-toflow", selected = q$flow)
+    if (!is.null(q$granted))
+      shiny::updateCheckboxInput(session, "country-granted_only",
+                                 value = as_bool(q$granted))
+    if (!is.null(q$top_n_ids))
+      shiny::updateNumericInput(session, "country-top_n_ids",
+                                value = suppressWarnings(as.integer(q$top_n_ids)))
+
+    # --- Region tab inputs (namespaced as "region-<id>") --------------------
+    if (!is.null(q$region))
+      shiny::updateSelectizeInput(session, "region-region",
+                                  selected = csv(q$region))
+    if (!is.null(q$tech))
+      shiny::updateSelectizeInput(session, "region-techs_region",
+                                  selected = csv(q$tech))
+    if (!is.null(q$firm))
+      shiny::updateSelectizeInput(session, "region-firm",
+                                  selected = csv(q$firm))
+    if (!is.null(q$flow))
+      shiny::updateSelectizeInput(session, "region-toflow_region",
+                                  selected = q$flow)
+    if (!is.null(q$granted))
+      shiny::updateCheckboxInput(session, "region-granted_only",
+                                 value = as_bool(q$granted))
+    if (!is.null(q$top_n_ids))
+      shiny::updateNumericInput(session, "region-top_n_ids_region",
+                                value = suppressWarnings(as.integer(q$top_n_ids)))
+  })
+  `%||%` <- function(a, b) if (is.null(a) || !length(a)) b else a
 
   # Call Modules
   landing_ready <- landing_module_server("landing", waiter = startup_waiter, con = con)
