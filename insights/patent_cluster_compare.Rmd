@@ -247,8 +247,11 @@ fetch_one_patent <- function(raw_id, ops_request) {
   # Use `biblio` as the search constant — lightweight, returns the biblio
   # exchange document which includes title, abstract, and applicants.
   # NOTE: the search endpoint accepts ONE constant only (not comma-separated).
+  # `raw_id` is the publication number (publn_auth || publn_nr, e.g.
+  # "EP1234567"), so we query with pn= (publication number), NOT ap=
+  # (application number — a different PATSTAT identifier entirely).
   search_url <- paste0(
-    "https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=ap%3D",
+    "https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=pn%3D",
     raw_id
   )
   doc <- tryCatch(ops_request(search_url), error = function(e) NULL)

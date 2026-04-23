@@ -18,6 +18,41 @@ server <- function(input, output, session, con) {
   # Show sever message & reload button
   sever::sever()
 
+  # --------------------------------------------------------------------------
+  # Scope bookmarked URLs to the active tab only.
+  #
+  # Without this, Shiny serialises every registered input (country-*,
+  # region-*, globe-*, welcome-*, ...) into the URL. Only the inputs of the
+  # tab the user is looking at matter for the shareable view — the rest is
+  # noise that bloats the URL and may blow past proxy length limits.
+  #
+  # `setBookmarkExclude()` takes a character vector of input IDs to omit.
+  # We recompute it reactively from input$navbar_page, so switching tabs
+  # shrinks the URL to just that tab's inputs.
+  # --------------------------------------------------------------------------
+  shiny::observe({
+    tab         <- input$navbar_page
+    all_inputs  <- names(shiny::reactiveValuesToList(input))
+
+    # Always keep the tab selector itself. Inputs are namespaced by their
+    # module id ("country-...", "region-...", "globe-...").
+    keep_prefixes <- switch(tab %||% "",
+      "Country Explorer" = c("country-"),
+      "Region Explorer"  = c("region-"),
+      "Globe"            = c("globe-"),
+      "About"            = character(),
+      character()        # unknown / fallback — keep only navbar_page
+    )
+
+    keep_flag <- vapply(all_inputs, function(x) {
+      x == "navbar_page" ||
+        (length(keep_prefixes) > 0 &&
+         any(startsWith(x, keep_prefixes)))
+    }, logical(1))
+
+    session$setBookmarkExclude(all_inputs[!keep_flag])
+  })
+
   observe({
     # Trigger this observer every time an input changes
     reactiveValuesToList(input)
@@ -26,6 +61,7 @@ server <- function(input, output, session, con) {
   onBookmarked(function(url) {
     updateQueryString(url)
   })
+  `%||%` <- function(a, b) if (is.null(a) || !length(a)) b else a
 
   shiny::observe({
     query <- shiny::parseQueryString(session$clientData$url_search)
@@ -120,7 +156,6 @@ server <- function(input, output, session, con) {
       shiny::updateNumericInput(session, "region-top_n_ids_region",
                                 value = suppressWarnings(as.integer(q$top_n_ids)))
   })
-  `%||%` <- function(a, b) if (is.null(a) || !length(a)) b else a
 
   # Call Modules
   landing_ready <- landing_module_server("landing", waiter = startup_waiter, con = con)
