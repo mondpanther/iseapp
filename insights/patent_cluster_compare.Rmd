@@ -63,13 +63,14 @@ open_patent_db <- function(parquet_dir = file.path("..", "inst", "extdata")) {
 }
 
 get_top_patent_ids <- function(con, country_group, tech, toflow, top_n,
-                               group_definitions) {
+                               group_definitions, granted_only = TRUE) {
   country_codes <- if (country_group %in% names(group_definitions)) {
     group_definitions[[country_group]]
   } else {
     country_group
   }
   country_sql <- paste0("'", paste(country_codes, collapse = "', '"), "'")
+  granted_clause <- if (isTRUE(granted_only)) "AND p.granted = TRUE" else ""
 
   sql <- glue::glue("
     WITH filtered_tech AS (
@@ -86,6 +87,7 @@ get_top_patent_ids <- function(con, country_group, tech, toflow, top_n,
       INNER JOIN filtered_tech ft ON p.docdb_family_id = ft.docdb_family_id
       WHERE p.ctry_code IN ({country_sql})
         AND p.{toflow} IS NOT NULL
+        {granted_clause}
     ),
 
     ranked AS (
