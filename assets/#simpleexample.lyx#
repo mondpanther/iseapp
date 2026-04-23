@@ -184,5 +184,70 @@ Thus
 
 \end_layout
 
+\begin_layout Standard
+The whole thing converges to
+\end_layout
+
+\begin_layout Standard
+\begin_inset Formula 
+\[
+\left[\sigma+\sigma^{2}+...\right]=S
+\]
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+i.e.
+ geometric series....
+\end_layout
+
+\begin_layout Standard
+recall:
+\begin_inset Formula 
+\[
+S-\sigma S=\sigma-\sigma^{n+1}
+\]
+
+\end_inset
+
+hence:
+\begin_inset Formula 
+\[
+S=\frac{\sigma-\sigma^{n+1}}{1-\sigma}\dashrightarrow\frac{\sigma}{1-\sigma}
+\]
+
+\end_inset
+
+...mh could be larger one I suppose...
+\end_layout
+
+\begin_layout Standard
+Perhaps we want this to be <=0.5
+\end_layout
+
+\begin_layout Standard
+but wait:
+ we have 
+\begin_inset Formula 
+\[
+S\times\left(1-\sigma\right)<1
+\]
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Hence all we need is 
+\begin_inset Formula $\sigma<1$
+\end_inset
+
+
+\end_layout
+
 \end_body
 \end_document
