@@ -726,33 +726,39 @@ cluster_colors <- c(
 )
 
 make_umap_plot <- function(embed_data, k, tech_name) {
-  lmic_data <- embed_data |> filter(source == "LMIC")
-  hic_data  <- embed_data |> filter(source == "HIC")
+  # Two side-by-side panels (LMIC / HIC) sharing the UMAP coordinate system.
+  # Clustering and UMAP positioning were computed on the combined data
+  # upstream, so umap_x / umap_y and cluster_label are already comparable
+  # across the two panels; facet_wrap with fixed (default) scales keeps the
+  # axes aligned. Ensures each patent appears only in its own panel.
+  n_lmic <- sum(embed_data$source == "LMIC")
+  n_hic  <- sum(embed_data$source == "HIC")
 
-  ggplot() +
-    geom_point(data = hic_data,
-               aes(x = umap_x, y = umap_y, colour = cluster_label),
-               size = 4, alpha = 0.35, shape = 16) +
-    geom_text_repel(data = hic_data,
-                    aes(x = umap_x, y = umap_y, label = plot_label, colour = cluster_label),
-                    size = 2.2, fontface = "italic", alpha = 0.6,
-                    max.overlaps = 15, show.legend = FALSE) +
-    geom_point(data = lmic_data,
-               aes(x = umap_x, y = umap_y, colour = cluster_label),
-               size = 4, alpha = 0.9, shape = 16) +
-    geom_text_repel(data = lmic_data,
-                    aes(x = umap_x, y = umap_y, label = plot_label, colour = cluster_label),
-                    size = 2.2, fontface = "plain", alpha = 0.9,
+  # Force panel order: LMIC on the left, HIC on the right
+  embed_data <- embed_data |>
+    mutate(source = factor(source, levels = c("LMIC", "HIC")))
+
+  ggplot(embed_data,
+         aes(x = umap_x, y = umap_y, colour = cluster_label)) +
+    geom_point(size = 3.5, alpha = 0.85, shape = 16) +
+    geom_text_repel(aes(label = plot_label),
+                    size = 2.3, alpha = 0.9,
                     max.overlaps = 15, show.legend = FALSE) +
     scale_colour_manual(values = cluster_colors) +
+    facet_wrap(~source, ncol = 2) +
     theme_minimal() +
     labs(
-      title = paste0("Patent Embedding Clusters — ", tech_name, " (LMICs vs HICs)"),
-      subtitle = paste0(nrow(lmic_data), " LMIC patents (solid) and ",
-                        nrow(hic_data), " HIC patents (faded/italic) in ", k, " clusters"),
+      title    = paste0("Patent Embedding Clusters — ", tech_name),
+      subtitle = paste0(n_lmic, " LMIC patents  |  ", n_hic,
+                        " HIC patents  |  ", k, " shared clusters"),
       x = "UMAP 1", y = "UMAP 2", colour = "Theme"
     ) +
-    theme(legend.position = "right", legend.text = element_text(size = 9))
+    theme(
+      legend.position  = "right",
+      legend.text      = element_text(size = 9),
+      strip.text       = element_text(size = 13, face = "bold"),
+      panel.spacing.x  = unit(1.2, "lines")
+    )
 }
 
 make_wordcloud_plot <- function(embed_data, tech_name, max_per_source = 60) {
