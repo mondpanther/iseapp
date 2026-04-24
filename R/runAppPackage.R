@@ -43,7 +43,17 @@ runAppPackage <- function() {
 
   country_lookup_path <- system.file("extdata", "country_lookup.parquet", package = "innovationStrategyExplorer")
   DBI::dbExecute(con, sprintf("CREATE OR REPLACE TABLE country_lookup AS SELECT * FROM read_parquet('%s')", country_lookup_path))
-  
+
+  citenet_path <- system.file("extdata", "citenet.parquet", package = "innovationStrategyExplorer")
+  if (nzchar(citenet_path)) {
+    DBI::dbExecute(con, sprintf("CREATE OR REPLACE VIEW citenet AS SELECT * FROM read_parquet('%s')", citenet_path))
+  }
+
+  countrymap_path <- system.file("extdata", "countrymap.parquet", package = "innovationStrategyExplorer")
+  if (nzchar(countrymap_path)) {
+    DBI::dbExecute(con, sprintf("CREATE OR REPLACE VIEW countrymap AS SELECT * FROM read_parquet('%s')", countrymap_path))
+  }
+
   shiny::onStop(function() {
     DBI::dbDisconnect(con, shutdown = TRUE)
   })

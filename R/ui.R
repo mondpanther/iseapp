@@ -108,6 +108,10 @@ ui <- function(req) {
       globe_module_ui("globe")
     ),
     shiny::tabPanel(
+      "HGlobe",
+      hglobe_module_ui("hglobe")
+    ),
+    shiny::tabPanel(
       "About",
       about_module_ui("about")
     )

@@ -44,11 +44,25 @@
 #                                     tied). If the intersection is non-empty
 #                                     those are retained; otherwise all tied
 #                                     candidates are kept.
+#   S3b. persons_city_inferred  — per-person city extracted from address
+#                                  via city_gazetteer (cities with population
+#                                  >= MIN_CITY_POP, default 10k). Longest
+#                                  substring match wins; ties broken by
+#                                  population DESC then alphabetical.
 #   S6. inventor_countries_harm, holder_countries_harm — final tables
+#       Schema: (docdb_family_id, person_ctry_code, city, lat, lon,
+#                geocode_missing).
+#         - city, lat, lon = MODE city of the role's persons in that
+#           (family, country) pair, with random-but-deterministic tie-break
+#           (FARM_FINGERPRINT).
+#         - Where no person in that (family, country) has an extractable city,
+#           city is NULL, lat/lon fall back to the country's capital-city
+#           coordinates, and geocode_missing = TRUE.
 #
 # Outputs: downloaded to .bigdata/{inventor,holder}_countries_harm.parquet so
 # the rest of the local pipeline (build_nationalkey.R, 01-build-app-parquets.R)
-# continues to work unchanged.
+# continues to work unchanged — they only read (docdb_family_id,
+# person_ctry_code); the extra columns are additive.
 #
 # One-time seed uploads (idempotent): iso2_codelist and country_name_lookup
 # in patbis.iseapp. Uses countrycode::codelist for canonical names.
@@ -61,6 +75,7 @@ library(bigrquery)
 library(data.table)
 library(arrow)
 library(countrycode)
+library(maps)
 library(tictoc)
 
 project   <- "patbis"
@@ -197,6 +212,79 @@ if (!bq_table_exists(bq_table(project, dataset, "country_name_lookup"))) {
                     bq_field("name",    "STRING"),
                     bq_field("iso2",    "STRING"),
                     bq_field("name_lc", "STRING")))
+}
+
+# Seed 3: city gazetteer for city-extraction + lat/lon lookup.
+#   Source: maps::world.cities (~43k cities with lat/long/pop/capital flag).
+#   Filter to pop >= MIN_CITY_POP so the address x gazetteer join stays
+#   manageable in BigQuery. 10k retains ~18k cities worldwide.
+#
+# Seed 4: country_capitals — one capital per ISO2, used as fallback coordinates
+#   for (docdb_family_id, country) pairs where no city could be extracted from
+#   the address (geocode_missing = TRUE in the final output).
+MIN_CITY_POP <- 10000L
+
+city_gaz_tbl <- fqtn("city_gazetteer")
+capitals_tbl <- fqtn("country_capitals")
+
+seed_city_tables <- function() {
+  cat("  Building city_gazetteer + country_capitals from maps::world.cities ...\n")
+  wc <- as.data.table(maps::world.cities)
+  # maps::world.cities uses English country names; map to ISO2.
+  wc[, iso2 := countrycode::countrycode(country.etc, origin = "country.name",
+                                        destination = "iso2c",
+                                        warn = FALSE)]
+  wc <- wc[!is.na(iso2) & !is.na(name) & !is.na(lat) & !is.na(long)]
+  wc[, city     := as.character(name)]
+  wc[, city_uc  := toupper(city)]
+  wc[, population := as.integer(pop)]
+  wc[, lat := as.numeric(lat)]
+  wc[, lon := as.numeric(long)]
+  wc[, is_capital := as.integer(capital == 1L)]
+
+  # Capitals table: one row per ISO2. If multiple "capital == 1" rows exist
+  # for a country (shouldn't, but be defensive), pick the most populous.
+  caps <- wc[is_capital == 1L][order(iso2, -population)]
+  caps <- caps[!duplicated(iso2), .(iso2, capital = city,
+                                    lat, lon)]
+
+  # Gazetteer: population filter. Keep capitals regardless of population so
+  # small-country capitals (Vaduz, Monaco) survive the filter.
+  gaz <- wc[population >= MIN_CITY_POP | is_capital == 1L,
+            .(iso2, city, city_uc, lat, lon,
+              population = pmax(population, 0L),
+              is_capital)]
+  gaz <- unique(gaz, by = c("iso2", "city_uc"))
+
+  cat(sprintf("    gazetteer: %s cities across %d countries\n",
+              format(nrow(gaz), big.mark = ","), uniqueN(gaz$iso2)))
+  cat(sprintf("    capitals:  %d\n", nrow(caps)))
+
+  bq_table_upload(bq_table(project, dataset, "city_gazetteer"),
+                  values = as.data.frame(gaz),
+                  fields = list(
+                    bq_field("iso2",       "STRING"),
+                    bq_field("city",       "STRING"),
+                    bq_field("city_uc",    "STRING"),
+                    bq_field("lat",        "FLOAT"),
+                    bq_field("lon",        "FLOAT"),
+                    bq_field("population", "INT64"),
+                    bq_field("is_capital", "INT64")))
+
+  bq_table_upload(bq_table(project, dataset, "country_capitals"),
+                  values = as.data.frame(caps),
+                  fields = list(
+                    bq_field("iso2",    "STRING"),
+                    bq_field("capital", "STRING"),
+                    bq_field("lat",     "FLOAT"),
+                    bq_field("lon",     "FLOAT")))
+}
+
+if (!bq_table_exists(bq_table(project, dataset, "city_gazetteer")) ||
+    !bq_table_exists(bq_table(project, dataset, "country_capitals"))) {
+  seed_city_tables()
+} else {
+  cat("  city_gazetteer + country_capitals already present (skipping seed)\n")
 }
 
 # ---- 1. Person universe: linked to an appln with earliest_publn_year >= 1999
@@ -485,6 +573,77 @@ for (i in seq_len(nrow(diag3))) {
 }
 toc()
 
+# ---- 3b. persons_city_inferred: detect a city per person -------------------
+# For every person with a non-empty address AND a resolved country, scan the
+# uppercased address against the city_gazetteer rows for that country and keep
+# the longest city-name match (tie-break by population DESC, then alphabetical).
+#
+# The join is pruned aggressively by iso2 = person_ctry_code, so the cross
+# product is at most n_persons[c] x n_cities[c] per country — typically a few
+# hundred cities per country with MIN_CITY_POP = 10,000.
+#
+# Match uses padded substring STRPOS on an uppercased, punctuation-collapsed
+# copy of the address: CONCAT(' ', UPPER(regex_replace(addr, non-alnum -> ' '))
+# , ' '). This keeps multi-word cities like "NEW YORK" matchable while
+# enforcing word-boundary semantics.
+
+cat("\n=== 3b. persons_city_inferred (city extraction from address) ===\n")
+tic("S3b")
+bq_run(sprintf("
+  CREATE OR REPLACE TABLE `%s` AS
+  WITH persons_with_addr AS (
+    SELECT pai.person_id, pai.person_ctry_code, pc.person_address
+    FROM `%s` pai
+    JOIN `%s` pc USING (person_id)
+    WHERE pc.person_address IS NOT NULL
+      AND LENGTH(TRIM(pc.person_address)) > 0
+  ),
+  padded AS (
+    SELECT
+      person_id,
+      person_ctry_code,
+      CONCAT(' ',
+             TRIM(REGEXP_REPLACE(UPPER(person_address), r'[^A-Z0-9]+', ' ')),
+             ' ') AS addr_u
+    FROM persons_with_addr
+  ),
+  hits AS (
+    SELECT
+      p.person_id,
+      p.person_ctry_code,
+      g.city,
+      g.lat,
+      g.lon,
+      g.population,
+      LENGTH(g.city_uc) AS name_len
+    FROM padded p
+    JOIN `%s` g
+      ON g.iso2 = p.person_ctry_code
+     AND STRPOS(p.addr_u, CONCAT(' ', g.city_uc, ' ')) > 0
+  ),
+  picked AS (
+    SELECT person_id, person_ctry_code, city, lat, lon
+    FROM (
+      SELECT *,
+             ROW_NUMBER() OVER (
+               PARTITION BY person_id
+               ORDER BY name_len DESC, population DESC, city ASC
+             ) AS rnk
+      FROM hits
+    )
+    WHERE rnk = 1
+  )
+  SELECT * FROM picked
+", fqtn("persons_city_inferred"),
+   fqtn("persons_addr_inferred"),
+   fqtn("persons_clean"),
+   city_gaz_tbl))
+
+n_city <- bq_count(fqtn("persons_city_inferred"))
+cat(sprintf("  persons with a city match: %s\n",
+            format(n_city, big.mark = ",")))
+toc()
+
 # ---- 4. work: persons × applns, split by type -----------------------------
 
 cat("\n=== 4. work (persons x applns, inventor/holder split) ===\n")
@@ -495,6 +654,7 @@ bq_run(sprintf("
   CLUSTER BY psn_name
   AS
   SELECT
+    p.person_id,
     p.psn_name,
     a.docdb_family_id,
     p.person_ctry_code,
@@ -634,29 +794,109 @@ toc()
 cat("\n=== 6. Final harmonized outputs ===\n")
 tic("S6")
 
-# Materialize the harmonized row-level table, then the DISTINCT per-type views.
-# (One CREATE per output so each query is simple and BQ can cache.)
+# Each final table now carries:
+#   docdb_family_id, person_ctry_code, city, lat, lon, geocode_missing
+# where city is the MODAL city of the role's persons in that (family, country)
+# pair (random tie-break via FARM_FINGERPRINT), lat/lon are city centroids
+# from the gazetteer, and geocode_missing = TRUE flags rows that fell back to
+# the country's capital-city coordinates because no person in that
+# (family, country) pair had an extractable city.
 for (role in c("inventor", "holder")) {
   out_table <- paste0(role, "_countries_harm")
   bq_run(sprintf("
     CREATE OR REPLACE TABLE `%s` AS
-    SELECT DISTINCT
-      w.docdb_family_id,
-      COALESCE(nu.harm_ctry, tb.harm_ctry, w.person_ctry_code)
-        AS person_ctry_code
-    FROM `%s` w
-    LEFT JOIN `%s` nu
-      ON w.psn_name = nu.psn_name
-    LEFT JOIN `%s` tb
-      ON w.psn_name = tb.psn_name
-     AND w.docdb_family_id = tb.docdb_family_id
-    WHERE w.type = '%s'
+    WITH harm AS (
+      SELECT DISTINCT
+        w.docdb_family_id,
+        w.person_id,
+        COALESCE(nu.harm_ctry, tb.harm_ctry, w.person_ctry_code)
+          AS person_ctry_code
+      FROM `%s` w
+      LEFT JOIN `%s` nu
+        ON w.psn_name = nu.psn_name
+      LEFT JOIN `%s` tb
+        ON w.psn_name = tb.psn_name
+       AND w.docdb_family_id = tb.docdb_family_id
+      WHERE w.type = '%s'
+    ),
+    -- Attach per-person city (city is tied to person's own inferred country;
+    -- only use it when it matches the harmonized country for this family).
+    harm_city AS (
+      SELECT
+        h.docdb_family_id,
+        h.person_ctry_code,
+        pc.city,
+        pc.lat,
+        pc.lon
+      FROM harm h
+      LEFT JOIN `%s` pc
+        ON pc.person_id        = h.person_id
+       AND pc.person_ctry_code = h.person_ctry_code
+    ),
+    -- Count how many persons picked each city per (family, country).
+    city_counts AS (
+      SELECT
+        docdb_family_id, person_ctry_code, city, lat, lon,
+        COUNT(*) AS n
+      FROM harm_city
+      WHERE city IS NOT NULL
+      GROUP BY docdb_family_id, person_ctry_code, city, lat, lon
+    ),
+    -- Modal city per (family, country). Random-but-deterministic tie-break
+    -- via FARM_FINGERPRINT so reruns are reproducible.
+    city_mode AS (
+      SELECT docdb_family_id, person_ctry_code, city, lat, lon
+      FROM (
+        SELECT
+          c.*,
+          ROW_NUMBER() OVER (
+            PARTITION BY docdb_family_id, person_ctry_code
+            ORDER BY n DESC,
+                     FARM_FINGERPRINT(CONCAT(
+                       CAST(docdb_family_id AS STRING), '|',
+                       person_ctry_code, '|', city))
+          ) AS rnk
+        FROM city_counts c
+      )
+      WHERE rnk = 1
+    ),
+    fam_ctry AS (
+      SELECT DISTINCT docdb_family_id, person_ctry_code FROM harm
+    )
+    SELECT
+      fc.docdb_family_id,
+      fc.person_ctry_code,
+      cm.city                              AS city,
+      COALESCE(cm.lat, cap.lat)            AS lat,
+      COALESCE(cm.lon, cap.lon)            AS lon,
+      (cm.city IS NULL)                    AS geocode_missing
+    FROM fam_ctry fc
+    LEFT JOIN city_mode cm USING (docdb_family_id, person_ctry_code)
+    LEFT JOIN `%s` cap
+      ON cap.iso2 = fc.person_ctry_code
   ", fqtn(out_table),
      fqtn("work"),
      fqtn("name_best_unambig"),
      fqtn("tied_best"),
-     role), paste("emit", role))
-  cat("  ", role, ":", format(bq_count(fqtn(out_table)), big.mark=","), "rows\n")
+     role,
+     fqtn("persons_city_inferred"),
+     capitals_tbl), paste("emit", role))
+
+  # Coverage diagnostic
+  diag6 <- bq_table_download(bq_project_query(project, sprintf("
+    SELECT
+      COUNT(*)                                             AS n_rows,
+      COUNTIF(city IS NOT NULL)                            AS n_with_city,
+      COUNTIF(geocode_missing AND lat IS NOT NULL)         AS n_capital_fallback,
+      COUNTIF(lat IS NULL)                                 AS n_no_coords
+    FROM `%s`
+  ", fqtn(out_table))), bigint = "integer64")
+  cat(sprintf("  %s: %s rows  (city: %s, capital-fallback: %s, no-coords: %s)\n",
+              role,
+              format(as.numeric(diag6$n_rows),            big.mark = ","),
+              format(as.numeric(diag6$n_with_city),       big.mark = ","),
+              format(as.numeric(diag6$n_capital_fallback),big.mark = ","),
+              format(as.numeric(diag6$n_no_coords),       big.mark = ",")))
 }
 toc()
 
@@ -712,6 +952,102 @@ cat(sprintf("  mapped families, filing year 2013-2022: %s\n",
             format(as.numeric(stats$n_2013_2022), big.mark = ",")))
 cat(sprintf("  mapped families, all years:             %s\n",
             format(as.numeric(stats$n_total_mapped), big.mark = ",")))
+toc()
+
+# ---- 9. Build union countrymap.parquet in patstat_clean -------------------
+# Combine inventor + holder into a single distinct (docdb_family_id, ctry_code)
+# table. For (family, country) pairs present in BOTH roles, keep the inventor's
+# city/lat/lon/geocode_missing (inventor side preferred whenever available).
+# Output schema:
+#   docdb_family_id  INTEGER
+#   ctry_code        VARCHAR   (renamed from person_ctry_code for compatibility
+#                               with the existing patstat_clean file)
+#   city             VARCHAR
+#   lat              DOUBLE
+#   lon              DOUBLE
+#   geocode_missing  BOOLEAN
+# Written to: <dropbox>/PATSTAT autumn 2025 data/patstat_clean/countrymap.parquet
+#             (override target with env var ISEAPP_COUNTRYMAP_OUT)
+
+cat("\n=== 9. Union countrymap.parquet (patstat_clean) ===\n")
+tic("S9")
+
+`%||%` <- function(a, b) if (is.null(a)) b else a
+find_dropbox_dir_local <- function() {
+  override <- Sys.getenv("ISEAPP_DROPBOX_DIR", unset = NA)
+  if (!is.na(override) && nzchar(override)) return(normalizePath(override, winslash = "/", mustWork = TRUE))
+  info_candidates <- if (.Platform$OS.type == "windows") {
+    c(file.path(Sys.getenv("LOCALAPPDATA"), "Dropbox", "info.json"),
+      file.path(Sys.getenv("APPDATA"),      "Dropbox", "info.json"))
+  } else {
+    c("~/.dropbox/info.json", "~/.config/dropbox/info.json")
+  }
+  info_path <- Filter(file.exists, path.expand(info_candidates))
+  if (!length(info_path))
+    stop("Could not find Dropbox info.json; set ISEAPP_DROPBOX_DIR to override.")
+  info <- jsonlite::fromJSON(info_path[[1]])
+  root <- info$personal$path %||% info$business$path
+  if (is.null(root)) stop("Dropbox info.json has no personal/business path.")
+  normalizePath(root, winslash = "/", mustWork = TRUE)
+}
+
+out_countrymap <- Sys.getenv("ISEAPP_COUNTRYMAP_OUT", unset = NA)
+if (is.na(out_countrymap) || !nzchar(out_countrymap)) {
+  dbx <- find_dropbox_dir_local()
+  out_countrymap <- file.path(dbx, "PATSTAT autumn 2025 data",
+                              "patstat_clean", "countrymap.parquet")
+}
+if (!dir.exists(dirname(out_countrymap)))
+  stop("Target directory does not exist: ", dirname(out_countrymap))
+tmp_countrymap <- paste0(out_countrymap, ".tmp-", Sys.getpid())
+
+con9 <- dbConnect(duckdb::duckdb())
+# Try to bump thread count — non-fatal if the PRAGMA isn't accepted.
+try(dbExecute(con9, sprintf("SET threads TO %d",
+                            max(1L, parallel::detectCores() - 1L))),
+    silent = TRUE)
+
+# FULL OUTER JOIN on (family, country); COALESCE prefers inventor fields.
+dbExecute(con9, sprintf("
+  COPY (
+    SELECT
+      COALESCE(i.docdb_family_id,  h.docdb_family_id)  AS docdb_family_id,
+      COALESCE(i.person_ctry_code, h.person_ctry_code) AS ctry_code,
+      COALESCE(i.city,             h.city)             AS city,
+      COALESCE(i.lat,              h.lat)              AS lat,
+      COALESCE(i.lon,              h.lon)              AS lon,
+      COALESCE(i.geocode_missing,  h.geocode_missing)  AS geocode_missing
+    FROM read_parquet('%s') i
+    FULL OUTER JOIN read_parquet('%s') h
+      ON  i.docdb_family_id  = h.docdb_family_id
+      AND i.person_ctry_code = h.person_ctry_code
+  ) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD)
+", out_inv, out_hold, tmp_countrymap))
+
+if (!file.rename(tmp_countrymap, out_countrymap)) {
+  for (i in 1:5) {
+    Sys.sleep(1); if (file.rename(tmp_countrymap, out_countrymap)) break
+  }
+  if (file.exists(tmp_countrymap))
+    stop("Could not rename ", tmp_countrymap, " to ", out_countrymap)
+}
+
+diag9 <- dbGetQuery(con9, sprintf("
+  SELECT
+    COUNT(*)                          AS n_rows,
+    COUNT(DISTINCT docdb_family_id)   AS n_families,
+    COUNTIF(city IS NOT NULL)         AS n_with_city,
+    COUNTIF(geocode_missing)          AS n_capital_fallback
+  FROM read_parquet('%s')
+", out_countrymap))
+dbDisconnect(con9, shutdown = TRUE)
+cat(sprintf("  wrote %s rows (%s families) -> %s\n",
+            format(diag9$n_rows,     big.mark = ","),
+            format(diag9$n_families, big.mark = ","), out_countrymap))
+cat(sprintf("    with city:          %s\n",
+            format(diag9$n_with_city, big.mark = ",")))
+cat(sprintf("    capital fallback:   %s\n",
+            format(diag9$n_capital_fallback, big.mark = ",")))
 toc()
 
 cat("\n=== Done. BQ outputs in patbis.iseapp.* and local .bigdata/ ===\n")

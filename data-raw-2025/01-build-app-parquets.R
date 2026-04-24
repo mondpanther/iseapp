@@ -977,6 +977,37 @@ cat("  Written inglobe_processed.parquet:", nrow(df_processed), "rows\n")
 rm(df_processed); gc()
 
 # ============================================================================
+# STEP N: Publish countrymap.parquet (with city/lat/lon) to inst/extdata
+# ----------------------------------------------------------------------------
+# Source: <dropbox>/PATSTAT autumn 2025 data/patstat_clean/countrymap.parquet
+#   — produced by data-raw-2025/build_inventor_countries_harm_bq.R (step 9).
+#   One row per (docdb_family_id, ctry_code), with mode city + lat/lon
+#   + geocode_missing flag. The file is copied as-is into inst/extdata so
+#   the Shiny app's DuckDB can expose it as a table. Overwrites any existing
+#   inst/extdata/countrymap.parquet.
+# ============================================================================
+cat("\nPublishing countrymap.parquet to inst/extdata/...\n")
+cm_src <- file.path(patstat_clean, "countrymap.parquet")
+cm_dst <- "inst/extdata/countrymap.parquet"
+if (!file.exists(cm_src)) {
+  warning("countrymap.parquet not found at ", cm_src,
+          " — run build_inventor_countries_harm_bq.R first. Skipping.")
+} else {
+  cm_tmp <- paste0(cm_dst, ".tmp-", Sys.getpid())
+  if (!file.copy(cm_src, cm_tmp, overwrite = TRUE))
+    stop("Failed to copy ", cm_src, " to ", cm_tmp)
+  if (!file.rename(cm_tmp, cm_dst)) {
+    for (i in 1:5) {
+      Sys.sleep(1); if (file.rename(cm_tmp, cm_dst)) break
+    }
+    if (file.exists(cm_tmp))
+      stop("Could not rename ", cm_tmp, " to ", cm_dst)
+  }
+  cm_sz <- round(file.info(cm_dst)$size / 1024^2, 1)
+  cat(sprintf("  Written countrymap.parquet: %.1f MB\n", cm_sz))
+}
+
+# ============================================================================
 # SUMMARY
 # ============================================================================
 

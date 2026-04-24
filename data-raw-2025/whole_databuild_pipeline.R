@@ -157,7 +157,18 @@ run_step("Build app parquet database",
          "data-raw/01-build-app-parquets.R")
 
 # ============================================================================
-# 4. Build the Shiny UI sysdata
+# 4. Build filtered citation network parquet
+# ----------------------------------------------------------------------------
+# Filters <dropbox>/patbis2025/data/fromPATSTAT/citenet_noself.parquet down
+# to citations whose BOTH endpoints (citing and cited docdb_family_id) are
+# present in inst/extdata/patent_database.parquet. Writes
+# inst/extdata/citenet.parquet so the Shiny app can query it via DuckDB.
+# ============================================================================
+run_step("Build filtered citenet parquet",
+         "data-raw-2025/03-build-citenet.R")
+
+# ============================================================================
+# 5. Build the Shiny UI sysdata
 # ----------------------------------------------------------------------------
 # Reads the parquets from step 3 and builds R/sysdata.rda — the internal
 # package data loaded automatically whenever the app starts. Contains the

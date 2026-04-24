@@ -40,6 +40,7 @@ server <- function(input, output, session, con) {
       "Country Explorer" = c("country-"),
       "Region Explorer"  = c("region-"),
       "Globe"            = c("globe-"),
+      "HGlobe"           = c("hglobe-"),
       "About"            = character(),
       character()        # unknown / fallback — keep only navbar_page
     )
@@ -170,5 +171,8 @@ server <- function(input, output, session, con) {
   shiny::observeEvent(c(req(input$navbar_page == "Globe")), once = TRUE, {
     globe_module_server("globe", session)
   })
-  
+  shiny::observeEvent(c(req(input$navbar_page == "HGlobe")), once = TRUE, {
+    hglobe_module_server("hglobe", con = con)
+  })
+
 }
