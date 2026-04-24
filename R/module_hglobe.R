@@ -140,7 +140,12 @@ hglobe_module_ui <- function(id) {
         style = "margin-bottom: 10px; color: #666; font-size: 0.9em;",
         shiny::textOutput(ns("status"))
       ),
-      leaflet::leafletOutput(ns("map"), height = "650px")
+      leaflet::leafletOutput(ns("map"), height = "550px"),
+      shiny::div(
+        style = "margin-top: 15px;",
+        shiny::h5("Pipeline stats"),
+        shiny::tableOutput(ns("stats"))
+      )
     )
   )
 }
@@ -192,6 +197,27 @@ hglobe_module_server <- function(id, con) {
       status_msg <- shiny::reactiveVal("")
       output$status <- shiny::renderText(status_msg())
 
+      # Accumulates one row per completed step (gen 0 seeded by Render Map,
+      # gen N added by each Next step click). Reset on every Render Map.
+      stats_rv <- shiny::reactiveVal(NULL)
+      output$stats <- shiny::renderTable({
+        df <- stats_rv()
+        if (is.null(df) || nrow(df) == 0) return(NULL)
+        df
+      }, striped = TRUE, hover = TRUE, width = "100%", digits = 0)
+
+      # Map a vector of flow values to marker radii on a log(1 + v) scale,
+      # normalised so the largest value gets the largest radius within this
+      # draw. NA or non-positive values fall back to the minimum radius.
+      radius_from_flow <- function(v, r_min = 3, r_max = 12) {
+        v  <- suppressWarnings(as.numeric(v))
+        lv <- log1p(pmax(v, 0, na.rm = FALSE))
+        lv[!is.finite(lv)] <- 0
+        rng <- diff(range(lv, na.rm = TRUE))
+        if (is.na(rng) || rng <= 0) return(rep((r_min + r_max) / 3, length(v)))
+        r_min + (r_max - r_min) * (lv - min(lv, na.rm = TRUE)) / rng
+      }
+
       # Session-scoped DuckDB staging tables. The app's DuckDB connection is
       # shared across sessions, so we must namespace on the session token to
       # avoid collisions. Generation N is stored at `hglobe_gen<N>_<token>`,
@@ -213,7 +239,7 @@ hglobe_module_server <- function(id, con) {
       drop_session_tables <- function() {
         tabs <- tryCatch(DBI::dbListTables(con),
                          error = function(e) character())
-        pat  <- sprintf("^hglobe_(gen[0-9]+|edges_tmp)_%s$", tok)
+        pat  <- sprintf("^hglobe_(gen[0-9]+|edges_tmp|passing_tmp)_%s$", tok)
         for (t in tabs[grepl(pat, tabs)]) {
           try(DBI::dbExecute(con, sprintf("DROP TABLE IF EXISTS %s", t)),
               silent = TRUE)
@@ -266,49 +292,70 @@ hglobe_module_server <- function(id, con) {
              )"))
         }
 
+        # Materialise the `passing` set so we can (a) count found-before-sample
+        # and (b) pull the chosen flow value for each (docdb, ctry) alongside
+        # the row for marker sizing. MAX() aggregates across duplicate
+        # appln_ids per (docdb, ctry), giving one row per pair.
+        passing_tbl <- sprintf("hglobe_passing_tmp_%s", tok)
+        toflow_col  <- input$toflow
         passing_sql <- glue::glue("
           passing AS (
-            SELECT DISTINCT p.docdb_family_id, p.ctry_code
+            SELECT p.docdb_family_id,
+                   p.ctry_code,
+                   MAX(p.{toflow_col}) AS toflow_val
             FROM full_patent_database p
             {if (has_tech) 'INNER JOIN filtered_tech ft ON p.docdb_family_id = ft.docdb_family_id' else ''}
             {if (has_firm) 'INNER JOIN filtered_firm ff ON p.docdb_family_id = ff.docdb_family_id' else ''}
             WHERE p.ctry_code IN ({country_sql})
-              AND p.{input$toflow} IS NOT NULL
+              AND p.{toflow_col} IS NOT NULL
               {granted_clause}
+            GROUP BY p.docdb_family_id, p.ctry_code
           )")
         ctes <- c(ctes, passing_sql)
 
-        # Bernoulli sample over the filtered set — fast and unbiased.
-        sampled_sql <- glue::glue("
-          sampled AS (
-            SELECT * FROM passing
-            USING SAMPLE {pct} PERCENT (bernoulli)
-          )")
-        ctes <- c(ctes, sampled_sql)
-
-        sql <- paste0(
+        create_passing <- paste0(
+          "CREATE OR REPLACE TABLE ", passing_tbl, " AS\n",
           "WITH ", paste(ctes, collapse = ",\n"), "\n",
-          "SELECT
-             s.docdb_family_id,
-             s.ctry_code,
-             c.city,
-             c.lat,
-             c.lon,
-             c.geocode_missing
-           FROM sampled s
-           INNER JOIN countrymap c
-             ON c.docdb_family_id = s.docdb_family_id
-            AND c.ctry_code       = s.ctry_code
-           WHERE c.lat IS NOT NULL AND c.lon IS NOT NULL"
+          "SELECT * FROM passing"
         )
+
+        ok <- tryCatch({ DBI::dbExecute(con, create_passing); TRUE },
+                      error = function(e) {
+                        status_msg(paste("Filter query failed:",
+                                         conditionMessage(e))); FALSE })
+        if (!ok) return()
+
+        n_found <- DBI::dbGetQuery(con,
+          sprintf("SELECT COUNT(*) AS n FROM %s", passing_tbl))$n
+
+        # Bernoulli sample over the filtered set, then join countrymap for
+        # geo. The SAMPLE goes inside a subquery because DuckDB's parser
+        # won't accept USING SAMPLE between FROM and an explicit JOIN — and
+        # sampling BEFORE the join ensures each (docdb, ctry) gets an
+        # independent inclusion coin flip, regardless of how many rows the
+        # countrymap join produces downstream.
+        sql <- sprintf("
+          SELECT p.docdb_family_id, p.ctry_code, p.toflow_val,
+                 c.city, c.lat, c.lon, c.geocode_missing
+          FROM (
+            SELECT * FROM %s USING SAMPLE %s PERCENT (bernoulli)
+          ) p
+          INNER JOIN countrymap c
+            ON c.docdb_family_id = p.docdb_family_id
+           AND c.ctry_code       = p.ctry_code
+          WHERE c.lat IS NOT NULL AND c.lon IS NOT NULL
+        ", passing_tbl, format(pct, nsmall = 4))
 
         dat <- tryCatch(
           DBI::dbGetQuery(con, sql),
           error = function(e) {
-            status_msg(paste("Query failed:", conditionMessage(e)))
+            status_msg(paste("Sample query failed:", conditionMessage(e)))
             NULL
           }
         )
+        try(DBI::dbExecute(con,
+              sprintf("DROP TABLE IF EXISTS %s", passing_tbl)),
+            silent = TRUE)
         if (is.null(dat)) return()
 
         if (nrow(dat) == 0) {
@@ -328,14 +375,25 @@ hglobe_module_server <- function(id, con) {
           city            = dat$city,
           lat             = dat$lat,
           lon             = dat$lon,
+          toflow_val      = dat$toflow_val,
           stringsAsFactors = FALSE
         )
         DBI::dbWriteTable(con, frontier_tbl(0), seed, overwrite = TRUE)
         gen_next(1)
 
+        # Reset stats with the gen 0 row.
+        stats_rv(data.frame(
+          step            = "gen 0 (seed)",
+          flow            = toflow_col,
+          nodes_found     = n_found,
+          nodes_kept      = nrow(dat),
+          stringsAsFactors = FALSE
+        ))
+
         status_msg(sprintf(
-          "Seeded generation 0: %s sampled (family x country) points. Click 'Next step' to expand citations.",
-          format(nrow(dat), big.mark = ",")))
+          "Seeded generation 0: %s of %s rows kept after sampling. Click 'Next step' to expand citations.",
+          format(nrow(dat), big.mark = ","),
+          format(n_found,   big.mark = ",")))
 
         # Tiny jitter so overlapping points are individually visible; the
         # deterministic lat/lon coming from countrymap would otherwise stack
@@ -346,10 +404,12 @@ hglobe_module_server <- function(id, con) {
         dat$lat_j <- dat$lat + stats::runif(nrow(dat), -jit, jit)
 
         popup_txt <- sprintf(
-          "<b>docdb</b>: %s<br/><b>ctry</b>: %s<br/><b>city</b>: %s%s",
+          "<b>docdb</b>: %s<br/><b>ctry</b>: %s<br/><b>city</b>: %s%s<br/><b>%s</b>: %s",
           dat$docdb_family_id, dat$ctry_code,
           ifelse(is.na(dat$city), "(capital fallback)", dat$city),
-          ifelse(isTRUE(dat$geocode_missing), " <i>(geocode missing)</i>", "")
+          ifelse(isTRUE(dat$geocode_missing), " <i>(geocode missing)</i>", ""),
+          toflow_col,
+          format(dat$toflow_val, big.mark = ",", digits = 4, scientific = FALSE)
         )
 
         leaflet::leafletProxy("map") |>
@@ -359,16 +419,11 @@ hglobe_module_server <- function(id, con) {
           leaflet::addCircleMarkers(
             lng          = dat$lon_j,
             lat          = dat$lat_j,
-            radius       = 3,
+            radius       = radius_from_flow(dat$toflow_val),
             stroke       = FALSE,
             fillOpacity  = 0.6,
             fillColor    = ifelse(isTRUE(dat$geocode_missing), "#bbbbbb", "#2780e3"),
-            popup        = popup_txt,
-            clusterOptions = leaflet::markerClusterOptions(
-              showCoverageOnHover = FALSE,
-              spiderfyOnMaxZoom   = TRUE,
-              maxClusterRadius    = 40
-            )
+            popup        = popup_txt
           )
       })
 
@@ -423,9 +478,12 @@ hglobe_module_server <- function(id, con) {
         prev_tbl <- frontier_tbl(g - 1)
         new_tbl  <- frontier_tbl(g)
         tmp_tbl  <- sprintf("hglobe_edges_tmp_%s", tok)
+        # Use whatever toflow was picked at the last "Render Map" click so
+        # node sizes remain consistent across generations.
+        toflow_col <- input$toflow
 
-        # Materialise the edge set (with src + tgt coords) in a temp table,
-        # then derive the new frontier (distinct citing docdbs) from it.
+        # Materialise the edge set (with src + tgt coords + tgt flow value)
+        # in a temp table, then derive the new frontier from it.
         sql_edges <- glue::glue("
           CREATE OR REPLACE TABLE {tmp_tbl} AS
           WITH citations AS (
@@ -450,22 +508,40 @@ hglobe_module_server <- function(id, con) {
             FROM ranked
             WHERE rn <= GREATEST(1, CEIL(cnt * {pct_edge} / 100.0))
           ),
+          -- Per-docdb MAX of the chosen flow column; joined below to attach
+          -- a single toflow_val to every citing docdb regardless of its
+          -- country multiplicity in full_patent_database.
+          flow_per_fam AS (
+            SELECT docdb_family_id, ctry_code,
+                   MAX({toflow_col}) AS toflow_val
+            FROM full_patent_database
+            WHERE {toflow_col} IS NOT NULL
+            GROUP BY docdb_family_id, ctry_code
+          ),
+          -- Pick one (ctry_code, lat, lon, toflow_val) per citing docdb,
+          -- restricted to countrymap rows that also have a flow value so
+          -- size scaling works. Alphabetical ctry_code tie-break.
           target_geo AS (
-            SELECT DISTINCT ON (docdb_family_id)
-                   docdb_family_id, ctry_code, city, lat, lon
-            FROM countrymap
-            WHERE lat IS NOT NULL AND lon IS NOT NULL
-            ORDER BY docdb_family_id, ctry_code
+            SELECT DISTINCT ON (c.docdb_family_id)
+                   c.docdb_family_id, c.ctry_code, c.city, c.lat, c.lon,
+                   fpf.toflow_val
+            FROM countrymap c
+            JOIN flow_per_fam fpf
+              ON fpf.docdb_family_id = c.docdb_family_id
+             AND fpf.ctry_code       = c.ctry_code
+            WHERE c.lat IS NOT NULL AND c.lon IS NOT NULL
+            ORDER BY c.docdb_family_id, c.ctry_code
           )
           SELECT
             se.prev_docdb_family_id,
             se.next_docdb_family_id,
             pf.ctry_code AS src_ctry, pf.lat AS src_lat, pf.lon AS src_lon,
             tg.ctry_code AS tgt_ctry, tg.lat AS tgt_lat, tg.lon AS tgt_lon,
-            tg.city      AS tgt_city
+            tg.city      AS tgt_city,
+            tg.toflow_val
           FROM sampled_edges se
-          JOIN {prev_tbl} pf  ON pf.docdb_family_id = se.prev_docdb_family_id
-          JOIN target_geo tg  ON tg.docdb_family_id = se.next_docdb_family_id
+          JOIN {prev_tbl} pf   ON pf.docdb_family_id = se.prev_docdb_family_id
+          JOIN target_geo tg   ON tg.docdb_family_id = se.next_docdb_family_id
         ")
         ok <- tryCatch({
           DBI::dbExecute(con, sql_edges); TRUE
@@ -476,9 +552,25 @@ hglobe_module_server <- function(id, con) {
 
         n_edges <- DBI::dbGetQuery(con,
           sprintf("SELECT COUNT(*) AS n FROM %s", tmp_tbl))$n
+        # Count distinct candidate citing docdbs BEFORE sampling — this is
+        # the "nodes found" number for the stats table.
+        n_found_nodes <- DBI::dbGetQuery(con, sprintf("
+          SELECT COUNT(DISTINCT c.docdb_family_id) AS n
+          FROM citenet c
+          WHERE c.cited_docdb_family_id IN (
+            SELECT docdb_family_id FROM %s
+          )
+        ", prev_tbl))$n
+
         if (n_edges == 0) {
           status_msg(sprintf(
             "No citations found for generation %d frontier.", g - 1))
+          stats_rv(rbind(stats_rv(), data.frame(
+            step            = sprintf("gen %d", g),
+            flow            = toflow_col,
+            nodes_found     = n_found_nodes,
+            nodes_kept      = 0L,
+            stringsAsFactors = FALSE)))
           try(DBI::dbExecute(con, sprintf("DROP TABLE IF EXISTS %s", tmp_tbl)),
               silent = TRUE)
           return()
@@ -492,7 +584,8 @@ hglobe_module_server <- function(id, con) {
                  tgt_ctry             AS ctry_code,
                  tgt_lat              AS lat,
                  tgt_lon              AS lon,
-                 tgt_city             AS city
+                 tgt_city             AS city,
+                 toflow_val
           FROM %s
         ", new_tbl, tmp_tbl))
 
@@ -500,38 +593,47 @@ hglobe_module_server <- function(id, con) {
         try(DBI::dbExecute(con, sprintf("DROP TABLE IF EXISTS %s", tmp_tbl)),
             silent = TRUE)
 
+        n_kept_nodes <- length(unique(edges$next_docdb_family_id))
+        stats_rv(rbind(stats_rv(), data.frame(
+          step            = sprintf("gen %d", g),
+          flow            = toflow_col,
+          nodes_found     = n_found_nodes,
+          nodes_kept      = n_kept_nodes,
+          stringsAsFactors = FALSE)))
+
         gen_next(g + 1)
         col <- pick_color(g)
 
         status_msg(sprintf(
-          "Generation %d: %s edges from %s gen-%d docdbs to %s gen-%d docdbs.",
+          "Generation %d: %s edges; %s citing docdbs kept of %s candidates.",
           g,
-          format(n_edges,                                            big.mark = ","),
-          format(length(unique(edges$prev_docdb_family_id)),         big.mark = ","),
-          g - 1,
-          format(length(unique(edges$next_docdb_family_id)),         big.mark = ","),
-          g))
+          format(n_edges,       big.mark = ","),
+          format(n_kept_nodes,  big.mark = ","),
+          format(n_found_nodes, big.mark = ",")))
 
         # Target-side markers (one per new-frontier docdb) — plot on top of
         # prior generations' markers; don't clear them.
         tgt_pts <- unique(edges[, c("next_docdb_family_id",
                                     "tgt_ctry", "tgt_lat", "tgt_lon",
-                                    "tgt_city")])
+                                    "tgt_city", "toflow_val")])
 
         m <- leaflet::leafletProxy("map") |>
           leaflet::addCircleMarkers(
             lng         = tgt_pts$tgt_lon,
             lat         = tgt_pts$tgt_lat,
-            radius      = 2,
+            radius      = radius_from_flow(tgt_pts$toflow_val),
             stroke      = FALSE,
             fillOpacity = 0.7,
             fillColor   = col,
             popup       = sprintf(
-              "<b>citing%d docdb</b>: %s<br/><b>ctry</b>: %s<br/><b>city</b>: %s",
+              "<b>citing%d docdb</b>: %s<br/><b>ctry</b>: %s<br/><b>city</b>: %s<br/><b>%s</b>: %s",
               g,
               tgt_pts$next_docdb_family_id,
               tgt_pts$tgt_ctry,
-              ifelse(is.na(tgt_pts$tgt_city), "(capital fallback)", tgt_pts$tgt_city)
+              ifelse(is.na(tgt_pts$tgt_city), "(capital fallback)", tgt_pts$tgt_city),
+              toflow_col,
+              format(tgt_pts$toflow_val, big.mark = ",",
+                     digits = 4, scientific = FALSE)
             )
           )
 
