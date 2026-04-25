@@ -39,8 +39,7 @@ server <- function(input, output, session, con) {
     keep_prefixes <- switch(tab %||% "",
       "Country Explorer" = c("country-"),
       "Region Explorer"  = c("region-"),
-      "Globe"            = c("globe-"),
-      "HGlobe"           = c("hglobe-"),
+      "HiGGlobe"         = c("hglobe-"),
       "About"            = character(),
       character()        # unknown / fallback — keep only navbar_page
     )
@@ -90,7 +89,7 @@ server <- function(input, output, session, con) {
   #
   # Recognised params (all optional, all case-sensitive for values):
   #   tab        Navbar tab: "Country Explorer" | "Region Explorer" |
-  #              "Globe" | "About"
+  #              "HiGGlobe" | "About"
   #   ctry       Comma-separated country codes or predefined group names
   #              (uses country-tab input).
   #   region     Comma-separated UK region names (region-tab input).
@@ -168,10 +167,7 @@ server <- function(input, output, session, con) {
   shiny::observeEvent(c(req(input$navbar_page == "Region Explorer")), once = TRUE, {
     region_module_server("region", session, con = con)
   })
-  shiny::observeEvent(c(req(input$navbar_page == "Globe")), once = TRUE, {
-    globe_module_server("globe", session)
-  })
-  shiny::observeEvent(c(req(input$navbar_page == "HGlobe")), once = TRUE, {
+  shiny::observeEvent(c(req(input$navbar_page == "HiGGlobe")), once = TRUE, {
     hglobe_module_server("hglobe", con = con)
   })
 

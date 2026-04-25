@@ -1,4 +1,4 @@
-#' HGlobe module Sidebar
+#' HiGGlobe module Sidebar
 #'
 #' Same global filters as the "Value flows by Country" view in the Country
 #' Explorer (country / firm / techs / granted_only / toflow), plus a sampling
@@ -79,6 +79,16 @@ hglobe_module_sidebar <- function(id) {
       shiny::h5("SAMPLING", style = "font-weight: 600; margin-bottom: 10px;"),
       shiny::div(
         class = "side_input",
+        shiny::radioButtons(
+          inputId = ns("sampling_mode"),
+          label   = "Sampling mode",
+          choices = c("Percent", "Number"),
+          selected = "Percent",
+          inline   = TRUE
+        )
+      ),
+      shiny::div(
+        class = "side_input",
         shiny::numericInput(
           inputId = ns("sampling_rate"),
           label   = "Sampling rate [%]",
@@ -119,7 +129,7 @@ hglobe_module_sidebar <- function(id) {
   )
 }
 
-#' HGlobe module UI
+#' HiGGlobe module UI
 #'
 #' @param id the ID of the module
 #' @keywords internal
@@ -136,6 +146,58 @@ hglobe_module_ui <- function(id) {
 
     shiny::div(
       style = "padding: 20px;",
+      # html2canvas drives both the "Save PNG" download and the "Copy to
+      # clipboard" path. Loaded once from CDN; no R-package dependency.
+      shiny::tags$head(
+        shiny::tags$script(
+          src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"
+        ),
+        shiny::tags$script(shiny::HTML(
+          "window.higglobe_capture = async function(elId, action) {
+             const node = document.getElementById(elId);
+             if (!node) { console.warn('higglobe_capture: no element', elId); return; }
+             try {
+               const canvas = await html2canvas(node, {
+                 useCORS: true, allowTaint: true, scale: 2,
+                 backgroundColor: '#ffffff'
+               });
+               if (action === 'save') {
+                 const a = document.createElement('a');
+                 a.href = canvas.toDataURL('image/png');
+                 a.download = 'higglobe-map.png';
+                 document.body.appendChild(a);
+                 a.click();
+                 document.body.removeChild(a);
+               } else if (action === 'copy') {
+                 canvas.toBlob(async function(blob) {
+                   try {
+                     await navigator.clipboard.write([
+                       new ClipboardItem({ 'image/png': blob })
+                     ]);
+                     console.log('Copied map to clipboard.');
+                   } catch (e) {
+                     alert('Clipboard copy failed: ' + e.message +
+                       '\\nNote: requires HTTPS (or localhost) and a recent browser.');
+                   }
+                 }, 'image/png');
+               }
+             } catch (e) {
+               alert('Map capture failed: ' + e.message);
+             }
+           };"
+        ))
+      ),
+
+      shiny::div(
+        style = "display:flex; gap:8px; margin-bottom:10px;",
+        shiny::actionButton(ns("save_png"),
+                            shiny::tagList(shiny::icon("download"), "Save PNG"),
+                            class = "btn-sm btn-outline-secondary"),
+        shiny::actionButton(ns("copy_clip"),
+                            shiny::tagList(shiny::icon("copy"),
+                                           "Copy to clipboard"),
+                            class = "btn-sm btn-outline-secondary")
+      ),
       shiny::div(
         style = "margin-bottom: 10px; color: #666; font-size: 0.9em;",
         shiny::textOutput(ns("status"))
@@ -150,7 +212,7 @@ hglobe_module_ui <- function(id) {
   )
 }
 
-#' HGlobe module Server
+#' HiGGlobe module Server
 #'
 #' @param id the ID of the module
 #' @param con DuckDB connection shared with other modules; must expose the
@@ -187,6 +249,34 @@ hglobe_module_server <- function(id, con) {
         }
       })
 
+      # Save PNG / Copy to clipboard — both invoke the same client-side
+      # html2canvas capture; the JS branch decides how to dispatch the canvas
+      # (download vs Clipboard API). Using shinyjs::runjs avoids the need to
+      # register a custom message handler.
+      shiny::observeEvent(input$save_png, {
+        shinyjs::runjs(sprintf(
+          "higglobe_capture('%s', 'save');", session$ns("map")))
+      })
+      shiny::observeEvent(input$copy_clip, {
+        shinyjs::runjs(sprintf(
+          "higglobe_capture('%s', 'copy');", session$ns("map")))
+      })
+
+      # Re-label the Step 1 sample-size input when the sampling mode toggles.
+      # Bounds and step also change so percent stays clamped to 0-100 with a
+      # 0.1 step, while integer counts get a step of 1 with no upper bound.
+      shiny::observeEvent(input$sampling_mode, {
+        if (identical(input$sampling_mode, "Number")) {
+          shiny::updateNumericInput(session, "sampling_rate",
+            label = "Sample size [#]",
+            min = 0, max = NA, step = 1)
+        } else {
+          shiny::updateNumericInput(session, "sampling_rate",
+            label = "Sampling rate [%]",
+            min = 0, max = 100, step = 0.1)
+        }
+      }, ignoreInit = TRUE)
+
       # Bootstrap an empty leaflet base layer.
       output$map <- leaflet::renderLeaflet({
         leaflet::leaflet(options = leaflet::leafletOptions(preferCanvas = TRUE)) |>
@@ -199,12 +289,16 @@ hglobe_module_server <- function(id, con) {
 
       # Accumulates one row per completed step (gen 0 seeded by Render Map,
       # gen N added by each Next step click). Reset on every Render Map.
+      # The `color` column carries an HTML swatch matching the generation's
+      # marker / edge color on the map; renderTable below skips sanitisation
+      # for that column so the inline style renders.
       stats_rv <- shiny::reactiveVal(NULL)
       output$stats <- shiny::renderTable({
         df <- stats_rv()
         if (is.null(df) || nrow(df) == 0) return(NULL)
         df
-      }, striped = TRUE, hover = TRUE, width = "100%", digits = 0)
+      }, striped = TRUE, hover = TRUE, width = "100%", digits = 0,
+         sanitize.text.function = identity)
 
       # Map a vector of flow values to marker radii on a log(1 + v) scale,
       # normalised so the largest value gets the largest radius within this
@@ -231,10 +325,32 @@ hglobe_module_server <- function(id, con) {
       gen_next <- shiny::reactiveVal(NULL)
 
       # Per-generation edge / marker color cycle so successive generations
-      # are visually distinct on the map.
+      # are visually distinct on the map. Gen 0 (the seed) gets the first
+      # entry; each subsequent generation steps to the next color.
       gen_colors <- c("#2780e3", "#d9534f", "#5cb85c", "#f0ad4e",
                       "#9467bd", "#8c564b", "#17becf", "#e377c2")
-      pick_color <- function(g) gen_colors[((g - 1) %% length(gen_colors)) + 1]
+      pick_color <- function(g) gen_colors[(g %% length(gen_colors)) + 1]
+      color_swatch_html <- function(hex)
+        sprintf(paste0('<span style="display:inline-block;width:24px;',
+                       'height:14px;background:%s;border-radius:2px;',
+                       'border:1px solid #999;"></span>'), hex)
+
+      # Build a clickable Espacenet search link from an appln_id (the EP/WO/US
+      # publication number stored in patent_database.appln_id). Mirrors the
+      # behaviour of build_espacenet_search() used in the bar-chart tooltips,
+      # but emits a plain <a target="_blank"> for leaflet popups instead of a
+      # ggiraph window.open() snippet.
+      espacenet_link <- function(appln_id) {
+        # utils::URLencode is scalar-only, so loop with vapply.
+        vapply(as.character(appln_id), function(id) {
+          if (is.na(id) || !nzchar(id)) return(NA_character_)
+          sprintf(
+            '<a href="https://worldwide.espacenet.com/patent/search?q=%s" target="_blank" rel="noopener">%s</a>',
+            utils::URLencode(paste0("pn=", id), reserved = TRUE),
+            id
+          )
+        }, character(1), USE.NAMES = FALSE)
+      }
 
       drop_session_tables <- function() {
         tabs <- tryCatch(DBI::dbListTables(con),
@@ -250,10 +366,22 @@ hglobe_module_server <- function(id, con) {
 
       shiny::observeEvent(input$render_map, {
         shiny::req(input$toflow, input$country, input$techs)
-        pct <- suppressWarnings(as.numeric(input$sampling_rate))
-        if (!is.finite(pct) || pct < 0 || pct > 100) {
-          status_msg("Sampling rate must be between 0 and 100.")
-          return()
+        sample_mode <- input$sampling_mode %||% "Percent"
+        sample_val  <- suppressWarnings(as.numeric(input$sampling_rate))
+        if (identical(sample_mode, "Number")) {
+          if (!is.finite(sample_val) || sample_val < 0) {
+            status_msg("Sample size must be a non-negative integer.")
+            return()
+          }
+          sample_clause <- sprintf("USING SAMPLE %d ROWS (reservoir)",
+                                   as.integer(sample_val))
+        } else {
+          if (!is.finite(sample_val) || sample_val < 0 || sample_val > 100) {
+            status_msg("Sampling rate must be between 0 and 100.")
+            return()
+          }
+          sample_clause <- sprintf("USING SAMPLE %s PERCENT (bernoulli)",
+                                   format(sample_val, nsmall = 4))
         }
 
         selected_countries <- expand_country_selection(input$country)
@@ -302,7 +430,8 @@ hglobe_module_server <- function(id, con) {
           passing AS (
             SELECT p.docdb_family_id,
                    p.ctry_code,
-                   MAX(p.{toflow_col}) AS toflow_val
+                   MAX(p.{toflow_col}) AS toflow_val,
+                   ANY_VALUE(p.appln_id) AS appln_id
             FROM full_patent_database p
             {if (has_tech) 'INNER JOIN filtered_tech ft ON p.docdb_family_id = ft.docdb_family_id' else ''}
             {if (has_firm) 'INNER JOIN filtered_firm ff ON p.docdb_family_id = ff.docdb_family_id' else ''}
@@ -328,23 +457,26 @@ hglobe_module_server <- function(id, con) {
         n_found <- DBI::dbGetQuery(con,
           sprintf("SELECT COUNT(*) AS n FROM %s", passing_tbl))$n
 
-        # Bernoulli sample over the filtered set, then join countrymap for
-        # geo. The SAMPLE goes inside a subquery because DuckDB's parser
-        # won't accept USING SAMPLE between FROM and an explicit JOIN — and
-        # sampling BEFORE the join ensures each (docdb, ctry) gets an
-        # independent inclusion coin flip, regardless of how many rows the
-        # countrymap join produces downstream.
+        # Sample over the filtered set, then join countrymap for geo. The
+        # SAMPLE clause goes inside a subquery because DuckDB's parser won't
+        # accept USING SAMPLE between FROM and an explicit JOIN, and sampling
+        # BEFORE the join ensures each (docdb, ctry) gets an independent
+        # inclusion decision regardless of how many rows the countrymap join
+        # produces downstream.
+        #   sample_clause is either
+        #     "USING SAMPLE <pct> PERCENT (bernoulli)"   (Percent mode)
+        #     "USING SAMPLE <n> ROWS (reservoir)"        (Number  mode)
         sql <- sprintf("
-          SELECT p.docdb_family_id, p.ctry_code, p.toflow_val,
+          SELECT p.docdb_family_id, p.ctry_code, p.toflow_val, p.appln_id,
                  c.city, c.lat, c.lon, c.geocode_missing
           FROM (
-            SELECT * FROM %s USING SAMPLE %s PERCENT (bernoulli)
+            SELECT * FROM %s %s
           ) p
           INNER JOIN countrymap c
             ON c.docdb_family_id = p.docdb_family_id
            AND c.ctry_code       = p.ctry_code
           WHERE c.lat IS NOT NULL AND c.lon IS NOT NULL
-        ", passing_tbl, format(pct, nsmall = 4))
+        ", passing_tbl, sample_clause)
 
         dat <- tryCatch(
           DBI::dbGetQuery(con, sql),
@@ -376,6 +508,7 @@ hglobe_module_server <- function(id, con) {
           lat             = dat$lat,
           lon             = dat$lon,
           toflow_val      = dat$toflow_val,
+          appln_id        = dat$appln_id,
           stringsAsFactors = FALSE
         )
         DBI::dbWriteTable(con, frontier_tbl(0), seed, overwrite = TRUE)
@@ -383,11 +516,13 @@ hglobe_module_server <- function(id, con) {
 
         # Reset stats with the gen 0 row.
         stats_rv(data.frame(
+          color           = color_swatch_html(pick_color(0)),
           step            = "gen 0 (seed)",
           flow            = toflow_col,
           nodes_found     = n_found,
           nodes_kept      = nrow(dat),
-          stringsAsFactors = FALSE
+          stringsAsFactors = FALSE,
+          check.names     = FALSE
         ))
 
         status_msg(sprintf(
@@ -403,9 +538,15 @@ hglobe_module_server <- function(id, con) {
         dat$lon_j <- dat$lon + stats::runif(nrow(dat), -jit, jit)
         dat$lat_j <- dat$lat + stats::runif(nrow(dat), -jit, jit)
 
+        appln_link <- espacenet_link(dat$appln_id)
+        appln_html <- ifelse(
+          is.na(appln_link),
+          "(no appln id)",
+          appln_link
+        )
         popup_txt <- sprintf(
-          "<b>docdb</b>: %s<br/><b>ctry</b>: %s<br/><b>city</b>: %s%s<br/><b>%s</b>: %s",
-          dat$docdb_family_id, dat$ctry_code,
+          "<b>docdb</b>: %s<br/><b>appln</b>: %s<br/><b>ctry</b>: %s<br/><b>city</b>: %s%s<br/><b>%s</b>: %s",
+          dat$docdb_family_id, appln_html, dat$ctry_code,
           ifelse(is.na(dat$city), "(capital fallback)", dat$city),
           ifelse(isTRUE(dat$geocode_missing), " <i>(geocode missing)</i>", ""),
           toflow_col,
@@ -422,14 +563,14 @@ hglobe_module_server <- function(id, con) {
             radius       = radius_from_flow(dat$toflow_val),
             stroke       = FALSE,
             fillOpacity  = 0.6,
-            fillColor    = ifelse(isTRUE(dat$geocode_missing), "#bbbbbb", "#2780e3"),
+            fillColor    = ifelse(isTRUE(dat$geocode_missing),
+                                  "#bbbbbb", pick_color(0)),
             popup        = popup_txt
           )
       })
 
-      # Quadratic-bezier curve between two points — same primitive Globe uses
-      # to draw value-flow arcs. `bend` controls the peak height relative to
-      # the source->target distance.
+      # Quadratic-bezier curve between two points used to draw citation arcs.
+      # `bend` controls the peak height relative to the source->target distance.
       make_curve <- function(sx, sy, tx, ty, n = 40, bend = 0.3) {
         if (sx == tx && sy == ty)
           return(data.frame(lon = c(sx, tx), lat = c(sy, ty)))
@@ -508,23 +649,25 @@ hglobe_module_server <- function(id, con) {
             FROM ranked
             WHERE rn <= GREATEST(1, CEIL(cnt * {pct_edge} / 100.0))
           ),
-          -- Per-docdb MAX of the chosen flow column; joined below to attach
-          -- a single toflow_val to every citing docdb regardless of its
-          -- country multiplicity in full_patent_database.
+          -- Per-docdb MAX of the chosen flow column plus a single appln_id
+          -- (Espacenet-searchable publication number); joined below to
+          -- attach toflow_val and appln_id to every citing docdb regardless
+          -- of its country multiplicity in full_patent_database.
           flow_per_fam AS (
             SELECT docdb_family_id, ctry_code,
-                   MAX({toflow_col}) AS toflow_val
+                   MAX({toflow_col})    AS toflow_val,
+                   ANY_VALUE(appln_id)  AS appln_id
             FROM full_patent_database
             WHERE {toflow_col} IS NOT NULL
             GROUP BY docdb_family_id, ctry_code
           ),
-          -- Pick one (ctry_code, lat, lon, toflow_val) per citing docdb,
-          -- restricted to countrymap rows that also have a flow value so
-          -- size scaling works. Alphabetical ctry_code tie-break.
+          -- Pick one (ctry_code, lat, lon, toflow_val, appln_id) per citing
+          -- docdb, restricted to countrymap rows that also have a flow
+          -- value so size scaling works. Alphabetical ctry_code tie-break.
           target_geo AS (
             SELECT DISTINCT ON (c.docdb_family_id)
                    c.docdb_family_id, c.ctry_code, c.city, c.lat, c.lon,
-                   fpf.toflow_val
+                   fpf.toflow_val, fpf.appln_id
             FROM countrymap c
             JOIN flow_per_fam fpf
               ON fpf.docdb_family_id = c.docdb_family_id
@@ -538,7 +681,8 @@ hglobe_module_server <- function(id, con) {
             pf.ctry_code AS src_ctry, pf.lat AS src_lat, pf.lon AS src_lon,
             tg.ctry_code AS tgt_ctry, tg.lat AS tgt_lat, tg.lon AS tgt_lon,
             tg.city      AS tgt_city,
-            tg.toflow_val
+            tg.toflow_val,
+            tg.appln_id  AS tgt_appln_id
           FROM sampled_edges se
           JOIN {prev_tbl} pf   ON pf.docdb_family_id = se.prev_docdb_family_id
           JOIN target_geo tg   ON tg.docdb_family_id = se.next_docdb_family_id
@@ -566,11 +710,13 @@ hglobe_module_server <- function(id, con) {
           status_msg(sprintf(
             "No citations found for generation %d frontier.", g - 1))
           stats_rv(rbind(stats_rv(), data.frame(
+            color           = color_swatch_html(pick_color(g)),
             step            = sprintf("gen %d", g),
             flow            = toflow_col,
             nodes_found     = n_found_nodes,
             nodes_kept      = 0L,
-            stringsAsFactors = FALSE)))
+            stringsAsFactors = FALSE,
+            check.names     = FALSE)))
           try(DBI::dbExecute(con, sprintf("DROP TABLE IF EXISTS %s", tmp_tbl)),
               silent = TRUE)
           return()
@@ -585,7 +731,8 @@ hglobe_module_server <- function(id, con) {
                  tgt_lat              AS lat,
                  tgt_lon              AS lon,
                  tgt_city             AS city,
-                 toflow_val
+                 toflow_val,
+                 tgt_appln_id         AS appln_id
           FROM %s
         ", new_tbl, tmp_tbl))
 
@@ -595,11 +742,13 @@ hglobe_module_server <- function(id, con) {
 
         n_kept_nodes <- length(unique(edges$next_docdb_family_id))
         stats_rv(rbind(stats_rv(), data.frame(
+          color           = color_swatch_html(pick_color(g)),
           step            = sprintf("gen %d", g),
           flow            = toflow_col,
           nodes_found     = n_found_nodes,
           nodes_kept      = n_kept_nodes,
-          stringsAsFactors = FALSE)))
+          stringsAsFactors = FALSE,
+          check.names     = FALSE)))
 
         gen_next(g + 1)
         col <- pick_color(g)
@@ -615,7 +764,10 @@ hglobe_module_server <- function(id, con) {
         # prior generations' markers; don't clear them.
         tgt_pts <- unique(edges[, c("next_docdb_family_id",
                                     "tgt_ctry", "tgt_lat", "tgt_lon",
-                                    "tgt_city", "toflow_val")])
+                                    "tgt_city", "toflow_val", "tgt_appln_id")])
+
+        tgt_link <- espacenet_link(tgt_pts$tgt_appln_id)
+        tgt_link_html <- ifelse(is.na(tgt_link), "(no appln id)", tgt_link)
 
         m <- leaflet::leafletProxy("map") |>
           leaflet::addCircleMarkers(
@@ -626,9 +778,10 @@ hglobe_module_server <- function(id, con) {
             fillOpacity = 0.7,
             fillColor   = col,
             popup       = sprintf(
-              "<b>citing%d docdb</b>: %s<br/><b>ctry</b>: %s<br/><b>city</b>: %s<br/><b>%s</b>: %s",
+              "<b>citing%d docdb</b>: %s<br/><b>appln</b>: %s<br/><b>ctry</b>: %s<br/><b>city</b>: %s<br/><b>%s</b>: %s",
               g,
               tgt_pts$next_docdb_family_id,
+              tgt_link_html,
               tgt_pts$tgt_ctry,
               ifelse(is.na(tgt_pts$tgt_city), "(capital fallback)", tgt_pts$tgt_city),
               toflow_col,
@@ -637,7 +790,7 @@ hglobe_module_server <- function(id, con) {
             )
           )
 
-        # Curved polyline per edge — same bezier primitive Globe uses.
+        # Curved polyline per edge using the bezier primitive above.
         for (i in seq_len(nrow(edges))) {
           cv <- make_curve(edges$src_lon[i], edges$src_lat[i],
                            edges$tgt_lon[i], edges$tgt_lat[i])

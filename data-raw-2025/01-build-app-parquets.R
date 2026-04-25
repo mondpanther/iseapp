@@ -982,20 +982,97 @@ rm(df_processed); gc()
 # Source: <dropbox>/PATSTAT autumn 2025 data/patstat_clean/countrymap.parquet
 #   — produced by data-raw-2025/build_inventor_countries_harm_bq.R (step 9).
 #   One row per (docdb_family_id, ctry_code), with mode city + lat/lon
-#   + geocode_missing flag. The file is copied as-is into inst/extdata so
-#   the Shiny app's DuckDB can expose it as a table. Overwrites any existing
-#   inst/extdata/countrymap.parquet.
+#   + geocode_missing flag.
+#
+# Augmentation:
+#   patent_database may carry (docdb, ctry) pairs that have no person record
+#   in PATSTAT (e.g. families pulled in by Watson nationalkey augmentation
+#   without an inventor address), so they are absent from the harmonisation-
+#   derived countrymap above. Without coordinates the HiGGlobe view drops
+#   them silently. To avoid that, we backfill any such missing pair with the
+#   capital-city coordinates of its country and geocode_missing = TRUE.
+#   The capital lookup is rebuilt from maps::world.cities so this step has
+#   no BigQuery dependency.
 # ============================================================================
 cat("\nPublishing countrymap.parquet to inst/extdata/...\n")
 cm_src <- file.path(patstat_clean, "countrymap.parquet")
 cm_dst <- "inst/extdata/countrymap.parquet"
+pdb_pq <- "inst/extdata/patent_database.parquet"
+
 if (!file.exists(cm_src)) {
   warning("countrymap.parquet not found at ", cm_src,
           " — run build_inventor_countries_harm_bq.R first. Skipping.")
+} else if (!file.exists(pdb_pq)) {
+  warning("patent_database.parquet not found at ", pdb_pq,
+          " — countrymap will be published without capital-fallback ",
+          "augmentation. Skipping.")
+  file.copy(cm_src, cm_dst, overwrite = TRUE)
 } else {
+  # Build a capital-coordinates lookup keyed on ISO2 from maps::world.cities.
+  # If multiple capital rows exist for a country (rare), keep the most
+  # populous. Countries without a capital row get no fallback.
+  if (!requireNamespace("maps", quietly = TRUE))
+    stop("Package 'maps' is required for the countrymap capital fallback.")
+  wc <- as.data.table(maps::world.cities)
+  wc[, iso2 := countrycode::countrycode(country.etc, origin = "country.name",
+                                        destination = "iso2c", warn = FALSE)]
+  caps <- wc[capital == 1L & !is.na(iso2)][order(iso2, -as.integer(pop))]
+  caps <- caps[!duplicated(iso2),
+               .(ctry_code = iso2,
+                 cap_city  = name,
+                 cap_lat   = as.numeric(lat),
+                 cap_lon   = as.numeric(long))]
+  cat(sprintf("  Capital lookup: %d countries\n", nrow(caps)))
+
+  con_cm <- dbConnect(duckdb::duckdb())
+  on.exit(try(dbDisconnect(con_cm, shutdown = TRUE), silent = TRUE), add = TRUE)
+  dbWriteTable(con_cm, "caps", as.data.frame(caps), overwrite = TRUE)
+
   cm_tmp <- paste0(cm_dst, ".tmp-", Sys.getpid())
-  if (!file.copy(cm_src, cm_tmp, overwrite = TRUE))
-    stop("Failed to copy ", cm_src, " to ", cm_tmp)
+  dbExecute(con_cm, sprintf("
+    COPY (
+      WITH cm AS (
+        SELECT * FROM read_parquet('%s')
+      ),
+      pairs AS (
+        SELECT DISTINCT docdb_family_id, ctry_code
+        FROM read_parquet('%s')
+        WHERE docdb_family_id IS NOT NULL
+          AND ctry_code IS NOT NULL
+      ),
+      missing AS (
+        SELECT p.docdb_family_id, p.ctry_code,
+               c.cap_city AS city,
+               c.cap_lat  AS lat,
+               c.cap_lon  AS lon,
+               TRUE       AS geocode_missing
+        FROM pairs p
+        LEFT JOIN cm
+          ON cm.docdb_family_id = p.docdb_family_id
+         AND cm.ctry_code       = p.ctry_code
+        LEFT JOIN caps c
+          ON c.ctry_code = p.ctry_code
+        WHERE cm.docdb_family_id IS NULL
+          AND c.cap_lat IS NOT NULL
+      )
+      SELECT docdb_family_id, ctry_code, city, lat, lon, geocode_missing
+      FROM cm
+      UNION ALL
+      SELECT docdb_family_id, ctry_code, city, lat, lon, geocode_missing
+      FROM missing
+    ) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD)
+  ", cm_src, pdb_pq, gsub("'", "''", cm_tmp)))
+
+  diag_cm <- dbGetQuery(con_cm, sprintf("
+    SELECT
+      COUNT(*)                  AS n_rows,
+      COUNTIF(geocode_missing)  AS n_capital_fallback,
+      COUNTIF(NOT geocode_missing) AS n_with_city
+    FROM read_parquet('%s')
+  ", gsub("'", "''", cm_tmp)))
+
+  dbDisconnect(con_cm, shutdown = TRUE)
+
   if (!file.rename(cm_tmp, cm_dst)) {
     for (i in 1:5) {
       Sys.sleep(1); if (file.rename(cm_tmp, cm_dst)) break
@@ -1004,7 +1081,11 @@ if (!file.exists(cm_src)) {
       stop("Could not rename ", cm_tmp, " to ", cm_dst)
   }
   cm_sz <- round(file.info(cm_dst)$size / 1024^2, 1)
-  cat(sprintf("  Written countrymap.parquet: %.1f MB\n", cm_sz))
+  cat(sprintf("  Written countrymap.parquet: %.1f MB (%s rows; %s with city, %s capital-fallback)\n",
+              cm_sz,
+              format(diag_cm$n_rows,             big.mark = ","),
+              format(diag_cm$n_with_city,        big.mark = ","),
+              format(diag_cm$n_capital_fallback, big.mark = ",")))
 }
 
 # ============================================================================

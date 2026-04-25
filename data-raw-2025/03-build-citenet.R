@@ -5,12 +5,15 @@
 #           already removed; ~278M rows)
 # Output:  inst/extdata/citenet.parquet
 #          Restricted to citations where BOTH endpoints (citing
-#          docdb_family_id and cited_docdb_family_id) are present in BOTH
-#          of the app's family-keyed tables:
-#            - inst/extdata/countrymap.parquet    (country/city/geocode)
-#            - inst/extdata/patent_database.parquet (main nationalkey-scored table)
+#          docdb_family_id and cited_docdb_family_id) are present in
+#          inst/extdata/patent_database.parquet — i.e. the family is in
+#          the Shiny app's main database. Since 01-build-app-parquets.R
+#          augments countrymap so every (docdb, ctry) in patent_database
+#          has coordinates, this single check is sufficient: every kept
+#          citation has plottable endpoints in HiGGlobe.
 #
-# Depends on 01-build-app-parquets.R having published both files.
+# Depends on 01-build-app-parquets.R having published patent_database.parquet
+# (and the augmented countrymap.parquet).
 
 library(DBI)
 library(duckdb)
@@ -47,12 +50,9 @@ citenet_src <- file.path(dropbox_dir, "patbis2025", "data",
 if (!file.exists(citenet_src))
   stop("Source citenet parquet not found: ", citenet_src)
 
-countrymap_pq <- "inst/extdata/countrymap.parquet"
-patent_db_pq  <- "inst/extdata/patent_database.parquet"
-for (p in c(countrymap_pq, patent_db_pq)) {
-  if (!file.exists(p))
-    stop(p, " not found — run 01-build-app-parquets.R first.")
-}
+patent_db_pq <- "inst/extdata/patent_database.parquet"
+if (!file.exists(patent_db_pq))
+  stop(patent_db_pq, " not found — run 01-build-app-parquets.R first.")
 
 out_path  <- "inst/extdata/citenet.parquet"
 tmp_path  <- paste0(out_path, ".tmp-", Sys.getpid())
@@ -67,24 +67,17 @@ on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 dbExecute(con, sprintf("PRAGMA threads = %d",
                        max(1L, parallel::detectCores() - 1L)))
 
-# Families in the INTERSECTION of countrymap and patent_database.
-# Both endpoints of a citation must be in this set.
+# Distinct families present in the Shiny app's main database.
 dbExecute(con, sprintf("
   CREATE TEMP TABLE fam AS
-  SELECT DISTINCT cm.docdb_family_id
-  FROM read_parquet('%s') cm
-  WHERE cm.docdb_family_id IS NOT NULL
-    AND cm.docdb_family_id IN (
-      SELECT DISTINCT docdb_family_id
-      FROM read_parquet('%s')
-      WHERE docdb_family_id IS NOT NULL
-    )
-", countrymap_pq, patent_db_pq))
+  SELECT DISTINCT docdb_family_id
+  FROM read_parquet('%s')
+  WHERE docdb_family_id IS NOT NULL
+", patent_db_pq))
 n_fam <- dbGetQuery(con, "SELECT COUNT(*) AS n FROM fam")$n
-cat(sprintf("  families (countrymap INTERSECT patent_database): %s\n",
-            format(n_fam, big.mark = ",")))
+cat(sprintf("  patent_database families: %s\n", format(n_fam, big.mark = ",")))
 
-# Keep only citations where both endpoints are in that intersection.
+# Keep only citations where both endpoints are in that family set.
 dbExecute(con, sprintf("
   COPY (
     SELECT c.docdb_family_id, c.cited_docdb_family_id

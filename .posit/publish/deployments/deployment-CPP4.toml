@@ -11,8 +11,8 @@ id = '019cdc4e-02b5-144d-71fe-74477e6abf2a'
 dashboard_url = 'https://connect.posit.cloud/mondpanther/content/019cdc4e-02b5-144d-71fe-74477e6abf2a'
 direct_url = 'https://019cdc4e-02b5-144d-71fe-74477e6abf2a.share.connect.posit.cloud'
 logs_url = 'https://connect.posit.cloud/mondpanther/content/019cdc4e-02b5-144d-71fe-74477e6abf2a/history'
-deployed_at = '2026-04-23T14:12:31+01:00'
-bundle_id = '019dba75-9067-ab53-34a8-5047088de566'
+deployed_at = '2026-04-25T13:19:30+01:00'
+bundle_id = '019dc491-2b9d-6425-ff12-304903c962cc'
 files = [
   '.posit/publish/deployments/deployment-CPP4.toml',
   '.posit/publish/iseapp2-9GQ2.toml',
@@ -28,7 +28,7 @@ files = [
   'R/innovationStrategyExplorer-package.R',
   'R/module_about.R',
   'R/module_country.R',
-  'R/module_globe.R',
+  'R/module_hglobe.R',
   'R/module_landing.R',
   'R/module_region.R',
   'R/module_welcome.R',
@@ -45,7 +45,9 @@ files = [
   'data-raw/02-build-app-sysdata.R',
   'inst/VERSION',
   'inst/config.yml',
+  'inst/extdata/citenet.parquet',
   'inst/extdata/country_lookup.parquet',
+  'inst/extdata/countrymap.parquet',
   'inst/extdata/firm_lookup.parquet',
   'inst/extdata/inglobe_processed.parquet',
   'inst/extdata/patent_database.parquet',
@@ -75,9 +77,6 @@ files = [
   'man/expand_region_selection.Rd',
   'man/get_prepdata_path.Rd',
   'man/get_region_name.Rd',
-  'man/globe_module_server.Rd',
-  'man/globe_module_sidebar.Rd',
-  'man/globe_module_ui.Rd',
   'man/innovationStrategyExplorer-package.Rd',
   'man/load_precomputed_by_country.Rd',
   'man/load_precomputed_by_region.Rd',
