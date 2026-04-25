@@ -119,12 +119,39 @@ hglobe_module_sidebar <- function(id) {
       width = "100%"
     ),
 
-    bslib::input_task_button(
-      ns("next_step"),
-      "Next step",
-      label_busy = "Rendering edges...",
-      class = "btn-secondary",
-      width = "100%"
+    # The numericInput is wrapped in a <div class="form-group"> with a
+    # default 1rem bottom margin; a flex row with align-items:flex-end then
+    # leaves the button hovering above the input's bottom edge. Inline CSS
+    # zeroes that margin only inside this container.
+    shiny::tags$div(
+      class = "hglobe-gen-row",
+      style = paste0(
+        "display: flex; gap: 8px; align-items: flex-end; margin-top: 6px;"
+      ),
+      shiny::tags$style(shiny::HTML(
+        ".hglobe-gen-row .form-group { margin-bottom: 0; }
+         .hglobe-gen-row .shiny-input-container { width: 100%; }"
+      )),
+      shiny::div(
+        style = "flex: 0 0 120px;",
+        shiny::numericInput(
+          inputId = ns("add_generations"),
+          label   = "Add Generations",
+          value   = 1,
+          min     = 1,
+          step    = 1
+        )
+      ),
+      shiny::div(
+        style = "flex: 1; min-width: 0;",
+        bslib::input_task_button(
+          ns("next_step"),
+          "Generate",
+          label_busy = "Generating...",
+          class = "btn-secondary",
+          width = "100%"
+        )
+      )
     )
   )
 }
@@ -146,6 +173,15 @@ hglobe_module_ui <- function(id) {
 
     shiny::div(
       style = "padding: 20px;",
+      shiny::div(
+        style = "margin-bottom: 16px;",
+        shiny::h2("HiGGlobe - The Hidden Giants Explorer",
+                  style = "margin: 0 0 4px 0; font-weight: 600;"),
+        shiny::div(
+          "Visualize direct and indirect knowledge spillovers",
+          style = "color: #666; font-size: 1.05em;"
+        )
+      ),
       # html2canvas drives both the "Save PNG" download and the "Copy to
       # clipboard" path. Loaded once from CDN; no R-package dependency.
       shiny::tags$head(
@@ -189,7 +225,12 @@ hglobe_module_ui <- function(id) {
       ),
 
       shiny::div(
-        style = "display:flex; gap:8px; margin-bottom:10px;",
+        style = "margin-bottom: 10px; color: #666; font-size: 0.9em;",
+        shiny::textOutput(ns("status"))
+      ),
+      leaflet::leafletOutput(ns("map"), height = "550px"),
+      shiny::div(
+        style = "display:flex; gap:8px; justify-content:flex-end; margin-top:10px;",
         shiny::actionButton(ns("save_png"),
                             shiny::tagList(shiny::icon("download"), "Save PNG"),
                             class = "btn-sm btn-outline-secondary"),
@@ -199,14 +240,9 @@ hglobe_module_ui <- function(id) {
                             class = "btn-sm btn-outline-secondary")
       ),
       shiny::div(
-        style = "margin-bottom: 10px; color: #666; font-size: 0.9em;",
-        shiny::textOutput(ns("status"))
-      ),
-      leaflet::leafletOutput(ns("map"), height = "550px"),
-      shiny::div(
         style = "margin-top: 15px;",
         shiny::h5("Pipeline stats"),
-        shiny::tableOutput(ns("stats"))
+        shiny::uiOutput(ns("stats_ui"))
       )
     )
   )
@@ -253,14 +289,17 @@ hglobe_module_server <- function(id, con) {
       # html2canvas capture; the JS branch decides how to dispatch the canvas
       # (download vs Clipboard API). Using shinyjs::runjs avoids the need to
       # register a custom message handler.
+      # `ignoreInit = TRUE` is essential here: without it the observer fires
+      # once on module init (button value transitions NULL -> 0) and would
+      # spuriously trigger a download / clipboard write on every page load.
       shiny::observeEvent(input$save_png, {
         shinyjs::runjs(sprintf(
           "higglobe_capture('%s', 'save');", session$ns("map")))
-      })
+      }, ignoreInit = TRUE)
       shiny::observeEvent(input$copy_clip, {
         shinyjs::runjs(sprintf(
           "higglobe_capture('%s', 'copy');", session$ns("map")))
-      })
+      }, ignoreInit = TRUE)
 
       # Re-label the Step 1 sample-size input when the sampling mode toggles.
       # Bounds and step also change so percent stays clamped to 0-100 with a
@@ -288,22 +327,79 @@ hglobe_module_server <- function(id, con) {
       output$status <- shiny::renderText(status_msg())
 
       # Accumulates one row per completed step (gen 0 seeded by Render Map,
-      # gen N added by each Next step click). Reset on every Render Map.
-      # The `color` column carries an HTML swatch matching the generation's
-      # marker / edge color on the map; renderTable below skips sanitisation
-      # for that column so the inline style renders.
+      # gen N added by each Next step click). Each row carries its integer
+      # `gen` so the per-row "Show" checkbox can address the matching
+      # leaflet layer group. Reset on every Render Map.
       stats_rv <- shiny::reactiveVal(NULL)
-      output$stats <- shiny::renderTable({
+
+      # Render a Bootstrap-styled HTML table where every row has a Shiny
+      # checkbox. We use isolate() when reading prior checkbox state so
+      # this renderUI does NOT take a reactive dependency on the checkbox
+      # values themselves — otherwise ticking a box would re-render the
+      # whole table and reset every other state.
+      output$stats_ui <- shiny::renderUI({
         df <- stats_rv()
         if (is.null(df) || nrow(df) == 0) return(NULL)
-        df
-      }, striped = TRUE, hover = TRUE, width = "100%", digits = 0,
-         sanitize.text.function = identity)
+
+        rows <- lapply(seq_len(nrow(df)), function(i) {
+          g     <- df$gen[i]
+          cb_id <- sprintf("show_gen_%d", g)
+          prev  <- shiny::isolate(input[[cb_id]])
+          val   <- if (is.null(prev)) TRUE else isTRUE(prev)
+          shiny::tags$tr(
+            shiny::tags$td(
+              shiny::checkboxInput(ns(cb_id), label = NULL, value = val,
+                                   width = "30px")
+            ),
+            shiny::tags$td(shiny::HTML(df$color[i])),
+            shiny::tags$td(df$step[i]),
+            shiny::tags$td(if (is.na(df$avg_flow[i])) "—"
+                           else format(df$avg_flow[i],
+                                       big.mark = ",", digits = 4,
+                                       scientific = FALSE)),
+            shiny::tags$td(format(df$nodes_found[i], big.mark = ",")),
+            shiny::tags$td(format(df$nodes_kept[i],  big.mark = ","))
+          )
+        })
+
+        shiny::tags$table(
+          class = "table table-sm table-striped table-hover",
+          style = "width: 100%;",
+          shiny::tags$thead(shiny::tags$tr(
+            shiny::tags$th("Show"),
+            shiny::tags$th("Color"),
+            shiny::tags$th("Step"),
+            shiny::tags$th("Avg flow"),
+            shiny::tags$th("Nodes found"),
+            shiny::tags$th("Nodes kept")
+          )),
+          shiny::tags$tbody(rows)
+        )
+      })
+
+      # When any "Show" checkbox toggles, push showGroup/hideGroup to the
+      # map for that generation. This is a CSS-class flip on the existing
+      # leaflet layer — no re-query, no re-render, cheap regardless of how
+      # many edges or markers are in the group.
+      shiny::observe({
+        df <- stats_rv()
+        if (is.null(df) || nrow(df) == 0) return()
+        proxy <- leaflet::leafletProxy("map")
+        for (g in df$gen) {
+          val   <- input[[sprintf("show_gen_%d", g)]]
+          show  <- if (is.null(val)) TRUE else isTRUE(val)
+          group <- sprintf("gen_%d", g)
+          if (show) leaflet::showGroup(proxy, group)
+          else      leaflet::hideGroup(proxy, group)
+        }
+      })
 
       # Map a vector of flow values to marker radii on a log(1 + v) scale,
       # normalised so the largest value gets the largest radius within this
       # draw. NA or non-positive values fall back to the minimum radius.
-      radius_from_flow <- function(v, r_min = 3, r_max = 12) {
+      # Defaults sized for clickability at max zoom — at radius 5 px the
+      # circle is a comfortable touch/click target on most displays.
+      radius_from_flow <- function(v, r_min = 5, r_max = 16) {
         v  <- suppressWarnings(as.numeric(v))
         lv <- log1p(pmax(v, 0, na.rm = FALSE))
         lv[!is.finite(lv)] <- 0
@@ -364,7 +460,7 @@ hglobe_module_server <- function(id, con) {
 
       shiny::onSessionEnded(function() drop_session_tables())
 
-      shiny::observeEvent(input$render_map, {
+      shiny::observeEvent(input$render_map, ignoreInit = TRUE, {
         shiny::req(input$toflow, input$country, input$techs)
         sample_mode <- input$sampling_mode %||% "Percent"
         sample_val  <- suppressWarnings(as.numeric(input$sampling_rate))
@@ -456,6 +552,9 @@ hglobe_module_server <- function(id, con) {
 
         n_found <- DBI::dbGetQuery(con,
           sprintf("SELECT COUNT(*) AS n FROM %s", passing_tbl))$n
+        # Mean of the chosen flow column over the nodes FOUND (pre-sample).
+        avg_flow_found <- DBI::dbGetQuery(con,
+          sprintf("SELECT AVG(toflow_val) AS m FROM %s", passing_tbl))$m
 
         # Sample over the filtered set, then join countrymap for geo. The
         # SAMPLE clause goes inside a subquery because DuckDB's parser won't
@@ -516,9 +615,10 @@ hglobe_module_server <- function(id, con) {
 
         # Reset stats with the gen 0 row.
         stats_rv(data.frame(
+          gen             = 0L,
           color           = color_swatch_html(pick_color(0)),
           step            = "gen 0 (seed)",
-          flow            = toflow_col,
+          avg_flow        = avg_flow_found,
           nodes_found     = n_found,
           nodes_kept      = nrow(dat),
           stringsAsFactors = FALSE,
@@ -526,7 +626,7 @@ hglobe_module_server <- function(id, con) {
         ))
 
         status_msg(sprintf(
-          "Seeded generation 0: %s of %s rows kept after sampling. Click 'Next step' to expand citations.",
+          "Seeded generation 0: %s of %s rows kept after sampling. Click 'Generate' to expand citations.",
           format(nrow(dat), big.mark = ","),
           format(n_found,   big.mark = ",")))
 
@@ -565,7 +665,8 @@ hglobe_module_server <- function(id, con) {
             fillOpacity  = 0.6,
             fillColor    = ifelse(isTRUE(dat$geocode_missing),
                                   "#bbbbbb", pick_color(0)),
-            popup        = popup_txt
+            popup        = popup_txt,
+            group        = "gen_0"
           )
       })
 
@@ -605,26 +706,17 @@ hglobe_module_server <- function(id, con) {
       # citing rows (at least one), resolve coordinates via countrymap, and
       # persist the resulting distinct next-generation docdbs as the new
       # frontier table for the next click.
-      shiny::observeEvent(input$next_step, {
-        g <- gen_next()
-        if (is.null(g)) {
-          status_msg("Run 'Render Map' first to seed generation 0.")
-          return()
-        }
-        pct_edge <- suppressWarnings(as.numeric(input$edge_sampling_rate))
-        if (!is.finite(pct_edge) || pct_edge < 0 || pct_edge > 100) {
-          status_msg("Edge sampling rate must be between 0 and 100.")
-          return()
-        }
+      # Per-iteration worker: advances exactly ONE generation. Returns TRUE
+      # on success, FALSE if the SQL failed or there were zero citations
+      # (the latter still appends a stats row before returning). Defined
+      # here so both the immediate first-iteration path and the deferred
+      # later::later() path can reuse it.
+      do_one_generation <- function(pct_edge, toflow_col) {
+        g        <- gen_next()
         prev_tbl <- frontier_tbl(g - 1)
         new_tbl  <- frontier_tbl(g)
         tmp_tbl  <- sprintf("hglobe_edges_tmp_%s", tok)
-        # Use whatever toflow was picked at the last "Render Map" click so
-        # node sizes remain consistent across generations.
-        toflow_col <- input$toflow
 
-        # Materialise the edge set (with src + tgt coords + tgt flow value)
-        # in a temp table, then derive the new frontier from it.
         sql_edges <- glue::glue("
           CREATE OR REPLACE TABLE {tmp_tbl} AS
           WITH citations AS (
@@ -635,24 +727,11 @@ hglobe_module_server <- function(id, con) {
               SELECT docdb_family_id FROM {prev_tbl}
             )
           ),
-          ranked AS (
-            SELECT *,
-                   ROW_NUMBER() OVER (
-                     PARTITION BY prev_docdb_family_id
-                     ORDER BY HASH(next_docdb_family_id)
-                   ) AS rn,
-                   COUNT(*) OVER (PARTITION BY prev_docdb_family_id) AS cnt
-            FROM citations
-          ),
           sampled_edges AS (
             SELECT prev_docdb_family_id, next_docdb_family_id
-            FROM ranked
-            WHERE rn <= GREATEST(1, CEIL(cnt * {pct_edge} / 100.0))
+            FROM citations
+            USING SAMPLE {format(pct_edge, nsmall = 4)} PERCENT (bernoulli)
           ),
-          -- Per-docdb MAX of the chosen flow column plus a single appln_id
-          -- (Espacenet-searchable publication number); joined below to
-          -- attach toflow_val and appln_id to every citing docdb regardless
-          -- of its country multiplicity in full_patent_database.
           flow_per_fam AS (
             SELECT docdb_family_id, ctry_code,
                    MAX({toflow_col})    AS toflow_val,
@@ -661,9 +740,6 @@ hglobe_module_server <- function(id, con) {
             WHERE {toflow_col} IS NOT NULL
             GROUP BY docdb_family_id, ctry_code
           ),
-          -- Pick one (ctry_code, lat, lon, toflow_val, appln_id) per citing
-          -- docdb, restricted to countrymap rows that also have a flow
-          -- value so size scaling works. Alphabetical ctry_code tie-break.
           target_geo AS (
             SELECT DISTINCT ON (c.docdb_family_id)
                    c.docdb_family_id, c.ctry_code, c.city, c.lat, c.lon,
@@ -687,42 +763,56 @@ hglobe_module_server <- function(id, con) {
           JOIN {prev_tbl} pf   ON pf.docdb_family_id = se.prev_docdb_family_id
           JOIN target_geo tg   ON tg.docdb_family_id = se.next_docdb_family_id
         ")
+
         ok <- tryCatch({
           DBI::dbExecute(con, sql_edges); TRUE
         }, error = function(e) {
           status_msg(paste("Edge query failed:", conditionMessage(e))); FALSE
         })
-        if (!ok) return()
+        if (!ok) return(FALSE)
 
         n_edges <- DBI::dbGetQuery(con,
           sprintf("SELECT COUNT(*) AS n FROM %s", tmp_tbl))$n
-        # Count distinct candidate citing docdbs BEFORE sampling — this is
-        # the "nodes found" number for the stats table.
-        n_found_nodes <- DBI::dbGetQuery(con, sprintf("
-          SELECT COUNT(DISTINCT c.docdb_family_id) AS n
-          FROM citenet c
-          WHERE c.cited_docdb_family_id IN (
-            SELECT docdb_family_id FROM %s
+        found_stats <- DBI::dbGetQuery(con, sprintf("
+          WITH found AS (
+            SELECT DISTINCT c.docdb_family_id
+            FROM citenet c
+            WHERE c.cited_docdb_family_id IN (
+              SELECT docdb_family_id FROM %s
+            )
+          ),
+          per_fam AS (
+            SELECT p.docdb_family_id,
+                   MAX(p.%s) AS toflow_val
+            FROM full_patent_database p
+            INNER JOIN found USING (docdb_family_id)
+            WHERE p.%s IS NOT NULL
+            GROUP BY p.docdb_family_id
           )
-        ", prev_tbl))$n
+          SELECT
+            (SELECT COUNT(*)         FROM found)   AS n,
+            (SELECT AVG(toflow_val)  FROM per_fam) AS avg_flow
+        ", prev_tbl, toflow_col, toflow_col))
+        n_found_nodes  <- found_stats$n
+        avg_flow_found <- found_stats$avg_flow
 
         if (n_edges == 0) {
           status_msg(sprintf(
             "No citations found for generation %d frontier.", g - 1))
           stats_rv(rbind(stats_rv(), data.frame(
+            gen             = as.integer(g),
             color           = color_swatch_html(pick_color(g)),
             step            = sprintf("gen %d", g),
-            flow            = toflow_col,
+            avg_flow        = avg_flow_found,
             nodes_found     = n_found_nodes,
             nodes_kept      = 0L,
             stringsAsFactors = FALSE,
             check.names     = FALSE)))
           try(DBI::dbExecute(con, sprintf("DROP TABLE IF EXISTS %s", tmp_tbl)),
               silent = TRUE)
-          return()
+          return(FALSE)
         }
 
-        # Persist the distinct next-generation docdbs as the new frontier.
         DBI::dbExecute(con, sprintf("
           CREATE OR REPLACE TABLE %s AS
           SELECT DISTINCT
@@ -742,9 +832,10 @@ hglobe_module_server <- function(id, con) {
 
         n_kept_nodes <- length(unique(edges$next_docdb_family_id))
         stats_rv(rbind(stats_rv(), data.frame(
+          gen             = as.integer(g),
           color           = color_swatch_html(pick_color(g)),
           step            = sprintf("gen %d", g),
-          flow            = toflow_col,
+          avg_flow        = avg_flow_found,
           nodes_found     = n_found_nodes,
           nodes_kept      = n_kept_nodes,
           stringsAsFactors = FALSE,
@@ -760,15 +851,13 @@ hglobe_module_server <- function(id, con) {
           format(n_kept_nodes,  big.mark = ","),
           format(n_found_nodes, big.mark = ",")))
 
-        # Target-side markers (one per new-frontier docdb) — plot on top of
-        # prior generations' markers; don't clear them.
         tgt_pts <- unique(edges[, c("next_docdb_family_id",
                                     "tgt_ctry", "tgt_lat", "tgt_lon",
                                     "tgt_city", "toflow_val", "tgt_appln_id")])
-
         tgt_link <- espacenet_link(tgt_pts$tgt_appln_id)
         tgt_link_html <- ifelse(is.na(tgt_link), "(no appln id)", tgt_link)
 
+        gen_group <- sprintf("gen_%d", g)
         m <- leaflet::leafletProxy("map") |>
           leaflet::addCircleMarkers(
             lng         = tgt_pts$tgt_lon,
@@ -787,10 +876,9 @@ hglobe_module_server <- function(id, con) {
               toflow_col,
               format(tgt_pts$toflow_val, big.mark = ",",
                      digits = 4, scientific = FALSE)
-            )
+            ),
+            group       = gen_group
           )
-
-        # Curved polyline per edge using the bezier primitive above.
         for (i in seq_len(nrow(edges))) {
           cv <- make_curve(edges$src_lon[i], edges$src_lat[i],
                            edges$tgt_lon[i], edges$tgt_lat[i])
@@ -800,8 +888,60 @@ hglobe_module_server <- function(id, con) {
               lat     = cv$lat,
               color   = col,
               weight  = 1,
-              opacity = 0.35
+              opacity = 0.35,
+              group   = gen_group
             )
+        }
+        TRUE
+      }
+
+      # Queue of generations still to run for the current "Generate" click.
+      # Driving iterations through this reactiveVal + later::later() lets each
+      # generation paint to the browser before the next one starts, so the
+      # user sees the chain build up incrementally instead of waiting for the
+      # whole batch to finish in one frozen blob.
+      pending_gens <- shiny::reactiveVal(0L)
+      # Inputs needed by each iteration are captured when "Generate" is
+      # pressed, so changes to the sliders mid-batch don't surprise the
+      # user (the Render Map seed locked the toflow already).
+      pending_pct  <- shiny::reactiveVal(NA_real_)
+      pending_flow <- shiny::reactiveVal(NA_character_)
+
+      shiny::observeEvent(input$next_step, ignoreInit = TRUE, {
+        if (is.null(gen_next())) {
+          status_msg("Run 'Render Map' first to seed generation 0.")
+          return()
+        }
+        pct_edge <- suppressWarnings(as.numeric(input$edge_sampling_rate))
+        if (!is.finite(pct_edge) || pct_edge < 0 || pct_edge > 100) {
+          status_msg("Edge sampling rate must be between 0 and 100.")
+          return()
+        }
+        n_steps <- suppressWarnings(as.integer(input$add_generations))
+        if (is.na(n_steps) || n_steps < 1) n_steps <- 1L
+
+        pending_pct(pct_edge)
+        pending_flow(input$toflow)
+        pending_gens(n_steps)
+      })
+
+      shiny::observeEvent(pending_gens(), ignoreInit = TRUE, {
+        rem <- pending_gens()
+        if (rem <= 0) return()
+        ok <- do_one_generation(pending_pct(), pending_flow())
+        if (!ok) {
+          pending_gens(0L)
+          return()
+        }
+        if (rem > 1) {
+          # Defer the decrement so the current reactive flush completes —
+          # the leaflet markers / polylines / stats row added above paint
+          # to the browser before the next iteration starts.
+          later::later(function() {
+            shiny::isolate(pending_gens(rem - 1L))
+          }, delay = 0.15)
+        } else {
+          pending_gens(0L)
         }
       })
 
