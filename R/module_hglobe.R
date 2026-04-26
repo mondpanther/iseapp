@@ -274,6 +274,23 @@ hglobe_module_ui <- function(id) {
         style = "margin-top: 15px;",
         shiny::h5("Pipeline stats"),
         shiny::uiOutput(ns("stats_ui"))
+      ),
+      shiny::div(
+        style = paste0(
+          "margin-top: 14px; color: #555; font-size: 0.9em; ",
+          "line-height: 1.45; max-width: 60em;"),
+        shiny::tags$strong("Notes:"),
+        " The HiGGlobe tool allows you to trace the direct and indirect ",
+        "knowledge spillovers from a set of initial innovations. To make ",
+        "handling a potentially large number of innovations and associated ",
+        "citations tractable, the tool allows to draw a sample from a larger ",
+        "population as well as only displaying a random sample of the ",
+        "associated citation edges. With this you can uncover ",
+        shiny::tags$em("giants"),
+        " - innovations that are heavily cited - and ",
+        shiny::tags$em("hidden giants"),
+        " - innovations that are not cited very much directly but have a ",
+        "strong impact via indirect citation links."
       )
     )
   )
@@ -388,6 +405,10 @@ hglobe_module_server <- function(id, con) {
                            else format(df$avg_flow[i],
                                        big.mark = ",", digits = 4,
                                        scientific = FALSE)),
+            shiny::tags$td(if (is.null(df$avg_pv[i]) || is.na(df$avg_pv[i])) "—"
+                           else format(df$avg_pv[i],
+                                       big.mark = ",", digits = 4,
+                                       scientific = FALSE)),
             shiny::tags$td(format(df$nodes_found[i], big.mark = ",")),
             shiny::tags$td(format(df$nodes_kept[i],  big.mark = ","))
           )
@@ -401,6 +422,7 @@ hglobe_module_server <- function(id, con) {
             shiny::tags$th("Color"),
             shiny::tags$th("Step"),
             shiny::tags$th("Avg flow"),
+            shiny::tags$th("Avg pv"),
             shiny::tags$th("Nodes found"),
             shiny::tags$th("Nodes kept")
           )),
@@ -559,6 +581,7 @@ hglobe_module_server <- function(id, con) {
             SELECT p.docdb_family_id,
                    p.ctry_code,
                    MAX(p.{toflow_col}) AS toflow_val,
+                   MAX(p.pv)             AS pv_val,
                    ANY_VALUE(p.appln_id) AS appln_id
             FROM full_patent_database p
             {if (has_tech) 'INNER JOIN filtered_tech ft ON p.docdb_family_id = ft.docdb_family_id' else ''}
@@ -585,9 +608,13 @@ hglobe_module_server <- function(id, con) {
 
         n_found <- DBI::dbGetQuery(con,
           sprintf("SELECT COUNT(*) AS n FROM %s", passing_tbl))$n
-        # Mean of the chosen flow column over the nodes FOUND (pre-sample).
-        avg_flow_found <- DBI::dbGetQuery(con,
-          sprintf("SELECT AVG(toflow_val) AS m FROM %s", passing_tbl))$m
+        # Mean of the chosen flow column AND the patent value (pv) over the
+        # nodes FOUND (pre-sample). One round-trip carries both averages.
+        agg_found <- DBI::dbGetQuery(con, sprintf(
+          "SELECT AVG(toflow_val) AS avg_flow, AVG(pv_val) AS avg_pv FROM %s",
+          passing_tbl))
+        avg_flow_found <- agg_found$avg_flow
+        avg_pv_found   <- agg_found$avg_pv
 
         # Sample over the filtered set, then join countrymap for geo. The
         # SAMPLE clause goes inside a subquery because DuckDB's parser won't
@@ -665,6 +692,7 @@ hglobe_module_server <- function(id, con) {
           color           = color_swatch_html(pick_color(0)),
           step            = "gen 0 (seed)",
           avg_flow        = avg_flow_found,
+          avg_pv          = avg_pv_found,
           nodes_found     = n_found,
           nodes_kept      = nrow(dat),
           stringsAsFactors = FALSE,
@@ -829,7 +857,8 @@ hglobe_module_server <- function(id, con) {
           ),
           per_fam AS (
             SELECT p.docdb_family_id,
-                   MAX(p.%s) AS toflow_val
+                   MAX(p.%s) AS toflow_val,
+                   MAX(p.pv) AS pv_val
             FROM full_patent_database p
             INNER JOIN found USING (docdb_family_id)
             WHERE p.%s IS NOT NULL
@@ -837,10 +866,12 @@ hglobe_module_server <- function(id, con) {
           )
           SELECT
             (SELECT COUNT(*)         FROM found)   AS n,
-            (SELECT AVG(toflow_val)  FROM per_fam) AS avg_flow
+            (SELECT AVG(toflow_val)  FROM per_fam) AS avg_flow,
+            (SELECT AVG(pv_val)      FROM per_fam) AS avg_pv
         ", prev_tbl, toflow_col, toflow_col))
         n_found_nodes  <- found_stats$n
         avg_flow_found <- found_stats$avg_flow
+        avg_pv_found   <- found_stats$avg_pv
 
         if (n_edges == 0) {
           status_msg(sprintf(
@@ -850,6 +881,7 @@ hglobe_module_server <- function(id, con) {
             color           = color_swatch_html(pick_color(g)),
             step            = sprintf("gen %d", g),
             avg_flow        = avg_flow_found,
+            avg_pv          = avg_pv_found,
             nodes_found     = n_found_nodes,
             nodes_kept      = 0L,
             stringsAsFactors = FALSE,
@@ -882,6 +914,7 @@ hglobe_module_server <- function(id, con) {
           color           = color_swatch_html(pick_color(g)),
           step            = sprintf("gen %d", g),
           avg_flow        = avg_flow_found,
+          avg_pv          = avg_pv_found,
           nodes_found     = n_found_nodes,
           nodes_kept      = n_kept_nodes,
           stringsAsFactors = FALSE,
@@ -1005,22 +1038,39 @@ hglobe_module_server <- function(id, con) {
         }
       })
 
-      # URL-driven auto-Generate: when ?higglobe_gen=N is on the URL the
-      # server-side handler has already preset input$add_generations and
-      # (likely) clicked Initiate Innovation. We just need to wait for
-      # gen 0 to be seeded (gen_next() flips from NULL to 1L) and then
-      # fire the Generate button once. `auto_gen_armed` ensures we do this
-      # at most once per arrival, even if the user clicks Initiate
-      # Innovation again later.
-      auto_gen_armed <- shiny::reactiveVal(FALSE)
+      # URL-driven auto-init + auto-Generate: when ?higglobe_run=1 (or
+      # ?higglobe_gen=N or ?step=N) is on the URL, server.R has stashed
+      # the flag in session$userData$restore_params. The module fires the
+      # actual button clicks itself, AFTER all its observers are
+      # registered, so the clicks never race lazy-init.
+      auto_init_armed <- shiny::reactiveVal(FALSE)
+      auto_gen_armed  <- shiny::reactiveVal(FALSE)
       shiny::observe({
-        rp  <- session$userData$restore_params %||% list()
-        raw <- rp$higglobe_gen
-        if (is.null(raw) || !nzchar(raw)) return()
-        n_gen <- suppressWarnings(as.integer(raw))
-        if (length(n_gen) == 1L && !is.na(n_gen) && n_gen > 0)
-          auto_gen_armed(TRUE)
+        rp <- session$userData$restore_params %||% list()
+        # auto-init if any of run / gen / step indicates we should
+        run_flag <- isTRUE(tolower(as.character(rp$higglobe_run %||% "")) %in%
+                           c("1", "true", "yes", "on"))
+        raw_gen  <- rp$higglobe_gen
+        n_gen <- if (!is.null(raw_gen) && nzchar(raw_gen))
+                   suppressWarnings(as.integer(raw_gen)) else NA_integer_
+        gen_flag <- length(n_gen) == 1L && !is.na(n_gen) && n_gen > 0
+        if (run_flag || gen_flag) auto_init_armed(TRUE)
+        if (gen_flag)             auto_gen_armed(TRUE)
       })
+      # Fire the Initiate Innovation click once, with a small delay so
+      # selectizeInput / numericInput updates from the URL handler have
+      # propagated to the client.
+      shiny::observeEvent(auto_init_armed(), once = TRUE, ignoreInit = TRUE, {
+        if (!isTRUE(auto_init_armed())) return()
+        auto_init_armed(FALSE)
+        later::later(function() {
+          shinyjs::click(id = "render_map")
+        }, delay = 1.2)
+      })
+      # Fire the Generate click once gen 0 is actually seeded (gen_next
+      # flips from NULL to 1L). `auto_gen_armed` is set above, so a user
+      # who later re-runs Initiate Innovation manually doesn't get a
+      # surprise auto-Generate.
       shiny::observe({
         if (!isTRUE(auto_gen_armed())) return()
         g <- gen_next()

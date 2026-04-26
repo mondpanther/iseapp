@@ -197,9 +197,10 @@ server <- function(input, output, session, con) {
     # `step=N` is the bookmarkable shorthand: the URL records the number of
     # generations currently displayed, and reopening that URL replays the
     # full sequence (init + N generations). It mirrors the effect of
-    # higglobe_run=1 + higglobe_gen=N. The module's observer reads
-    # higglobe_gen from restore_params to arm the auto-Generate, so we
-    # also stash the value there if the URL only carried `step`.
+    # higglobe_run=1 + higglobe_gen=N. The actual click on Initiate
+    # Innovation is fired by the module itself once it has booted (it is
+    # initialised lazily on the first HiGGlobe tab visit) — clicking the
+    # button from server.R races the lazy init and was unreliable.
     step_val <- suppressWarnings(as.integer(q$step))
     if (length(step_val) == 1L && !is.na(step_val) && step_val > 0L) {
       shiny::updateNumericInput(session, "hglobe-add_generations",
@@ -208,23 +209,19 @@ server <- function(input, output, session, con) {
         session$userData$restore_params <- list()
       session$userData$restore_params$higglobe_gen <-
         as.character(step_val)
+      session$userData$restore_params$higglobe_run <- "1"
       bslib::nav_select(id = "navbar_page", selected = "HiGGlobe",
                         session = session)
-      later::later(function() {
-        shinyjs::click("hglobe-render_map")
-      }, delay = 2.0)
     }
 
-    # higglobe_run=1 auto-fires Initiate Innovation a moment after the
-    # module has booted. The hglobe_module_server is initialised lazily on
-    # first HiGGlobe tab visit, so we both switch to the tab and schedule
-    # the click on a delay long enough to let the inputs above settle.
+    # higglobe_run=1 just stashes the flag and switches to HiGGlobe; the
+    # module fires the click itself once it has booted.
     if (as_bool(q$higglobe_run)) {
+      if (is.null(session$userData$restore_params))
+        session$userData$restore_params <- list()
+      session$userData$restore_params$higglobe_run <- "1"
       bslib::nav_select(id = "navbar_page", selected = "HiGGlobe",
                         session = session)
-      later::later(function() {
-        shinyjs::click("hglobe-render_map")
-      }, delay = 2.0)
     }
   })
 
