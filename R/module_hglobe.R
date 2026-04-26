@@ -272,7 +272,6 @@ hglobe_module_ui <- function(id) {
       ),
       shiny::div(
         style = "margin-top: 15px;",
-        shiny::h5("Pipeline stats"),
         shiny::uiOutput(ns("stats_ui"))
       ),
       shiny::div(
@@ -1056,29 +1055,65 @@ hglobe_module_server <- function(id, con) {
         gen_flag <- length(n_gen) == 1L && !is.na(n_gen) && n_gen > 0
         if (run_flag || gen_flag) auto_init_armed(TRUE)
         if (gen_flag)             auto_gen_armed(TRUE)
+        # Schedule the Initiate Innovation click DIRECTLY here, not via
+        # an intervening observeEvent. The observeEvent route was
+        # racing the same reactive flush in which auto_init_armed first
+        # transitioned to TRUE — with the eventExpr already truthy on
+        # initial evaluation, the change-detection logic skipped it and
+        # the body never ran. Doing the click inline avoids that
+        # entirely. The flag is still set for the status-message
+        # display below.
+        if (run_flag || gen_flag) {
+          auto_click("render_map", delay_ms = 1200L,
+                     label = "Initiate Innovation")
+        } else {
+          # Diagnostic only: if we got here without arming we want to
+          # see WHY (which keys were and weren't in the URL).
+          status_msg(sprintf(
+            "URL params seen: %d keys [%s] | run=%s, gen=%s",
+            length(rp),
+            paste(names(rp), collapse = ","),
+            run_flag,
+            if (is.na(n_gen)) "NA" else as.character(n_gen)))
+        }
       })
-      # Helper: trigger a native DOM click on a namespaced button. We use
-      # this rather than shinyjs::click() because input_task_button's
-      # ExtendedTask wires its handler to the native click event — a
-      # jQuery .click() (which is what shinyjs::click does) doesn't
-      # always propagate. The JS also polls for the button to actually
-      # exist in the DOM before clicking, so it won't quietly miss when
-      # the HiGGlobe tab content hasn't finished rendering yet.
-      auto_click <- function(short_id, delay_ms = 0L) {
-        full_id <- session$ns(short_id)
+      # Helper: trigger the Shiny input value bump for a button so the
+      # observeEvent(input$<id>, ...) listener fires — same wire signal a
+      # real user click would produce. Goes through Shiny.setInputValue
+      # with priority:'event', which works whether the button is a plain
+      # actionButton or a bslib::input_task_button (whose ExtendedTask
+      # wrapper sometimes ignores synthetic DOM clicks). The status_msg
+      # update gives the user a visible breadcrumb so we can see whether
+      # the auto-trigger actually fired even if the click somehow misses.
+      auto_click <- function(short_id, delay_ms = 0L,
+                             label = short_id) {
+        full_id  <- session$ns(short_id)
+        cur_raw  <- shiny::isolate(input[[short_id]])
+        cur_val  <- if (is.null(cur_raw)) 0L else as.integer(cur_raw)
+        next_val <- cur_val + 1L
+        status_msg(sprintf(
+          "Auto-%s scheduled (in %d ms)...", label, as.integer(delay_ms)))
         shinyjs::runjs(sprintf(
-          "(function(){var id='%s';var initial=%d;var attempts=0;function go(){var b=document.getElementById(id);if(b){b.click();return;}if(attempts++>40)return;setTimeout(go,250);}setTimeout(go,initial);})();",
-          full_id, as.integer(delay_ms)
+          paste0(
+            "(function(){",
+            "var id='%s';",
+            "function fire(){",
+            "  if(window.Shiny && Shiny.setInputValue){",
+            "    Shiny.setInputValue(id, %d, {priority:'event'});",
+            "    var b=document.getElementById(id);",
+            "    if(b){try{b.click();}catch(e){}}",
+            "  } else { setTimeout(fire, 100); }",
+            "}",
+            "setTimeout(fire, %d);",
+            "})();"
+          ),
+          full_id, next_val, as.integer(delay_ms)
         ))
       }
 
-      # Fire the Initiate Innovation click once. The 1.2 s delay covers
-      # selectizeInput / numericInput round-trips from the URL handler.
-      shiny::observeEvent(auto_init_armed(), once = TRUE, ignoreInit = TRUE, {
-        if (!isTRUE(auto_init_armed())) return()
-        auto_init_armed(FALSE)
-        auto_click("render_map", delay_ms = 1200L)
-      })
+      # (auto-init click is now scheduled inline in the observe() above
+      # — no observeEvent indirection.)
+
       # Fire the Generate click once gen 0 is actually seeded (gen_next
       # flips from NULL to 1L). `auto_gen_armed` is set above, so a user
       # who later re-runs Initiate Innovation manually doesn't get a
@@ -1088,7 +1123,7 @@ hglobe_module_server <- function(id, con) {
         g <- gen_next()
         if (is.null(g) || g != 1L) return()
         auto_gen_armed(FALSE)
-        auto_click("next_step", delay_ms = 400L)
+        auto_click("next_step", delay_ms = 400L, label = "Generate")
       })
 
       # Spinner: visible whenever a multi-generation batch is mid-flight,

@@ -194,13 +194,7 @@ server <- function(input, output, session, con) {
                                   value = n_gen)
     }
 
-    # `step=N` is the bookmarkable shorthand: the URL records the number of
-    # generations currently displayed, and reopening that URL replays the
-    # full sequence (init + N generations). It mirrors the effect of
-    # higglobe_run=1 + higglobe_gen=N. The actual click on Initiate
-    # Innovation is fired by the module itself once it has booted (it is
-    # initialised lazily on the first HiGGlobe tab visit) — clicking the
-    # button from server.R races the lazy init and was unreliable.
+    # `step=N` (legacy custom param) — preserved as a shorthand.
     step_val <- suppressWarnings(as.integer(q$step))
     if (length(step_val) == 1L && !is.na(step_val) && step_val > 0L) {
       shiny::updateNumericInput(session, "hglobe-add_generations",
@@ -210,6 +204,29 @@ server <- function(input, output, session, con) {
       session$userData$restore_params$higglobe_gen <-
         as.character(step_val)
       session$userData$restore_params$higglobe_run <- "1"
+      bslib::nav_select(id = "navbar_page", selected = "HiGGlobe",
+                        session = session)
+    }
+
+    # Auto-replay from a Shiny native bookmark: when the bookmark URL
+    # contains hglobe-render_map > 0 (meaning the button was clicked at
+    # least once in the previous session), treat that as the auto-init
+    # signal. If hglobe-next_step is also > 0, auto-fire Generate after
+    # the seed is ready. The actual button clicks are dispatched by the
+    # module itself, after its observers are registered (clicking from
+    # server.R raced the lazy module init and was unreliable).
+    rm_clicks <- suppressWarnings(as.integer(q[["hglobe-render_map"]]))
+    if (length(rm_clicks) == 1L && !is.na(rm_clicks) && rm_clicks > 0L) {
+      if (is.null(session$userData$restore_params))
+        session$userData$restore_params <- list()
+      session$userData$restore_params$higglobe_run <- "1"
+      ns_clicks <- suppressWarnings(as.integer(q[["hglobe-next_step"]]))
+      if (length(ns_clicks) == 1L && !is.na(ns_clicks) && ns_clicks > 0L) {
+        # Mark the auto-Generate as armed; the module reads
+        # higglobe_gen and the user's bookmarked add_generations field
+        # already carries the per-click step count Shiny restored.
+        session$userData$restore_params$higglobe_gen <- "1"
+      }
       bslib::nav_select(id = "navbar_page", selected = "HiGGlobe",
                         session = session)
     }
