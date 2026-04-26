@@ -90,7 +90,7 @@ hglobe_module_sidebar <- function(id) {
         shiny::radioButtons(
           inputId = ns("sampling_mode"),
           label   = "Sampling mode",
-          choices = c("Percent", "Number"),
+          choices = c("Percent", "Number", "Top"),
           selected = "Percent",
           inline   = TRUE
         )
@@ -352,7 +352,8 @@ hglobe_module_server <- function(id, con) {
       # Bounds and step also change so percent stays clamped to 0-100 with a
       # 0.1 step, while integer counts get a step of 1 with no upper bound.
       shiny::observeEvent(input$sampling_mode, {
-        if (identical(input$sampling_mode, "Number")) {
+        if (identical(input$sampling_mode, "Number") ||
+            identical(input$sampling_mode, "Top")) {
           shiny::updateNumericInput(session, "sampling_rate",
             label = "Sample size [#]",
             min = 0, max = NA, step = 1)
@@ -523,6 +524,19 @@ hglobe_module_server <- function(id, con) {
           }
           sample_clause <- sprintf("USING SAMPLE %d ROWS (reservoir)",
                                    as.integer(sample_val))
+        } else if (identical(sample_mode, "Top")) {
+          # Deterministic top-N by the chosen flow value — same logic the
+          # Country Explorer's Value-flows-by-Technology bar chart uses to
+          # build "Top N patent IDs" lists. The `toflow_val` column on
+          # `passing_tbl` is the per-(docdb, ctry) MAX of input$toflow,
+          # so an ORDER BY ... DESC LIMIT N gives the highest-flow
+          # families. NULLS LAST keeps any unscored rows out of the top.
+          if (!is.finite(sample_val) || sample_val < 0) {
+            status_msg("Sample size must be a non-negative integer.")
+            return()
+          }
+          sample_clause <- sprintf("ORDER BY toflow_val DESC NULLS LAST LIMIT %d",
+                                   as.integer(sample_val))
         } else {
           if (!is.finite(sample_val) || sample_val < 0 || sample_val > 100) {
             status_msg("Sampling rate must be between 0 and 100.")
@@ -621,9 +635,10 @@ hglobe_module_server <- function(id, con) {
         # BEFORE the join ensures each (docdb, ctry) gets an independent
         # inclusion decision regardless of how many rows the countrymap join
         # produces downstream.
-        #   sample_clause is either
-        #     "USING SAMPLE <pct> PERCENT (bernoulli)"   (Percent mode)
-        #     "USING SAMPLE <n> ROWS (reservoir)"        (Number  mode)
+        #   sample_clause is one of:
+        #     "USING SAMPLE <pct> PERCENT (bernoulli)"           (Percent)
+        #     "USING SAMPLE <n> ROWS (reservoir)"                (Number)
+        #     "ORDER BY toflow_val DESC NULLS LAST LIMIT <n>"    (Top)
         sql <- sprintf("
           SELECT p.docdb_family_id, p.ctry_code, p.toflow_val, p.appln_id,
                  c.city, c.lat, c.lon, c.geocode_missing
