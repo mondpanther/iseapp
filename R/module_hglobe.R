@@ -199,7 +199,7 @@ hglobe_module_ui <- function(id) {
       style = "padding: 20px;",
       shiny::div(
         style = "margin-bottom: 16px;",
-        shiny::h2("HiGGlobe - The Hidden Giants Explorer",
+        shiny::h2("HiGGlo - The Hidden Giants Globe",
                   style = "margin: 0 0 4px 0; font-weight: 600;"),
         shiny::div(
           "Visualize direct and indirect knowledge spillovers",
@@ -279,7 +279,7 @@ hglobe_module_ui <- function(id) {
           "margin-top: 14px; color: #555; font-size: 0.9em; ",
           "line-height: 1.45; max-width: 60em;"),
         shiny::tags$strong("Notes:"),
-        " The HiGGlobe tool allows you to trace the direct and indirect ",
+        " The HiGGlo tool allows you to trace the direct and indirect ",
         "knowledge spillovers from a set of initial innovations. To make ",
         "handling a potentially large number of innovations and associated ",
         "citations tractable, the tool allows to draw a sample from a larger ",
@@ -1066,15 +1066,6 @@ hglobe_module_server <- function(id, con) {
         if (run_flag || gen_flag) {
           auto_click("render_map", delay_ms = 1200L,
                      label = "Initiate Innovation")
-        } else {
-          # Diagnostic only: if we got here without arming we want to
-          # see WHY (which keys were and weren't in the URL).
-          status_msg(sprintf(
-            "URL params seen: %d keys [%s] | run=%s, gen=%s",
-            length(rp),
-            paste(names(rp), collapse = ","),
-            run_flag,
-            if (is.na(n_gen)) "NA" else as.character(n_gen)))
         }
       })
       # Helper: trigger the Shiny input value bump for a button so the
