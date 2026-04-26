@@ -530,6 +530,36 @@ if (file.exists(granted_cache)) {
 }
 toc()
 
+# ---- Pull multi-application family set from BigQuery -----------------------
+# Used to attach a per-family `fam_size_min2` boolean column so the Shiny UI
+# can filter to families with PATSTAT docdb_family_size >= 2 at query time.
+# We always materialise this list, regardless of the build-time
+# FAMILY_SIZE_MIN setting, so the runtime filter can be toggled
+# independently of the build-time scope.
+cat("\nFetching fam_size>=2 set from BigQuery ...\n")
+tic("multifam-family fetch")
+multifam_cache <- file.path(bigdata_dir, "fam_size_min2.parquet")
+if (file.exists(multifam_cache)) {
+  cat("  Reading cached fam_size>=2 families from ", multifam_cache, "\n", sep = "")
+  multifam_fams <- as.data.table(arrow::read_parquet(multifam_cache))
+} else {
+  cat("  Querying patbis.fromPATSTAT2025.tls201_appln ...\n")
+  multifam_fams <- as.data.table(bq_table_download(
+    bq_project_query("patbis", "
+      SELECT DISTINCT docdb_family_id
+      FROM `patbis.fromPATSTAT2025.tls201_appln`
+      WHERE docdb_family_size >= 2
+        AND docdb_family_id IS NOT NULL
+    "),
+    page_size = 200000, bigint = "integer"
+  ))
+  arrow::write_parquet(multifam_fams, multifam_cache,
+                       compression = "zstd", compression_level = 3)
+  cat("  Cached ", nrow(multifam_fams),
+      " fam_size>=2 families -> ", multifam_cache, "\n", sep = "")
+}
+toc()
+
 
 # ============================================================================
 # STEP 10: Compute istraxes from fromWATSON
@@ -649,9 +679,13 @@ if (all(c("ev_HIC", "ev_EMDE") %in% names(patchar))) {
 # countries. National measures (from pcm) vary by country.
 cat("  10e: Building innovation x country measures in memory...\n")
 
-# Per-innovation measures (same for all countries of an innovation)
+# Per-innovation measures (same for all countries of an innovation).
+# `cost`, `alpha`, `pv` are kept here too — they are the inputs the runtime
+# view in R/runAppPackage.R uses to derive is_*/av_* on the fly, so we no
+# longer need to materialise the 44 derived columns into the parquet.
 measure_cols <- grep("^(istrax_|avstrax_|ev_)", names(patchar), value = TRUE)
-patchar_slim <- patchar[, c("docdb_family_id", measure_cols), with = FALSE]
+patchar_slim <- patchar[, c("docdb_family_id", measure_cols,
+                             "cost", "alpha", "pv"), with = FALSE]
 
 # Cross with countrymap to get innovation x country level
 patent_data <- patchar_slim[countrymap, on = "docdb_family_id", nomatch = 0L]
@@ -664,6 +698,18 @@ cat(sprintf("    granted families in patent_data: %s / %s (%.1f%%)\n",
                    big.mark = ","),
             format(uniqueN(patent_data$docdb_family_id), big.mark = ","),
             100 * uniqueN(patent_data[granted == TRUE]$docdb_family_id) /
+                  uniqueN(patent_data$docdb_family_id)))
+
+# Same idea for the multi-application flag — every (docdb, ctry) row
+# inherits the family-level boolean so the Shiny UI can filter to
+# docdb_family_size >= 2 at query time.
+patent_data[, fam_size_min2 :=
+              docdb_family_id %in% multifam_fams$docdb_family_id]
+cat(sprintf("    fam_size>=2 families in patent_data: %s / %s (%.1f%%)\n",
+            format(uniqueN(patent_data[fam_size_min2 == TRUE]$docdb_family_id),
+                   big.mark = ","),
+            format(uniqueN(patent_data$docdb_family_id), big.mark = ","),
+            100 * uniqueN(patent_data[fam_size_min2 == TRUE]$docdb_family_id) /
                   uniqueN(patent_data$docdb_family_id)))
 
 # Merge in national measures (only exist for a subset of innovation x country)
@@ -697,6 +743,56 @@ cat("    final country universe: ",
 
 rm(patchar, pcm, pcm_national, patchar_slim)
 gc()
+toc()
+
+
+# ============================================================================
+# STEP 10f: Citation counts per family
+# ----------------------------------------------------------------------------
+# Read the source citenet file (one row per docdb-family citation, self-
+# citations already removed). Restrict both endpoints to the final docdb
+# universe (i.e. the Shiny app's main database) and count incoming
+# citations per cited_docdb_family_id. Merged into patent_data at the
+# docdb_family_id level — every (docdb, ctry) row for the same family
+# carries the same citation count, exactly like ev_global / global flow
+# values do. Stored as the new column `cit_count` so it can be exposed in
+# the toflow dropdown.
+# ============================================================================
+cat("\nComputing citation counts from citenet_noself...\n")
+tic("citation counts")
+citenet_src <- file.path(patbis_dir, "fromPATSTAT", "citenet_noself.parquet")
+if (!file.exists(citenet_src)) {
+  warning("citenet_noself.parquet not found at ", citenet_src,
+          " — adding cit_count = 0 for every family.")
+  patent_data[, cit_count := 0L]
+} else {
+  con_cit <- DBI::dbConnect(duckdb::duckdb())
+  on.exit(try(DBI::dbDisconnect(con_cit, shutdown = TRUE), silent = TRUE),
+          add = TRUE)
+  DBI::dbWriteTable(con_cit, "fams",
+                    data.frame(docdb_family_id = final_docdbs),
+                    overwrite = TRUE)
+  cit_counts <- as.data.table(DBI::dbGetQuery(con_cit, sprintf("
+    SELECT c.cited_docdb_family_id AS docdb_family_id,
+           COUNT(*)                AS cit_count
+    FROM read_parquet('%s') c
+    INNER JOIN fams f_cited
+      ON f_cited.docdb_family_id = c.cited_docdb_family_id
+    INNER JOIN fams f_citing
+      ON f_citing.docdb_family_id = c.docdb_family_id
+    GROUP BY c.cited_docdb_family_id
+  ", citenet_src)))
+  DBI::dbDisconnect(con_cit, shutdown = TRUE)
+
+  cat(sprintf("  %s families have citations (%.1f%% of universe)\n",
+              format(nrow(cit_counts), big.mark = ","),
+              100 * nrow(cit_counts) / length(final_docdbs)))
+
+  patent_data <- cit_counts[patent_data, on = "docdb_family_id"]
+  # cit_count is BIGINT/INTEGER from DuckDB so the existing is.double loop
+  # below skips it; NA-fill it here explicitly.
+  patent_data[is.na(cit_count), cit_count := 0L]
+}
 toc()
 
 
@@ -773,11 +869,30 @@ if (n_missing > 0) {
       round(100 * n_missing / nrow(patent_data), 2), "%)\n")
 }
 
-# Replace NAs with 0 and round numeric measures
-num_cols <- names(patent_data)[sapply(patent_data, is.double)]
+# Replace NAs with 0 and round numeric measures. `cost`, `alpha`, `pv` keep
+# their full double precision because the runtime view derives is_*/av_*
+# from them on every query — quantising them to 4 decimals would surface
+# as a small but real numerical drift versus the previously precomputed
+# is/av columns (especially for tiny cost values where 1/cost amplifies
+# rounding error). NA→0 still applies so the view's CASE-on-cost guard
+# can short-circuit cleanly.
+num_cols       <- names(patent_data)[sapply(patent_data, is.double)]
+no_round_cols  <- c("cost", "alpha", "pv")
 for (nc in num_cols) {
   patent_data[is.na(get(nc)), (nc) := 0]
-  patent_data[, (nc) := round(get(nc), 4)]
+  if (!nc %in% no_round_cols)
+    patent_data[, (nc) := round(get(nc), 4)]
+}
+
+# Drop the precomputed is_*/av_* columns. They were a function of
+# (ev_*, cost, alpha, pv) and are now reconstructed on every query by the
+# DuckDB view in R/runAppPackage.R. Removing 44 derived columns shrinks
+# patent_database.parquet from ~1.9 GB to <1 GB.
+derived_cols <- grep("^(is_|av_)", names(patent_data), value = TRUE)
+if (length(derived_cols)) {
+  cat("  Dropping", length(derived_cols),
+      "derived is_*/av_* columns (recomputed by runtime view)\n")
+  patent_data[, (derived_cols) := NULL]
 }
 
 cat("  patent_data:", nrow(patent_data), "rows,", ncol(patent_data), "columns\n")

@@ -132,6 +132,9 @@ server <- function(input, output, session, con) {
     if (!is.null(q$granted))
       shiny::updateCheckboxInput(session, "country-granted_only",
                                  value = as_bool(q$granted))
+    if (!is.null(q$multifam))
+      shiny::updateCheckboxInput(session, "country-multifam_only",
+                                 value = as_bool(q$multifam))
     if (!is.null(q$top_n_ids))
       shiny::updateNumericInput(session, "country-top_n_ids",
                                 value = suppressWarnings(as.integer(q$top_n_ids)))
@@ -152,6 +155,9 @@ server <- function(input, output, session, con) {
     if (!is.null(q$granted))
       shiny::updateCheckboxInput(session, "region-granted_only",
                                  value = as_bool(q$granted))
+    if (!is.null(q$multifam))
+      shiny::updateCheckboxInput(session, "region-multifam_only",
+                                 value = as_bool(q$multifam))
     if (!is.null(q$top_n_ids))
       shiny::updateNumericInput(session, "region-top_n_ids_region",
                                 value = suppressWarnings(as.integer(q$top_n_ids)))

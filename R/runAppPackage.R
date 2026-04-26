@@ -21,7 +21,36 @@ runAppPackage <- function() {
   # ")
 
   full_db_path <- system.file("extdata", "patent_database.parquet", package = "innovationStrategyExplorer")
-  DBI::dbExecute(con, sprintf("CREATE OR REPLACE VIEW full_patent_database AS SELECT * FROM read_parquet('%s')", full_db_path))
+
+  # The on-disk parquet now stores only ev_* (per-country / per-group flow
+  # values) plus the three Watson scalars (cost, alpha, pv) per family.
+  # For every ev_<dest> column we derive is_<dest> and av_<dest> on the
+  # fly via this DuckDB view. Formulas mirror the original build script:
+  #   is_<dest> = ((alpha + 1) / cost) * ev_<dest> * 1[pv <= 2*cost]
+  #   av_<dest> = (pv + ev_<dest>) / cost
+  # The CASE guard reproduces the previous behaviour of treating rows with
+  # missing / zero cost as 0 (after the build-time NA->0 conversion) so
+  # downstream `WHERE p.{toflow} IS NOT NULL` filters still pass them.
+  ev_targets <- c("nationalkey_2013_2022",
+                  "in", "at", "fr", "de", "gb", "cn", "us",
+                  "wesbal", "southcau", "eca", "easteur", "ceneur",
+                  "cenasia", "oecd", "g7", "euplusuk", "eu", "hic",
+                  "emdenocn", "emde", "global")
+  derived_sql <- paste(vapply(ev_targets, function(t) {
+    sprintf(paste0(
+      "  CASE WHEN cost IS NULL OR cost = 0 THEN 0\n",
+      "       ELSE ((alpha + 1) / cost) * ev_%s * CAST(pv <= 2 * cost AS DOUBLE)\n",
+      "  END AS is_%s,\n",
+      "  CASE WHEN cost IS NULL OR cost = 0 THEN 0\n",
+      "       ELSE (pv + ev_%s) / cost\n",
+      "  END AS av_%s"
+    ), t, t, t, t)
+  }, character(1)), collapse = ",\n")
+
+  DBI::dbExecute(con, sprintf(
+    "CREATE OR REPLACE VIEW full_patent_database AS\nSELECT *,\n%s\nFROM read_parquet('%s')",
+    derived_sql, full_db_path
+  ))
   
   patents_x_tech_path <- system.file("extdata", "patents_x_tech.parquet", package = "innovationStrategyExplorer")
   DBI::dbExecute(con, sprintf("CREATE OR REPLACE TABLE patents_x_tech AS SELECT * FROM read_parquet('%s')", patents_x_tech_path))

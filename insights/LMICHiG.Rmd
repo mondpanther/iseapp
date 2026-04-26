@@ -1,0 +1,545 @@
+---
+title: "Are developing country innovators hidden giants?"
+author: "Innovation Strategy Explorer — insights"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    self_contained: true
+    toc: true
+    toc_depth: 2
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      fig.width = 11, fig.height = 6.5, dpi = 150)
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(tidyr)
+library(scales)
+library(ggrepel)
+library(DBI)
+library(duckdb)
+library(htmltools)
+
+# Light, theme-proof table styling. RStudio's inline notebook preview
+# renders chunk output inside an iframe whose CSS inherits the IDE colour
+# scheme — including dark backgrounds that make ordinary kable output
+# unreadable. Inline `style="..."` with `!important` on every cell beats
+# both the iframe stylesheet and any document-level <style> block.
+nice_kable <- function(df, digits = NULL,
+                       format.args = list(big.mark = ",")) {
+  cols  <- names(df)
+  ndig  <- function(j) {
+    if (is.null(digits)) NA_integer_
+    else if (length(digits) == 1L) digits
+    else digits[j]
+  }
+  fmt   <- function(v, j) {
+    d <- ndig(j)
+    if (is.numeric(v)) {
+      v2 <- if (is.na(d)) v else round(v, d)
+      do.call(format, c(list(v2), format.args, list(scientific = FALSE)))
+    } else as.character(v)
+  }
+
+  th_s  <- "background:#e8e8e8 !important;color:#111 !important;border:1px solid #bbb;padding:4px 10px;text-align:center;font-weight:600;"
+  td_s  <- "background:#ffffff !important;color:#222 !important;border:1px solid #ddd;padding:4px 10px;text-align:right;"
+  td_z  <- "background:#f7f7f7 !important;color:#222 !important;border:1px solid #ddd;padding:4px 10px;text-align:right;"
+  ltxt  <- "text-align:left;"
+  tbl_s <- "background:#ffffff !important;color:#222 !important;border-collapse:collapse;font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:13px;margin:8px 0;"
+
+  thead <- paste0(
+    "<tr>",
+    paste0(sprintf('<th style="%s">%s</th>', th_s, cols), collapse = ""),
+    "</tr>"
+  )
+  rows <- vapply(seq_len(nrow(df)), function(i) {
+    cells <- vapply(seq_along(cols), function(j) {
+      base <- if (i %% 2 == 0) td_z else td_s
+      sty  <- if (j == 1) paste0(base, ltxt) else base
+      sprintf('<td style="%s">%s</td>', sty, fmt(df[[j]][i], j))
+    }, character(1))
+    paste0("<tr>", paste(cells, collapse = ""), "</tr>")
+  }, character(1))
+
+  htmltools::HTML(paste0(
+    sprintf('<table style="%s">', tbl_s),
+    "<thead>", thead, "</thead>",
+    "<tbody>", paste(rows, collapse = ""), "</tbody>",
+    "</table>"
+  ))
+}
+```
+
+## What this note shows
+
+## Citation, EV, and AV ranks at the docdb level
+
+Collapse the app's main database to one row per `docdb_family_id`, attach
+flags telling us whether the family is mapped to **China**, any **HIC**, or
+any **non-HIC country (excluding China)**, then rank docdbs (1 = highest)
+by:
+
+* **Citation count** (`cit_count`) — number of times a docdb is cited by
+  another docdb in the app database.
+* **EV global** (`ev_global`) — Watson average global spillover.
+* **AV global** (`av_global`) — Watson average global return.
+
+Country-class flags are not mutually exclusive (a family can be mapped to
+e.g. both the US and China). For colouring the scatter we collapse to a
+single primary class with priority **China → HIC → non-HIC excl. China**.
+
+```{r build_docdb_ranks}
+# Locate inst/extdata regardless of where the Rmd is rendered from.
+find_extdata <- function(file) {
+  cand <- c(
+    system.file("extdata", file, package = "innovationStrategyExplorer"),
+    file.path("..", "inst", "extdata", file),
+    file.path("inst", "extdata", file)
+  )
+  hit <- cand[nzchar(cand) & file.exists(cand)]
+  if (!length(hit)) stop("Could not locate ", file)
+  normalizePath(hit[[1]], winslash = "/")
+}
+pdb_path <- find_extdata("patent_database.parquet")
+clu_path <- find_extdata("country_lookup.parquet")
+
+# Pull a per-docdb table directly from DuckDB so we never materialise the
+# 28 M-row patent_database in R memory. ANY_VALUE on the family-constant
+# columns is safe because cit_count, ev_global, av_global don't vary
+# across countries within a docdb.
+con <- dbConnect(duckdb::duckdb())
+# Note: av_global is no longer materialised in patent_database.parquet —
+# it is derived by the runtime view in R/runAppPackage.R from
+# (pv + ev_global) / cost. We reproduce the same expression here so this
+# Rmd can read the raw parquet without going through the package view.
+docdb <- dbGetQuery(con, sprintf("
+  WITH p   AS (SELECT * FROM read_parquet('%s')),
+       cl  AS (SELECT * FROM read_parquet('%s'))
+  SELECT
+    p.docdb_family_id,
+    ANY_VALUE(p.cit_count)  AS cit_count,
+    ANY_VALUE(p.ev_global)  AS ev_global,
+    ANY_VALUE(p.granted)    AS granted,
+    ANY_VALUE(
+      CASE WHEN p.cost IS NULL OR p.cost = 0 THEN 0
+           ELSE (p.pv + p.ev_global) / p.cost
+      END
+    ) AS av_global,
+    MAX(CASE WHEN cl.is_hic = TRUE THEN 1 ELSE 0 END)               AS any_hic,
+    MAX(CASE WHEN p.ctry_code = 'CN' THEN 1 ELSE 0 END)             AS any_cn,
+    MAX(CASE WHEN cl.is_hic = FALSE AND p.ctry_code <> 'CN' THEN 1
+             ELSE 0 END)                                            AS any_lmic_excl_cn
+  FROM p
+  LEFT JOIN cl ON cl.ctry_code = p.ctry_code
+  GROUP BY p.docdb_family_id
+", pdb_path, clu_path))
+dbDisconnect(con, shutdown = TRUE)
+
+docdb <- docdb %>%
+  mutate(
+    cit_rank      = min_rank(desc(cit_count)),
+    ev_rank       = min_rank(desc(ev_global)),
+    av_rank       = min_rank(desc(av_global)),
+    is_hic        = any_hic == 1,
+    is_china      = any_cn  == 1,
+    is_lmic_xcn   = any_lmic_excl_cn == 1,
+    region_class  = factor(
+      case_when(
+        is_china    ~ "China",
+        is_hic      ~ "HIC",
+        is_lmic_xcn ~ "non-HIC excl China",
+        TRUE        ~ "unmapped"
+      ),
+      levels = c("China", "HIC", "non-HIC excl China", "unmapped")
+    )
+  )
+
+cat(sprintf("docdbs total: %s   (HIC: %s, China: %s, non-HIC excl China: %s)\n",
+            format(nrow(docdb), big.mark = ","),
+            format(sum(docdb$is_hic),      big.mark = ","),
+            format(sum(docdb$is_china),    big.mark = ","),
+            format(sum(docdb$is_lmic_xcn), big.mark = ",")))
+```
+
+### Hidden-giant indices (citation rank vs value rank)
+
+* `higx_ev = cit_rank − ev_rank`
+* `higx_av = cit_rank − av_rank`
+
+Both ranks have **1 = highest**, so a *negative* index means a docdb is
+more highly cited than its value rank would predict — a candidate "hidden
+giant". A *positive* value means the opposite (high value, few citations).
+
+```{r higx_indices}
+docdb <- docdb %>%
+  mutate(
+    higx_ev = ((cit_rank) - (ev_rank))/max(cit_rank)*100,
+    higx_av = ((cit_rank) - (av_rank))/max(cit_rank)*100
+  )
+
+docdb %>%
+  filter(region_class != "unmapped") %>%
+  group_by(region_class) %>%
+  summarise(
+    n              = dplyr::n(),
+    mean_higx_ev   = mean(higx_ev),
+    median_higx_ev = stats::median(higx_ev),
+    p75_higx_ev    = stats::quantile(higx_ev, 0.75),
+    p90_higx_ev    = stats::quantile(higx_ev, 0.90),
+    p95_higx_ev    = stats::quantile(higx_ev, 0.95),
+    .groups        = "drop"
+  ) %>%
+  nice_kable(digits = 2, format.args = list(big.mark = ","))
+
+
+docdb %>% distinct(docdb_family_id) %>% nrow()
+docdb %>% nrow()
+```
+
+### Country-class flag overlap
+
+Since `is_hic`, `is_china`, and `is_lmic_xcn` are not mutually exclusive,
+the next regressions ask three overlapping yes/no questions. The table
+below tabulates all 2^3 = 8 combinations of the flags so the overlap is
+explicit. The `region_class` column shows where each combination ends up
+under the priority rule **China → HIC → non-HIC excl China** that drives
+the scatter.
+
+```{r flag_overlap}
+priority <- function(hic, cn, lmic) {
+  ifelse(cn,  "China",
+  ifelse(hic, "HIC",
+  ifelse(lmic, "non-HIC excl China",
+         "unmapped")))
+}
+
+docdb %>%
+  count(is_hic, is_china, is_lmic_xcn, name = "n") %>%
+  mutate(
+    share        = n / sum(n),
+    region_class = priority(is_hic, is_china, is_lmic_xcn)
+  ) %>%
+  select(is_hic, is_china, is_lmic_xcn, region_class, n, share) %>%
+  arrange(desc(n)) %>%
+  nice_kable(digits = c(NA, NA, NA, NA, 0, 4),
+             format.args = list(big.mark = ","))
+```
+
+#### Granted families only
+
+Same overlap table restricted to docdbs with at least one granted
+application — useful as a check on whether the flag distribution shifts
+when applications that never made it through examination are excluded.
+
+```{r flag_overlap_granted}
+docdb %>%
+  filter(granted) %>%
+  count(is_hic, is_china, is_lmic_xcn, name = "n") %>%
+  mutate(
+    share        = n / sum(n),
+    region_class = priority(is_hic, is_china, is_lmic_xcn)
+  ) %>%
+  select(is_hic, is_china, is_lmic_xcn, region_class, n, share) %>%
+  arrange(desc(n)) %>%
+  nice_kable(digits = c(NA, NA, NA, NA, 0, 4),
+             format.args = list(big.mark = ","))
+```
+
+#### `docdb_family_size` > 1
+
+Same overlap table restricted to docdbs whose PATSTAT
+`docdb_family_size` is at least 2 (multi-application families). The
+eligible-family list is read from
+`.bigdata/fam_size_min2.parquet`, the BigQuery cache that
+`01-build-app-parquets.R` produces when the build-time family-size
+filter is enabled.
+
+```{r flag_overlap_multifam}
+fam2_path <- local({
+  cand <- c(file.path("..", ".bigdata", "fam_size_min2.parquet"),
+            file.path(".bigdata", "fam_size_min2.parquet"))
+  hit  <- cand[file.exists(cand)]
+  if (!length(hit)) NA_character_ else normalizePath(hit[[1]], winslash = "/")
+})
+
+if (is.na(fam2_path)) {
+  cat("fam_size_min2.parquet not found — rerun the build pipeline (or set\n",
+      "FAMILY_SIZE_MIN <- 2L) to materialise the eligible-family cache.\n")
+} else {
+  con_fs <- dbConnect(duckdb::duckdb())
+  fams2 <- dbGetQuery(con_fs, sprintf(
+    "SELECT DISTINCT docdb_family_id FROM read_parquet('%s')",
+    fam2_path))
+  dbDisconnect(con_fs, shutdown = TRUE)
+
+  docdb %>%
+    semi_join(fams2, by = "docdb_family_id") %>%
+    count(is_hic, is_china, is_lmic_xcn, name = "n") %>%
+    mutate(
+      share        = n / sum(n),
+      region_class = priority(is_hic, is_china, is_lmic_xcn)
+    ) %>%
+    select(is_hic, is_china, is_lmic_xcn, region_class, n, share) %>%
+    arrange(desc(n)) %>%
+    nice_kable(digits = c(NA, NA, NA, NA, 0, 4),
+               format.args = list(big.mark = ","))
+}
+```
+
+### Regressions on country-class flags
+
+Both flag triples are non-mutually-exclusive — a docdb mapped to both the
+US and China contributes to `is_hic = TRUE` *and* `is_china = TRUE`. The
+intercept therefore represents a docdb with all three flags `FALSE`
+(none); each coefficient is the conditional change in the index when that
+particular flag flips on.
+
+```{r reg_higx}
+library(broom)
+library(fixest)
+
+mapped <- docdb %>%
+  filter(is_hic | is_china | is_lmic_xcn)   # drop unmapped families
+
+# fixest::feols beats stats::lm on memory and wall time for 28 M-row data
+# even without fixed effects (multi-threaded C++ path, no full model
+# matrix allocation). Default SEs are HC1 (heteroskedasticity-robust);
+# pass vcov = "iid" if you want classical OLS SEs to match lm exactly.
+fit_ev <- fixest::feols(higx_ev ~  is_china + is_lmic_xcn, data = mapped)
+
+tidy(fit_ev, conf.int = TRUE) %>%
+  mutate(outcome = "higx_ev") %>%
+  select(outcome, term, estimate, std.error, statistic, p.value,
+         conf.low, conf.high) %>%
+  nice_kable(digits = c(NA, NA, 3, 3, 2, 4, 3, 3),
+             format.args = list(big.mark = ","))
+
+cat(sprintf(
+  "n (mapped docdbs): %s   |   R^2 (higx_ev): %.4f\n",
+  format(nrow(mapped), big.mark = ","),
+  fixest::r2(fit_ev, type = "r2")
+))
+```
+
+#### Granted families only
+
+Re-run on the subset where `granted = TRUE` (the docdb has at least one
+granted application). This filters out applications that never made it
+through examination, which can carry citation patterns very different
+from granted patents.
+
+```{r reg_higx_granted}
+mapped_g <- mapped %>% filter(granted)
+
+fit_ev_g <- fixest::feols(higx_ev ~ is_hic + is_china + is_lmic_xcn,
+                          data = mapped_g)
+
+tidy(fit_ev_g, conf.int = TRUE) %>%
+  mutate(outcome = "higx_ev") %>%
+  select(outcome, term, estimate, std.error, statistic, p.value,
+         conf.low, conf.high) %>%
+  nice_kable(digits = c(NA, NA, 3, 3, 2, 4, 3, 3),
+             format.args = list(big.mark = ","))
+
+cat(sprintf(
+  "n (granted, mapped docdbs): %s   |   R^2 (higx_ev): %.4f\n",
+  format(nrow(mapped_g), big.mark = ","),
+  fixest::r2(fit_ev_g, type = "r2")
+))
+```
+
+#### `docdb_family_size` > 1
+
+Re-run on the multi-application subset (PATSTAT `docdb_family_size >= 2`),
+using the same `.bigdata/fam_size_min2.parquet` cache that the overlap
+table above reads.
+
+```{r reg_higx_multifam, results='asis'}
+fam2_path <- local({
+  cand <- c(file.path("..", ".bigdata", "fam_size_min2.parquet"),
+            file.path(".bigdata", "fam_size_min2.parquet"))
+  hit  <- cand[file.exists(cand)]
+  if (!length(hit)) NA_character_ else normalizePath(hit[[1]], winslash = "/")
+})
+
+if (is.na(fam2_path)) {
+  cat("fam_size_min2.parquet not found — skipping multi-family regressions.\n")
+} else {
+  con_fs <- dbConnect(duckdb::duckdb())
+  fams2  <- dbGetQuery(con_fs, sprintf(
+    "SELECT DISTINCT docdb_family_id FROM read_parquet('%s')", fam2_path))
+  dbDisconnect(con_fs, shutdown = TRUE)
+
+  mapped_m <- mapped %>% semi_join(fams2, by = "docdb_family_id")
+
+  fit_ev_m <- fixest::feols(higx_ev ~ is_hic + is_china + is_lmic_xcn,
+                            data = mapped_m)
+
+  # results='asis' lets us emit the raw HTML kable from inside this
+  # if-block. `print()` would have wrapped the htmltools::HTML object as
+  # plain-text output instead of rendering it.
+  cat(as.character(
+    tidy(fit_ev_m, conf.int = TRUE) %>%
+      mutate(outcome = "higx_ev") %>%
+      select(outcome, term, estimate, std.error, statistic, p.value,
+             conf.low, conf.high) %>%
+      nice_kable(digits = c(NA, NA, 3, 3, 2, 4, 3, 3),
+                 format.args = list(big.mark = ","))
+  ))
+
+  cat(sprintf(
+    "<pre style='margin-top:8px;background:#f5f5f5;color:#222;padding:6px 10px;font-size:12px;'>n (fam_size>=2, mapped docdbs): %s   |   R^2 (higx_ev): %.4f</pre>\n",
+    format(nrow(mapped_m), big.mark = ","),
+    fixest::r2(fit_ev_m, type = "r2")
+  ))
+}
+```
+
+### Coefficient comparison across specifications
+
+Stacks the three sub-samples (all mapped docdbs, granted only,
+`fam_size >= 2`) into one figure so the coefficient on each country-class
+flag is comparable across them. Bars are coefficient point estimates with
+95 % confidence intervals; the dashed zero line is the no-effect
+reference.
+
+```{r reg_higx_compare}
+collect_tidy <- function(fit, spec) {
+  if (!exists(deparse(substitute(fit)), inherits = FALSE) || is.null(fit))
+    return(NULL)
+  tidy(fit, conf.int = TRUE) %>% mutate(spec = spec)
+}
+
+reg_long <- bind_rows(
+  collect_tidy(fit_ev,   "all"),
+  collect_tidy(fit_ev_g, "granted"),
+  if (exists("fit_ev_m")) collect_tidy(fit_ev_m, "fam_size>=2")
+) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(spec = factor(spec, levels = c("all", "granted", "fam_size>=2")))
+
+ggplot(reg_long, aes(x = term, y = estimate, fill = spec)) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "#888") +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                position = position_dodge(width = 0.8),
+                width = 0.25) +
+  scale_fill_manual(values = c(
+    "all"          = "#1f77b4",
+    "granted"      = "#ff7f0e",
+    "fam_size>=2"  = "#2ca02c"
+  )) +
+  labs(
+    title = "higx_ev country-class coefficients across specifications",
+    x     = NULL,
+    y     = "Coefficient estimate (with 95% CI)",
+    fill  = "Sample"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 25, hjust = 1))
+```
+
+### EV-rank vs citation-rank scatter (1 % sample)
+
+```{r scatter_helper, include=FALSE}
+# Reusable scatter so the three subsamples (full / granted / fam_size>1)
+# share identical aesthetics. `subset_df` is a pre-filtered docdb table;
+# the helper handles the unmapped drop + Bernoulli sample + plot.
+scatter_ev_cit <- function(subset_df, prop = 0.05, subtitle_extra = NULL,
+                           seed = 42) {
+  set.seed(seed)
+  plot_df <- subset_df %>%
+    filter(region_class != "unmapped") %>%
+    # Drop China-only docdbs (is_china = TRUE with neither HIC nor non-HIC
+    # excl-China overlap) — the user's request was to exclude families
+    # mapped exclusively to China across all three scatters.
+    filter(!(is_china & !is_hic & !is_lmic_xcn)) %>%
+    # Convert ranks to percentiles within the eligible (post-exclusion)
+    # universe so the two axes share the same 0-100 scale and the y=x
+    # diagonal is interpretable.
+    mutate(
+      ev_pct  = ev_rank  / max(ev_rank,  na.rm = TRUE) * 100,
+      cit_pct = cit_rank / max(cit_rank, na.rm = TRUE) * 100
+    ) %>%
+    slice_sample(prop = prop)
+
+  # Cap each axis at the 99th percentile of the *displayed* sample so the
+  # bulk of the cloud is visible. Use the joint max across both axes so
+  # the 45° line stays meaningful.
+  cap <- max(stats::quantile(plot_df$ev_pct,  0.99, na.rm = TRUE),
+             stats::quantile(plot_df$cit_pct, 0.99, na.rm = TRUE))
+
+  sub <- sprintf("n = %s sampled docdbs; axes are percentiles (1 = top of distribution)",
+                 format(nrow(plot_df), big.mark = ","))
+  if (!is.null(subtitle_extra)) sub <- paste0(subtitle_extra, " — ", sub)
+
+  ggplot(plot_df, aes(ev_pct, cit_pct, colour = region_class)) +
+    geom_abline(slope = 1, intercept = 0,
+                colour = "#888", linetype = "dashed") +
+    geom_point(alpha = 0.35, size = 0.6) +
+    # Per-group 2D kernel-density contours over the same scatter — same
+    # colour scale as the dots so each region_class is identifiable. The
+    # `group = region_class` makes density estimates separate per class
+    # rather than a single global surface.
+    geom_density_2d(aes(group = region_class),
+                    linewidth = 0.55, alpha = 0.9) +
+    coord_cartesian(xlim = c(0, cap), ylim = c(0, cap)) +
+    scale_x_continuous(labels = label_number(accuracy = 0.1)) +
+    scale_y_continuous(labels = label_number(accuracy = 0.1)) +
+    scale_colour_manual(values = c(
+      "China"              = "#d62728",
+      "HIC"                = "#1f77b4",
+      "non-HIC excl China" = "#2ca02c"
+    )) +
+    labs(
+      title    = "EV-global percentile vs citation-count percentile",
+      subtitle = sub,
+      x        = "EV global percentile (rank / max × 100)",
+      y        = "Citation count percentile",
+      colour   = "Country class"
+    ) +
+    guides(colour = guide_legend(override.aes = list(alpha = 1, size = 2))) +
+    theme_minimal(base_size = 12)
+}
+```
+
+```{r scatter_ev_vs_cit}
+scatter_ev_cit(docdb, prop = 0.05, subtitle_extra = "all docdbs")
+```
+
+#### Granted families only
+
+```{r scatter_ev_vs_cit_granted}
+scatter_ev_cit(docdb %>% filter(granted),
+               prop = 0.05,
+               subtitle_extra = "granted families only")
+```
+
+#### `docdb_family_size` > 1
+
+```{r scatter_ev_vs_cit_multifam}
+fam2_path <- local({
+  cand <- c(file.path("..", ".bigdata", "fam_size_min2.parquet"),
+            file.path(".bigdata", "fam_size_min2.parquet"))
+  hit  <- cand[file.exists(cand)]
+  if (!length(hit)) NA_character_ else normalizePath(hit[[1]], winslash = "/")
+})
+
+if (is.na(fam2_path)) {
+  cat("fam_size_min2.parquet not found — skipping fam_size>1 scatter.\n")
+} else {
+  con_fs <- dbConnect(duckdb::duckdb())
+  fams2  <- dbGetQuery(con_fs, sprintf(
+    "SELECT DISTINCT docdb_family_id FROM read_parquet('%s')", fam2_path))
+  dbDisconnect(con_fs, shutdown = TRUE)
+  print(scatter_ev_cit(
+    docdb %>% semi_join(fams2, by = "docdb_family_id"),
+    prop = 0.05,
+    subtitle_extra = "fam_size >= 2"
+  ))
+}
+```
+

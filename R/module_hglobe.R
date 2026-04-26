@@ -52,10 +52,18 @@ hglobe_module_sidebar <- function(id) {
       ),
       shiny::div(
         class = "side_input",
-        shiny::checkboxInput(
-          inputId = ns("granted_only"),
-          label   = "Granted families only",
-          value   = TRUE
+        shiny::div(
+          style = "display:flex; gap:18px; flex-wrap:wrap;",
+          shiny::checkboxInput(
+            inputId = ns("granted_only"),
+            label   = "Granted families only",
+            value   = TRUE
+          ),
+          shiny::checkboxInput(
+            inputId = ns("multifam_only"),
+            label   = "Multi-application families only",
+            value   = FALSE
+          )
         )
       )
     ),
@@ -113,8 +121,8 @@ hglobe_module_sidebar <- function(id) {
 
     bslib::input_task_button(
       ns("render_map"),
-      "Render Map",
-      label_busy = "Rendering...",
+      "Initiate Innovation",
+      label_busy = "Initiating...",
       class = "btn-primary",
       width = "100%"
     ),
@@ -195,7 +203,14 @@ hglobe_module_ui <- function(id) {
              try {
                const canvas = await html2canvas(node, {
                  useCORS: true, allowTaint: true, scale: 2,
-                 backgroundColor: '#ffffff'
+                 backgroundColor: '#ffffff',
+                 // Skip the +/- zoom control from the rasterised image.
+                 // Add other selectors here if you want to drop more
+                 // overlay controls (e.g. layer picker) from the export.
+                 ignoreElements: function(el) {
+                   return !!(el && el.classList &&
+                             el.classList.contains('leaflet-control-zoom'));
+                 }
                });
                if (action === 'save') {
                  const a = document.createElement('a');
@@ -489,7 +504,8 @@ hglobe_module_server <- function(id, con) {
         firm_clause    <- build_firm_clause_v2(selected_firms,
                                                no_filter = no_firm_filter)
         tech_bool      <- build_tech_bool_v2(input$techs)
-        granted_clause <- build_granted_clause_v2(isTRUE(input$granted_only))
+        granted_clause  <- build_granted_clause_v2(isTRUE(input$granted_only))
+        multifam_clause <- build_multifam_clause_v2(isTRUE(input$multifam_only))
 
         has_tech <- tech_bool != "TRUE"
         has_firm <- nchar(trimws(firm_clause)) > 0
@@ -534,6 +550,7 @@ hglobe_module_server <- function(id, con) {
             WHERE p.ctry_code IN ({country_sql})
               AND p.{toflow_col} IS NOT NULL
               {granted_clause}
+              {multifam_clause}
             GROUP BY p.docdb_family_id, p.ctry_code
           )")
         ctes <- c(ctes, passing_sql)
@@ -612,6 +629,13 @@ hglobe_module_server <- function(id, con) {
         )
         DBI::dbWriteTable(con, frontier_tbl(0), seed, overwrite = TRUE)
         gen_next(1)
+
+        # Visual cue: once gen 0 is seeded, promote the "Generate" button
+        # from a muted secondary style to the primary blue so the user sees
+        # the next-step affordance light up.
+        shinyjs::runjs(sprintf(
+          "$('#%s').removeClass('btn-secondary').addClass('btn-primary');",
+          session$ns("next_step")))
 
         # Reset stats with the gen 0 row.
         stats_rv(data.frame(
