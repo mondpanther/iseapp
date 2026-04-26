@@ -188,6 +188,10 @@ plot_flows <- function(combined, lmic_share, destination_label,
 plot_marimekko <- function(combined, sample_label) {
   mm_df <- combined |>
     dplyr::filter(origin == "LMIC-origin (excl. China)") |>
+    # Drop the "All innovations" baseline row — it dwarfs every real
+    # category (its `innos` is the union of all of them) and would make
+    # the bar-width proportionality unusable.
+    dplyr::filter(technology != "All innovations") |>
     dplyr::arrange(mean) |>
     dplyr::mutate(
       w           = innos / sum(innos),

@@ -35,8 +35,9 @@ fetch_flow_csvs <- function(specs,
                               "Green Agriculture",
                               "Any Agriculture & Food technology"
                             ),
-                            cold_start_wait = 20,
-                            reflow_wait     = 12,
+                            cold_start_wait = 30,
+                            reflow_wait     = 20,
+                            fetch_timeout_s = 120,
                             overwrite       = FALSE) {
 
   if (!requireNamespace("chromote", quietly = TRUE)) {
@@ -83,6 +84,17 @@ fetch_flow_csvs <- function(specs,
   )
 
   message("Launching headless Chrome ...")
+  # Bump chromote's default wait timeout for CDP responses BEFORE we
+  # create the session, so Runtime.evaluate calls that take a while to
+  # come back (e.g. the CSV download fetch when all 14 tech categories
+  # are aggregated) don't trip the default 10s wait.
+  prev_timeout <- tryCatch(chromote::default_timeout(),
+                           error = function(e) NULL)
+  try(chromote::default_timeout(fetch_timeout_s), silent = TRUE)
+  on.exit({
+    if (!is.null(prev_timeout))
+      try(chromote::default_timeout(prev_timeout), silent = TRUE)
+  }, add = TRUE)
   b <- chromote::ChromoteSession$new()
   on.exit(try(b$close(), silent = TRUE), add = TRUE)
 
@@ -111,10 +123,15 @@ fetch_flow_csvs <- function(specs,
   }
 
   fetch_current_csv <- function() {
+    # The download fetch can take well over the default chromote 10 s
+    # timeout when the SQL behind the CSV touches all 14 tech categories
+    # at once. Pass an explicit timeout (in milliseconds) sized for the
+    # slowest realistic case.
     res <- b$Runtime$evaluate(
       "fetch(document.getElementById('country-dl_csv_avstrax_plot1').href).then(r => r.text())",
       awaitPromise  = TRUE,
-      returnByValue = TRUE
+      returnByValue = TRUE,
+      timeout       = fetch_timeout_s * 1000
     )
     if (!is.null(res$exceptionDetails)) {
       stop("Chromote fetch error: ",
