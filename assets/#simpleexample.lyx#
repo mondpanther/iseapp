@@ -216,7 +216,7 @@ S-\sigma S=\sigma-\sigma^{n+1}
 hence:
 \begin_inset Formula 
 \[
-S=\frac{\sigma-\sigma^{n+1}}{1-\sigma}\dashrightarrow\frac{\sigma}{1-\sigma}
+S=\frac{\sigma-\sigma^{n+1}}{1-\sigma}\dashrightarrow\frac{\sigma}{1-\sigma}=\frac{1}{1/\sigma-1}
 \]
 
 \end_inset
