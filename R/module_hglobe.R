@@ -1057,15 +1057,27 @@ hglobe_module_server <- function(id, con) {
         if (run_flag || gen_flag) auto_init_armed(TRUE)
         if (gen_flag)             auto_gen_armed(TRUE)
       })
-      # Fire the Initiate Innovation click once, with a small delay so
-      # selectizeInput / numericInput updates from the URL handler have
-      # propagated to the client.
+      # Helper: trigger a native DOM click on a namespaced button. We use
+      # this rather than shinyjs::click() because input_task_button's
+      # ExtendedTask wires its handler to the native click event — a
+      # jQuery .click() (which is what shinyjs::click does) doesn't
+      # always propagate. The JS also polls for the button to actually
+      # exist in the DOM before clicking, so it won't quietly miss when
+      # the HiGGlobe tab content hasn't finished rendering yet.
+      auto_click <- function(short_id, delay_ms = 0L) {
+        full_id <- session$ns(short_id)
+        shinyjs::runjs(sprintf(
+          "(function(){var id='%s';var initial=%d;var attempts=0;function go(){var b=document.getElementById(id);if(b){b.click();return;}if(attempts++>40)return;setTimeout(go,250);}setTimeout(go,initial);})();",
+          full_id, as.integer(delay_ms)
+        ))
+      }
+
+      # Fire the Initiate Innovation click once. The 1.2 s delay covers
+      # selectizeInput / numericInput round-trips from the URL handler.
       shiny::observeEvent(auto_init_armed(), once = TRUE, ignoreInit = TRUE, {
         if (!isTRUE(auto_init_armed())) return()
         auto_init_armed(FALSE)
-        later::later(function() {
-          shinyjs::click(id = "render_map")
-        }, delay = 1.2)
+        auto_click("render_map", delay_ms = 1200L)
       })
       # Fire the Generate click once gen 0 is actually seeded (gen_next
       # flips from NULL to 1L). `auto_gen_armed` is set above, so a user
@@ -1076,9 +1088,7 @@ hglobe_module_server <- function(id, con) {
         g <- gen_next()
         if (is.null(g) || g != 1L) return()
         auto_gen_armed(FALSE)
-        later::later(function() {
-          shinyjs::click(id = "next_step")
-        }, delay = 0.4)
+        auto_click("next_step", delay_ms = 400L)
       })
 
       # Spinner: visible whenever a multi-generation batch is mid-flight,
@@ -1100,8 +1110,20 @@ hglobe_module_server <- function(id, con) {
       # bookmarking has put into the URL. Bookmarking the URL with
       # step=N > 0 makes the page replay the init + N generations on
       # reopen via the URL handler in server.R.
+      #
+      # Crucial guard: if the user opened the page WITH a non-zero
+      # `step` in the URL, we must NOT immediately overwrite it with
+      # step=0 just because gen_next is still NULL during the auto-init
+      # boot phase — that would erase the replay-target before the
+      # auto-Generate has a chance to read it on a refresh.
       shiny::observe({
         g <- gen_next()
+        if (is.null(g)) {
+          rp <- session$userData$restore_params %||% list()
+          incoming <- suppressWarnings(as.integer(rp$step %||% rp$higglobe_gen))
+          if (length(incoming) == 1L && !is.na(incoming) && incoming > 0L)
+            return()  # honour the URL's step until the module actually seeds
+        }
         step_val <- if (is.null(g)) 0L else max(0L, as.integer(g) - 1L)
         shinyjs::runjs(sprintf(
           "(function(){var u=new URL(window.location);u.searchParams.set('step','%d');window.history.replaceState({},'',u);})()",
