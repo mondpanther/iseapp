@@ -104,8 +104,8 @@ ui <- function(req) {
       region_module_ui("region")
     ),
     shiny::tabPanel(
-      "Globe",
-      globe_module_ui("globe")
+      "HiGGlobe",
+      hglobe_module_ui("hglobe")
     ),
     shiny::tabPanel(
       "About",

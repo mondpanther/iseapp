@@ -102,7 +102,7 @@ cat("Detecting return flow columns...\n")
 parquet_cols <- DBI::dbGetQuery(con, 
   "SELECT column_name FROM information_schema.columns WHERE table_name = 'patent_database'"
 ) |> dplyr::pull(column_name)
-flow_cols <- parquet_cols[grepl("^(is|av|ev)_", parquet_cols)]
+flow_cols <- parquet_cols[grepl("^(is|av|ev)_|^cit_count$", parquet_cols)]
 
 cat("  ✓", length(flow_cols), "flow columns found\n")
 
@@ -303,9 +303,14 @@ spillovers <- list(
   "Average Spillovers to India"                          = "ev_in"
 )
 
+citations <- list(
+  "Citation Count" = "cit_count"
+)
+
 toflow_choices <- list(
-  "Marginal Returns"  = marginal,
-  "Average Returns"   = average,
+  "Citation Counts"    = citations,
+  "Marginal Returns"   = marginal,
+  "Average Returns"    = average,
   "Average Spillovers" = spillovers
 )
 

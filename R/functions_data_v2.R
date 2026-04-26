@@ -70,6 +70,20 @@ build_granted_clause_v2 <- function(granted_only = FALSE) {
   if (isTRUE(granted_only)) "AND p.granted = TRUE" else ""
 }
 
+#' Build a SQL clause restricting to multi-application families
+#'
+#' When \code{multifam_only} is TRUE, returns the AND clause used in the main
+#' WHERE to keep only docdbs with \code{fam_size_min2 = TRUE} — the per-family
+#' boolean attached at build time, TRUE iff PATSTAT's
+#' \code{docdb_family_size >= 2} for that family.
+#'
+#' @param multifam_only Logical. Default FALSE (no filter).
+#' @return Character. Empty string, or an \code{AND p.fam_size_min2 = TRUE}
+#'   clause.
+build_multifam_clause_v2 <- function(multifam_only = FALSE) {
+  if (isTRUE(multifam_only)) "AND p.fam_size_min2 = TRUE" else ""
+}
+
 #' Generate SQL combined query for country aggregation (v2)
 #'
 #' Joins slim bridge parquets for tech and firm at query time.
@@ -82,10 +96,11 @@ build_granted_clause_v2 <- function(granted_only = FALSE) {
 #'
 #' @return Character. SQL query string
 sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause,
-                                      top_n_ids = 10, granted_only = FALSE) {
+                                      top_n_ids = 10, granted_only = FALSE, multifam_only = FALSE) {
 
   tech_bool      <- build_tech_bool_v2(techs)
   granted_clause <- build_granted_clause_v2(granted_only)
+  multifam_clause <- build_multifam_clause_v2(multifam_only)
 
   # Build WHERE clause for tech filtering
   tech_filter_sql <- if (tech_bool == "TRUE") {
@@ -134,6 +149,7 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause,
       WHERE p.ctry_code IN ({country_sql})
         AND p.{toflow} IS NOT NULL
         {granted_clause}
+        {multifam_clause}
     ),
 
     -- Deduplicate across countries: one row per distinct patent
@@ -226,7 +242,7 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause,
 #' @param firm_clause Character. AND clause for firm filtering (may be empty)
 #' @return Character. SQL returning ctry_code, allinnos
 sql_ctry_allinnos_v2 <- function(toflow, country_sql, firm_clause,
-                                   granted_only = FALSE) {
+                                   granted_only = FALSE, multifam_only = FALSE) {
   firm_filter_sql <- if (nchar(trimws(firm_clause)) == 0) {
     ""
   } else {
@@ -234,6 +250,7 @@ sql_ctry_allinnos_v2 <- function(toflow, country_sql, firm_clause,
     paste0("WHERE ", firm_condition)
   }
   granted_clause <- build_granted_clause_v2(granted_only)
+  multifam_clause <- build_multifam_clause_v2(multifam_only)
 
   glue::glue("
     {if (nchar(trimws(firm_clause)) > 0) '
@@ -251,6 +268,7 @@ sql_ctry_allinnos_v2 <- function(toflow, country_sql, firm_clause,
     WHERE p.ctry_code IN ({country_sql})
       AND p.{toflow} IS NOT NULL
       {granted_clause}
+        {multifam_clause}
     GROUP BY p.ctry_code
   ")
 }
@@ -267,7 +285,7 @@ sql_ctry_allinnos_v2 <- function(toflow, country_sql, firm_clause,
 #'
 #' @return Character. SQL query string
 sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm_clause,
-                                           top_n_ids = 10, granted_only = FALSE) {
+                                           top_n_ids = 10, granted_only = FALSE, multifam_only = FALSE) {
 
   filter_clauses <- unlist(tech_filters)
   filter_clauses <- filter_clauses[nchar(trimws(filter_clauses)) > 0]
@@ -287,6 +305,7 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
   }
 
   granted_clause <- build_granted_clause_v2(granted_only)
+  multifam_clause <- build_multifam_clause_v2(multifam_only)
 
   # Build filtered_tech CTE:
   # "All innovations" = all patents regardless of tech mapping (single bar)
@@ -355,6 +374,7 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
       WHERE p.ctry_code IN ({country_sql})
         AND p.{toflow} IS NOT NULL
         {granted_clause}
+        {multifam_clause}
     ),
 
     ranked AS (
@@ -379,6 +399,7 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
         WHERE p.ctry_code IN ({country_sql})
           AND p.{toflow} IS NOT NULL
           {granted_clause}
+        {multifam_clause}
       ) t
     )
 
@@ -418,10 +439,11 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
 #' @param firm_clause Character. AND clause from build_firm_clause_v2().
 #' @return Character. SQL query string.
 sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause,
-                                     top_n_ids = 10, granted_only = FALSE) {
+                                     top_n_ids = 10, granted_only = FALSE, multifam_only = FALSE) {
 
   tech_bool      <- build_tech_bool_v2(techs)
   granted_clause <- build_granted_clause_v2(granted_only)
+  multifam_clause <- build_multifam_clause_v2(multifam_only)
 
   # Build WHERE clause for tech filtering
   tech_filter_sql <- if (tech_bool == "TRUE") {
@@ -472,6 +494,7 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause,
         AND p.ctry_code = 'GB'
         AND p.{toflow} IS NOT NULL
         {granted_clause}
+        {multifam_clause}
     ),
 
     -- Deduplicate across regions: one row per distinct patent
@@ -561,7 +584,7 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause,
 #' @param firm_clause Character. AND clause for firm filtering (may be empty)
 #' @return Character. SQL returning region_code, allinnos
 sql_region_allinnos_v2 <- function(toflow, region_sql, firm_clause,
-                                     granted_only = FALSE) {
+                                     granted_only = FALSE, multifam_only = FALSE) {
   firm_filter_sql <- if (nchar(trimws(firm_clause)) == 0) {
     ""
   } else {
@@ -569,6 +592,7 @@ sql_region_allinnos_v2 <- function(toflow, region_sql, firm_clause,
     paste0("WHERE ", firm_condition)
   }
   granted_clause <- build_granted_clause_v2(granted_only)
+  multifam_clause <- build_multifam_clause_v2(multifam_only)
 
   glue::glue("
     {if (nchar(trimws(firm_clause)) > 0) '
@@ -588,6 +612,7 @@ sql_region_allinnos_v2 <- function(toflow, region_sql, firm_clause,
       AND p.ctry_code = 'GB'
       AND p.{toflow} IS NOT NULL
       {granted_clause}
+        {multifam_clause}
     GROUP BY r.region_code
   ")
 }
@@ -604,7 +629,7 @@ sql_region_allinnos_v2 <- function(toflow, region_sql, firm_clause,
 #' @param firm_clause Character. AND clause from build_firm_clause_v2().
 #' @return Character. SQL query string.
 sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_clause,
-                                         top_n_ids = 10, granted_only = FALSE) {
+                                         top_n_ids = 10, granted_only = FALSE, multifam_only = FALSE) {
 
   filter_clauses <- unlist(tech_filters)
   filter_clauses <- filter_clauses[nchar(trimws(filter_clauses)) > 0]
@@ -624,6 +649,7 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
   }
 
   granted_clause <- build_granted_clause_v2(granted_only)
+  multifam_clause <- build_multifam_clause_v2(multifam_only)
 
   # Build filtered_tech CTE:
   # "All innovations" = all patents regardless of tech mapping (single bar)
@@ -689,6 +715,7 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
         AND p.ctry_code = 'GB'
         AND p.{toflow} IS NOT NULL
         {granted_clause}
+        {multifam_clause}
     ),
 
     ranked AS (
@@ -715,6 +742,7 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
           AND p.ctry_code = 'GB'
           AND p.{toflow} IS NOT NULL
           {granted_clause}
+        {multifam_clause}
       ) t
     )
 

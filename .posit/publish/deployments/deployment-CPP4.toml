@@ -11,8 +11,8 @@ id = '019cdc4e-02b5-144d-71fe-74477e6abf2a'
 dashboard_url = 'https://connect.posit.cloud/mondpanther/content/019cdc4e-02b5-144d-71fe-74477e6abf2a'
 direct_url = 'https://019cdc4e-02b5-144d-71fe-74477e6abf2a.share.connect.posit.cloud'
 logs_url = 'https://connect.posit.cloud/mondpanther/content/019cdc4e-02b5-144d-71fe-74477e6abf2a/history'
-deployed_at = '2026-04-23T09:12:48+01:00'
-bundle_id = '019db962-d788-6366-a2dc-88b8b7554274'
+deployed_at = '2026-04-26T20:55:54+01:00'
+bundle_id = '019dcb5b-2d0d-635a-2083-44b2d9a4df84'
 files = [
   '.posit/publish/deployments/deployment-CPP4.toml',
   '.posit/publish/iseapp2-9GQ2.toml',
@@ -28,7 +28,7 @@ files = [
   'R/innovationStrategyExplorer-package.R',
   'R/module_about.R',
   'R/module_country.R',
-  'R/module_globe.R',
+  'R/module_hglobe.R',
   'R/module_landing.R',
   'R/module_region.R',
   'R/module_welcome.R',
@@ -45,7 +45,9 @@ files = [
   'data-raw/02-build-app-sysdata.R',
   'inst/VERSION',
   'inst/config.yml',
+  'inst/extdata/citenet.parquet',
   'inst/extdata/country_lookup.parquet',
+  'inst/extdata/countrymap.parquet',
   'inst/extdata/firm_lookup.parquet',
   'inst/extdata/inglobe_processed.parquet',
   'inst/extdata/patent_database.parquet',
@@ -56,6 +58,7 @@ files = [
   'inst/extdata/tech_lookup.parquet',
   'inst/insights_html/.gitkeep',
   'inst/insights_html/flowsbetweenHICs_LMICs.html',
+  'inst/insights_html/patent_cluster_compare.html',
   'inst/www/css/custom-styles.min.css',
   'inst/www/img/favicon.svg',
   'inst/www/img/ifc_logo.svg',
@@ -74,9 +77,6 @@ files = [
   'man/expand_region_selection.Rd',
   'man/get_prepdata_path.Rd',
   'man/get_region_name.Rd',
-  'man/globe_module_server.Rd',
-  'man/globe_module_sidebar.Rd',
-  'man/globe_module_ui.Rd',
   'man/innovationStrategyExplorer-package.Rd',
   'man/load_precomputed_by_country.Rd',
   'man/load_precomputed_by_region.Rd',

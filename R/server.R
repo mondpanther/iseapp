@@ -39,7 +39,7 @@ server <- function(input, output, session, con) {
     keep_prefixes <- switch(tab %||% "",
       "Country Explorer" = c("country-"),
       "Region Explorer"  = c("region-"),
-      "Globe"            = c("globe-"),
+      "HiGGlobe"         = c("hglobe-"),
       "About"            = character(),
       character()        # unknown / fallback — keep only navbar_page
     )
@@ -89,7 +89,7 @@ server <- function(input, output, session, con) {
   #
   # Recognised params (all optional, all case-sensitive for values):
   #   tab        Navbar tab: "Country Explorer" | "Region Explorer" |
-  #              "Globe" | "About"
+  #              "HiGGlobe" | "About"
   #   ctry       Comma-separated country codes or predefined group names
   #              (uses country-tab input).
   #   region     Comma-separated UK region names (region-tab input).
@@ -132,6 +132,9 @@ server <- function(input, output, session, con) {
     if (!is.null(q$granted))
       shiny::updateCheckboxInput(session, "country-granted_only",
                                  value = as_bool(q$granted))
+    if (!is.null(q$multifam))
+      shiny::updateCheckboxInput(session, "country-multifam_only",
+                                 value = as_bool(q$multifam))
     if (!is.null(q$top_n_ids))
       shiny::updateNumericInput(session, "country-top_n_ids",
                                 value = suppressWarnings(as.integer(q$top_n_ids)))
@@ -152,9 +155,74 @@ server <- function(input, output, session, con) {
     if (!is.null(q$granted))
       shiny::updateCheckboxInput(session, "region-granted_only",
                                  value = as_bool(q$granted))
+    if (!is.null(q$multifam))
+      shiny::updateCheckboxInput(session, "region-multifam_only",
+                                 value = as_bool(q$multifam))
     if (!is.null(q$top_n_ids))
       shiny::updateNumericInput(session, "region-top_n_ids_region",
                                 value = suppressWarnings(as.integer(q$top_n_ids)))
+
+    # --- HiGGlobe URL params (also accept ctry / firm / tech / flow /
+    # granted / multifam — those are forwarded by the country-tab handlers
+    # above only when ctry / firm / tech are present, but HiGGlobe uses
+    # the same input ids prefixed `hglobe-`, so we mirror them here).
+    if (!is.null(q$ctry))
+      shiny::updateSelectizeInput(session, "hglobe-country",
+                                  selected = csv(q$ctry))
+    if (!is.null(q$tech))
+      shiny::updateSelectizeInput(session, "hglobe-techs",
+                                  selected = csv(q$tech))
+    if (!is.null(q$firm))
+      shiny::updateSelectizeInput(session, "hglobe-firm",
+                                  selected = csv(q$firm))
+    if (!is.null(q$flow))
+      shiny::updateSelectizeInput(session, "hglobe-toflow", selected = q$flow)
+    if (!is.null(q$granted))
+      shiny::updateCheckboxInput(session, "hglobe-granted_only",
+                                 value = as_bool(q$granted))
+    if (!is.null(q$multifam))
+      shiny::updateCheckboxInput(session, "hglobe-multifam_only",
+                                 value = as_bool(q$multifam))
+
+    # higglobe_gen=N preloads the "Add Generations" field. The actual click
+    # is wired up inside the module so it can wait for gen 0 to be seeded
+    # before firing Generate.
+    if (!is.null(q$higglobe_gen)) {
+      n_gen <- suppressWarnings(as.integer(q$higglobe_gen))
+      if (!is.na(n_gen) && n_gen > 0)
+        shiny::updateNumericInput(session, "hglobe-add_generations",
+                                  value = n_gen)
+    }
+
+    # `step=N` is the bookmarkable shorthand: the URL records the number of
+    # generations currently displayed, and reopening that URL replays the
+    # full sequence (init + N generations). It mirrors the effect of
+    # higglobe_run=1 + higglobe_gen=N. The actual click on Initiate
+    # Innovation is fired by the module itself once it has booted (it is
+    # initialised lazily on the first HiGGlobe tab visit) — clicking the
+    # button from server.R races the lazy init and was unreliable.
+    step_val <- suppressWarnings(as.integer(q$step))
+    if (length(step_val) == 1L && !is.na(step_val) && step_val > 0L) {
+      shiny::updateNumericInput(session, "hglobe-add_generations",
+                                value = step_val)
+      if (is.null(session$userData$restore_params))
+        session$userData$restore_params <- list()
+      session$userData$restore_params$higglobe_gen <-
+        as.character(step_val)
+      session$userData$restore_params$higglobe_run <- "1"
+      bslib::nav_select(id = "navbar_page", selected = "HiGGlobe",
+                        session = session)
+    }
+
+    # higglobe_run=1 just stashes the flag and switches to HiGGlobe; the
+    # module fires the click itself once it has booted.
+    if (as_bool(q$higglobe_run)) {
+      if (is.null(session$userData$restore_params))
+        session$userData$restore_params <- list()
+      session$userData$restore_params$higglobe_run <- "1"
+      bslib::nav_select(id = "navbar_page", selected = "HiGGlobe",
+                        session = session)
+    }
   })
 
   # Call Modules
@@ -167,8 +235,8 @@ server <- function(input, output, session, con) {
   shiny::observeEvent(c(req(input$navbar_page == "Region Explorer")), once = TRUE, {
     region_module_server("region", session, con = con)
   })
-  shiny::observeEvent(c(req(input$navbar_page == "Globe")), once = TRUE, {
-    globe_module_server("globe", session)
+  shiny::observeEvent(c(req(input$navbar_page == "HiGGlobe")), once = TRUE, {
+    hglobe_module_server("hglobe", con = con)
   })
-  
+
 }

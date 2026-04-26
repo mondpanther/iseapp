@@ -530,6 +530,36 @@ if (file.exists(granted_cache)) {
 }
 toc()
 
+# ---- Pull multi-application family set from BigQuery -----------------------
+# Used to attach a per-family `fam_size_min2` boolean column so the Shiny UI
+# can filter to families with PATSTAT docdb_family_size >= 2 at query time.
+# We always materialise this list, regardless of the build-time
+# FAMILY_SIZE_MIN setting, so the runtime filter can be toggled
+# independently of the build-time scope.
+cat("\nFetching fam_size>=2 set from BigQuery ...\n")
+tic("multifam-family fetch")
+multifam_cache <- file.path(bigdata_dir, "fam_size_min2.parquet")
+if (file.exists(multifam_cache)) {
+  cat("  Reading cached fam_size>=2 families from ", multifam_cache, "\n", sep = "")
+  multifam_fams <- as.data.table(arrow::read_parquet(multifam_cache))
+} else {
+  cat("  Querying patbis.fromPATSTAT2025.tls201_appln ...\n")
+  multifam_fams <- as.data.table(bq_table_download(
+    bq_project_query("patbis", "
+      SELECT DISTINCT docdb_family_id
+      FROM `patbis.fromPATSTAT2025.tls201_appln`
+      WHERE docdb_family_size >= 2
+        AND docdb_family_id IS NOT NULL
+    "),
+    page_size = 200000, bigint = "integer"
+  ))
+  arrow::write_parquet(multifam_fams, multifam_cache,
+                       compression = "zstd", compression_level = 3)
+  cat("  Cached ", nrow(multifam_fams),
+      " fam_size>=2 families -> ", multifam_cache, "\n", sep = "")
+}
+toc()
+
 
 # ============================================================================
 # STEP 10: Compute istraxes from fromWATSON
@@ -649,9 +679,13 @@ if (all(c("ev_HIC", "ev_EMDE") %in% names(patchar))) {
 # countries. National measures (from pcm) vary by country.
 cat("  10e: Building innovation x country measures in memory...\n")
 
-# Per-innovation measures (same for all countries of an innovation)
+# Per-innovation measures (same for all countries of an innovation).
+# `cost`, `alpha`, `pv` are kept here too — they are the inputs the runtime
+# view in R/runAppPackage.R uses to derive is_*/av_* on the fly, so we no
+# longer need to materialise the 44 derived columns into the parquet.
 measure_cols <- grep("^(istrax_|avstrax_|ev_)", names(patchar), value = TRUE)
-patchar_slim <- patchar[, c("docdb_family_id", measure_cols), with = FALSE]
+patchar_slim <- patchar[, c("docdb_family_id", measure_cols,
+                             "cost", "alpha", "pv"), with = FALSE]
 
 # Cross with countrymap to get innovation x country level
 patent_data <- patchar_slim[countrymap, on = "docdb_family_id", nomatch = 0L]
@@ -664,6 +698,18 @@ cat(sprintf("    granted families in patent_data: %s / %s (%.1f%%)\n",
                    big.mark = ","),
             format(uniqueN(patent_data$docdb_family_id), big.mark = ","),
             100 * uniqueN(patent_data[granted == TRUE]$docdb_family_id) /
+                  uniqueN(patent_data$docdb_family_id)))
+
+# Same idea for the multi-application flag — every (docdb, ctry) row
+# inherits the family-level boolean so the Shiny UI can filter to
+# docdb_family_size >= 2 at query time.
+patent_data[, fam_size_min2 :=
+              docdb_family_id %in% multifam_fams$docdb_family_id]
+cat(sprintf("    fam_size>=2 families in patent_data: %s / %s (%.1f%%)\n",
+            format(uniqueN(patent_data[fam_size_min2 == TRUE]$docdb_family_id),
+                   big.mark = ","),
+            format(uniqueN(patent_data$docdb_family_id), big.mark = ","),
+            100 * uniqueN(patent_data[fam_size_min2 == TRUE]$docdb_family_id) /
                   uniqueN(patent_data$docdb_family_id)))
 
 # Merge in national measures (only exist for a subset of innovation x country)
@@ -697,6 +743,56 @@ cat("    final country universe: ",
 
 rm(patchar, pcm, pcm_national, patchar_slim)
 gc()
+toc()
+
+
+# ============================================================================
+# STEP 10f: Citation counts per family
+# ----------------------------------------------------------------------------
+# Read the source citenet file (one row per docdb-family citation, self-
+# citations already removed). Restrict both endpoints to the final docdb
+# universe (i.e. the Shiny app's main database) and count incoming
+# citations per cited_docdb_family_id. Merged into patent_data at the
+# docdb_family_id level — every (docdb, ctry) row for the same family
+# carries the same citation count, exactly like ev_global / global flow
+# values do. Stored as the new column `cit_count` so it can be exposed in
+# the toflow dropdown.
+# ============================================================================
+cat("\nComputing citation counts from citenet_noself...\n")
+tic("citation counts")
+citenet_src <- file.path(patbis_dir, "fromPATSTAT", "citenet_noself.parquet")
+if (!file.exists(citenet_src)) {
+  warning("citenet_noself.parquet not found at ", citenet_src,
+          " — adding cit_count = 0 for every family.")
+  patent_data[, cit_count := 0L]
+} else {
+  con_cit <- DBI::dbConnect(duckdb::duckdb())
+  on.exit(try(DBI::dbDisconnect(con_cit, shutdown = TRUE), silent = TRUE),
+          add = TRUE)
+  DBI::dbWriteTable(con_cit, "fams",
+                    data.frame(docdb_family_id = final_docdbs),
+                    overwrite = TRUE)
+  cit_counts <- as.data.table(DBI::dbGetQuery(con_cit, sprintf("
+    SELECT c.cited_docdb_family_id AS docdb_family_id,
+           COUNT(*)                AS cit_count
+    FROM read_parquet('%s') c
+    INNER JOIN fams f_cited
+      ON f_cited.docdb_family_id = c.cited_docdb_family_id
+    INNER JOIN fams f_citing
+      ON f_citing.docdb_family_id = c.docdb_family_id
+    GROUP BY c.cited_docdb_family_id
+  ", citenet_src)))
+  DBI::dbDisconnect(con_cit, shutdown = TRUE)
+
+  cat(sprintf("  %s families have citations (%.1f%% of universe)\n",
+              format(nrow(cit_counts), big.mark = ","),
+              100 * nrow(cit_counts) / length(final_docdbs)))
+
+  patent_data <- cit_counts[patent_data, on = "docdb_family_id"]
+  # cit_count is BIGINT/INTEGER from DuckDB so the existing is.double loop
+  # below skips it; NA-fill it here explicitly.
+  patent_data[is.na(cit_count), cit_count := 0L]
+}
 toc()
 
 
@@ -773,11 +869,30 @@ if (n_missing > 0) {
       round(100 * n_missing / nrow(patent_data), 2), "%)\n")
 }
 
-# Replace NAs with 0 and round numeric measures
-num_cols <- names(patent_data)[sapply(patent_data, is.double)]
+# Replace NAs with 0 and round numeric measures. `cost`, `alpha`, `pv` keep
+# their full double precision because the runtime view derives is_*/av_*
+# from them on every query — quantising them to 4 decimals would surface
+# as a small but real numerical drift versus the previously precomputed
+# is/av columns (especially for tiny cost values where 1/cost amplifies
+# rounding error). NA→0 still applies so the view's CASE-on-cost guard
+# can short-circuit cleanly.
+num_cols       <- names(patent_data)[sapply(patent_data, is.double)]
+no_round_cols  <- c("cost", "alpha", "pv")
 for (nc in num_cols) {
   patent_data[is.na(get(nc)), (nc) := 0]
-  patent_data[, (nc) := round(get(nc), 4)]
+  if (!nc %in% no_round_cols)
+    patent_data[, (nc) := round(get(nc), 4)]
+}
+
+# Drop the precomputed is_*/av_* columns. They were a function of
+# (ev_*, cost, alpha, pv) and are now reconstructed on every query by the
+# DuckDB view in R/runAppPackage.R. Removing 44 derived columns shrinks
+# patent_database.parquet from ~1.9 GB to <1 GB.
+derived_cols <- grep("^(is_|av_)", names(patent_data), value = TRUE)
+if (length(derived_cols)) {
+  cat("  Dropping", length(derived_cols),
+      "derived is_*/av_* columns (recomputed by runtime view)\n")
+  patent_data[, (derived_cols) := NULL]
 }
 
 cat("  patent_data:", nrow(patent_data), "rows,", ncol(patent_data), "columns\n")
@@ -975,6 +1090,118 @@ rm(df_raw); gc()
 write_parquet_atomic(df_processed, "inst/extdata/inglobe_processed.parquet")
 cat("  Written inglobe_processed.parquet:", nrow(df_processed), "rows\n")
 rm(df_processed); gc()
+
+# ============================================================================
+# STEP N: Publish countrymap.parquet (with city/lat/lon) to inst/extdata
+# ----------------------------------------------------------------------------
+# Source: <dropbox>/PATSTAT autumn 2025 data/patstat_clean/countrymap.parquet
+#   — produced by data-raw-2025/build_inventor_countries_harm_bq.R (step 9).
+#   One row per (docdb_family_id, ctry_code), with mode city + lat/lon
+#   + geocode_missing flag.
+#
+# Augmentation:
+#   patent_database may carry (docdb, ctry) pairs that have no person record
+#   in PATSTAT (e.g. families pulled in by Watson nationalkey augmentation
+#   without an inventor address), so they are absent from the harmonisation-
+#   derived countrymap above. Without coordinates the HiGGlobe view drops
+#   them silently. To avoid that, we backfill any such missing pair with the
+#   capital-city coordinates of its country and geocode_missing = TRUE.
+#   The capital lookup is rebuilt from maps::world.cities so this step has
+#   no BigQuery dependency.
+# ============================================================================
+cat("\nPublishing countrymap.parquet to inst/extdata/...\n")
+cm_src <- file.path(patstat_clean, "countrymap.parquet")
+cm_dst <- "inst/extdata/countrymap.parquet"
+pdb_pq <- "inst/extdata/patent_database.parquet"
+
+if (!file.exists(cm_src)) {
+  warning("countrymap.parquet not found at ", cm_src,
+          " — run build_inventor_countries_harm_bq.R first. Skipping.")
+} else if (!file.exists(pdb_pq)) {
+  warning("patent_database.parquet not found at ", pdb_pq,
+          " — countrymap will be published without capital-fallback ",
+          "augmentation. Skipping.")
+  file.copy(cm_src, cm_dst, overwrite = TRUE)
+} else {
+  # Build a capital-coordinates lookup keyed on ISO2 from maps::world.cities.
+  # If multiple capital rows exist for a country (rare), keep the most
+  # populous. Countries without a capital row get no fallback.
+  if (!requireNamespace("maps", quietly = TRUE))
+    stop("Package 'maps' is required for the countrymap capital fallback.")
+  wc <- as.data.table(maps::world.cities)
+  wc[, iso2 := countrycode::countrycode(country.etc, origin = "country.name",
+                                        destination = "iso2c", warn = FALSE)]
+  caps <- wc[capital == 1L & !is.na(iso2)][order(iso2, -as.integer(pop))]
+  caps <- caps[!duplicated(iso2),
+               .(ctry_code = iso2,
+                 cap_city  = name,
+                 cap_lat   = as.numeric(lat),
+                 cap_lon   = as.numeric(long))]
+  cat(sprintf("  Capital lookup: %d countries\n", nrow(caps)))
+
+  con_cm <- dbConnect(duckdb::duckdb())
+  on.exit(try(dbDisconnect(con_cm, shutdown = TRUE), silent = TRUE), add = TRUE)
+  dbWriteTable(con_cm, "caps", as.data.frame(caps), overwrite = TRUE)
+
+  cm_tmp <- paste0(cm_dst, ".tmp-", Sys.getpid())
+  dbExecute(con_cm, sprintf("
+    COPY (
+      WITH cm AS (
+        SELECT * FROM read_parquet('%s')
+      ),
+      pairs AS (
+        SELECT DISTINCT docdb_family_id, ctry_code
+        FROM read_parquet('%s')
+        WHERE docdb_family_id IS NOT NULL
+          AND ctry_code IS NOT NULL
+      ),
+      missing AS (
+        SELECT p.docdb_family_id, p.ctry_code,
+               c.cap_city AS city,
+               c.cap_lat  AS lat,
+               c.cap_lon  AS lon,
+               TRUE       AS geocode_missing
+        FROM pairs p
+        LEFT JOIN cm
+          ON cm.docdb_family_id = p.docdb_family_id
+         AND cm.ctry_code       = p.ctry_code
+        LEFT JOIN caps c
+          ON c.ctry_code = p.ctry_code
+        WHERE cm.docdb_family_id IS NULL
+          AND c.cap_lat IS NOT NULL
+      )
+      SELECT docdb_family_id, ctry_code, city, lat, lon, geocode_missing
+      FROM cm
+      UNION ALL
+      SELECT docdb_family_id, ctry_code, city, lat, lon, geocode_missing
+      FROM missing
+    ) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD)
+  ", cm_src, pdb_pq, gsub("'", "''", cm_tmp)))
+
+  diag_cm <- dbGetQuery(con_cm, sprintf("
+    SELECT
+      COUNT(*)                  AS n_rows,
+      COUNTIF(geocode_missing)  AS n_capital_fallback,
+      COUNTIF(NOT geocode_missing) AS n_with_city
+    FROM read_parquet('%s')
+  ", gsub("'", "''", cm_tmp)))
+
+  dbDisconnect(con_cm, shutdown = TRUE)
+
+  if (!file.rename(cm_tmp, cm_dst)) {
+    for (i in 1:5) {
+      Sys.sleep(1); if (file.rename(cm_tmp, cm_dst)) break
+    }
+    if (file.exists(cm_tmp))
+      stop("Could not rename ", cm_tmp, " to ", cm_dst)
+  }
+  cm_sz <- round(file.info(cm_dst)$size / 1024^2, 1)
+  cat(sprintf("  Written countrymap.parquet: %.1f MB (%s rows; %s with city, %s capital-fallback)\n",
+              cm_sz,
+              format(diag_cm$n_rows,             big.mark = ","),
+              format(diag_cm$n_with_city,        big.mark = ","),
+              format(diag_cm$n_capital_fallback, big.mark = ",")))
+}
 
 # ============================================================================
 # SUMMARY

@@ -58,10 +58,18 @@ region_module_sidebar <- function(id) {
       ),
       shiny::div(
         class = "side_input",
-        shiny::checkboxInput(
-          inputId = ns("granted_only"),
-          label   = "Granted families only",
-          value   = TRUE
+        shiny::div(
+          style = "display:flex; gap:18px; flex-wrap:wrap;",
+          shiny::checkboxInput(
+            inputId = ns("granted_only"),
+            label   = "Granted families only",
+            value   = TRUE
+          ),
+          shiny::checkboxInput(
+            inputId = ns("multifam_only"),
+            label   = "Multi-application families only",
+            value   = FALSE
+          )
         )
       ),
 
@@ -366,7 +374,7 @@ region_module_server <- function(id, parent_session, con) {
         out <- DBI::dbGetQuery(con, sql_region_combined_v2(
           toflow, region_sql, input$techs_region, firm_clause,
           top_n_ids    = input$top_n_ids_region,
-          granted_only = isTRUE(input$granted_only)
+          granted_only = isTRUE(input$granted_only), multifam_only = isTRUE(input$multifam_only)
         ))
 
         if (nrow(out) == 0) return(NULL)
@@ -379,7 +387,7 @@ region_module_server <- function(id, parent_session, con) {
         allinnos_data <- DBI::dbGetQuery(
           con,
           sql_region_allinnos_v2(toflow, region_sql, firm_clause,
-                                 granted_only = isTRUE(input$granted_only))
+                                 granted_only = isTRUE(input$granted_only), multifam_only = isTRUE(input$multifam_only))
         ) |>
           dplyr::filter(region_code %in% selected_regions)
 
@@ -411,7 +419,7 @@ region_module_server <- function(id, parent_session, con) {
 
       }) |> shiny::bindCache(input$toflow_region, input$region, input$techs_region,
                              sort(input$firm), input$top_n_ids_region,
-                             isTRUE(input$granted_only))
+                             isTRUE(input$granted_only), isTRUE(input$multifam_only))
 
       fallback_by_tech_region <- shiny::reactive({
         shiny::req(input$toflow_region, input$region, input$tech_categories_plot1_region)
@@ -431,7 +439,7 @@ region_module_server <- function(id, parent_session, con) {
         out <- DBI::dbGetQuery(con, sql_region_tech_combined_v2(
           toflow, region_sql, tech_filters, firm_clause,
           top_n_ids    = input$top_n_ids_region,
-          granted_only = isTRUE(input$granted_only)
+          granted_only = isTRUE(input$granted_only), multifam_only = isTRUE(input$multifam_only)
         ))
 
         if (nrow(out) == 0) return(NULL)
@@ -466,7 +474,7 @@ region_module_server <- function(id, parent_session, con) {
 
       }) |> shiny::bindCache(input$toflow_region, input$region, input$tech_categories_plot1_region,
                              sort(input$firm), input$top_n_ids_region,
-                             isTRUE(input$granted_only))
+                             isTRUE(input$granted_only), isTRUE(input$multifam_only))
       # ===== RENDER OUTPUTS =====
       
       # Plot 1: Returns by Technology

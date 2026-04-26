@@ -13,6 +13,8 @@
 #'   * `toflow`       — value for the `country-toflow` select input
 #'   * `granted_only` — optional logical (default `TRUE`) for the
 #'                       "Granted families only" checkbox
+#'   * `multifam_only`— optional logical (default `FALSE`) for the
+#'                       "Multi-application families only" checkbox
 #' @param out_dir Directory where CSVs will be written
 #' @param app_url Base URL of the deployed app
 #' @param tech_categories Character vector for `country-tech_categories_plot1`
@@ -23,15 +25,19 @@ fetch_flow_csvs <- function(specs,
                             out_dir,
                             app_url  = "https://mondpanther-iseapp2.share.connect.posit.cloud/",
                             tech_categories = c(
-                              "Green Technology", "AI", "Green Transport",
+                              "All innovations",
+                              "Green Technology",
+                              "Battery Technology",
+                              "AI", "Green Transport",
                               "Green Manufacturing", "GHG Capture",
                               "Green Energy", "Adaptation", "Green Housing",
                               "Circular Economy", "Green ICT",
                               "Green Agriculture",
                               "Any Agriculture & Food technology"
                             ),
-                            cold_start_wait = 20,
-                            reflow_wait     = 12,
+                            cold_start_wait = 30,
+                            reflow_wait     = 20,
+                            fetch_timeout_s = 120,
                             overwrite       = FALSE) {
 
   if (!requireNamespace("chromote", quietly = TRUE)) {
@@ -57,8 +63,9 @@ fetch_flow_csvs <- function(specs,
     "%5D"
   )
 
-  spec_granted <- function(s) isTRUE(s$granted_only %||% TRUE)
   `%||%` <- function(a, b) if (is.null(a)) b else a
+  spec_granted  <- function(s) isTRUE(s$granted_only  %||% TRUE)
+  spec_multifam <- function(s) isTRUE(s$multifam_only %||% FALSE)
 
   initial_url <- paste0(
     app_url,
@@ -69,13 +76,25 @@ fetch_flow_csvs <- function(specs,
     "&country-firm=", q("No firm filter"),
     "&country-toflow=", q(needed[[1]]$toflow),
     "&country-tech_categories_plot1=", tech_arr,
-    "&country-granted_only=", tolower(as.character(spec_granted(needed[[1]]))),
+    "&country-granted_only=",   tolower(as.character(spec_granted(needed[[1]]))),
+    "&country-multifam_only=",  tolower(as.character(spec_multifam(needed[[1]]))),
     "&country-widthscale=", q("log"),
     "&country-display_mode=", q("confidence"),
     "&country-top_n_ids=10"
   )
 
   message("Launching headless Chrome ...")
+  # Bump chromote's default wait timeout for CDP responses BEFORE we
+  # create the session, so Runtime.evaluate calls that take a while to
+  # come back (e.g. the CSV download fetch when all 14 tech categories
+  # are aggregated) don't trip the default 10s wait.
+  prev_timeout <- tryCatch(chromote::default_timeout(),
+                           error = function(e) NULL)
+  try(chromote::default_timeout(fetch_timeout_s), silent = TRUE)
+  on.exit({
+    if (!is.null(prev_timeout))
+      try(chromote::default_timeout(prev_timeout), silent = TRUE)
+  }, add = TRUE)
   b <- chromote::ChromoteSession$new()
   on.exit(try(b$close(), silent = TRUE), add = TRUE)
 
@@ -104,10 +123,15 @@ fetch_flow_csvs <- function(specs,
   }
 
   fetch_current_csv <- function() {
+    # The download fetch can take well over the default chromote 10 s
+    # timeout when the SQL behind the CSV touches all 14 tech categories
+    # at once. Pass an explicit timeout (in milliseconds) sized for the
+    # slowest realistic case.
     res <- b$Runtime$evaluate(
       "fetch(document.getElementById('country-dl_csv_avstrax_plot1').href).then(r => r.text())",
       awaitPromise  = TRUE,
-      returnByValue = TRUE
+      returnByValue = TRUE,
+      timeout       = fetch_timeout_s * 1000
     )
     if (!is.null(res$exceptionDetails)) {
       stop("Chromote fetch error: ",
@@ -123,7 +147,8 @@ fetch_flow_csvs <- function(specs,
 
     if (i > 1) {
       message("Setting country='", spec$country, "', toflow='", spec$toflow,
-              "', granted_only=", spec_granted(spec), " ...")
+              "', granted_only=", spec_granted(spec),
+              ", multifam_only=", spec_multifam(spec), " ...")
       # country-country is a multi-select (selectizeInput multiple=TRUE) — pass an array
       set_input("country-country",
                 jsonlite::toJSON(spec$country, auto_unbox = FALSE))
@@ -131,6 +156,8 @@ fetch_flow_csvs <- function(specs,
                 jsonlite::toJSON(spec$toflow, auto_unbox = TRUE))
       set_input("country-granted_only",
                 if (spec_granted(spec)) "true" else "false")
+      set_input("country-multifam_only",
+                if (spec_multifam(spec)) "true" else "false")
       Sys.sleep(reflow_wait)
     }
     wait_for_download_href()
