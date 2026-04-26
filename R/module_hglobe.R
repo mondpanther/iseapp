@@ -76,7 +76,7 @@ hglobe_module_sidebar <- function(id) {
           inputId = ns("toflow"),
           label    = NULL,
           choices  = toflow_choices,
-          selected = "is_global",
+          selected = "ev_global",
           multiple = FALSE,
           width    = "400px"
         )
@@ -151,13 +151,29 @@ hglobe_module_sidebar <- function(id) {
         )
       ),
       shiny::div(
-        style = "flex: 1; min-width: 0;",
+        style = "flex: 1; min-width: 0; position: relative;",
         bslib::input_task_button(
           ns("next_step"),
           "Generate",
           label_busy = "Generating...",
           class = "btn-secondary",
           width = "100%"
+        ),
+        # Persistent spinner overlay shown for the *whole* multi-generation
+        # batch, not just one iteration. The bslib task button reverts to
+        # its idle look between iterations because each iteration is a
+        # separate observer firing; this overlay keeps the user aware that
+        # the server is still working until pending_gens hits 0.
+        shiny::tags$div(
+          id    = ns("next_step_spinner"),
+          style = paste0(
+            "display:none;position:absolute;top:50%;right:10px;",
+            "transform:translateY(-50%);pointer-events:none;"),
+          shiny::tags$span(
+            class = "spinner-border spinner-border-sm",
+            role  = "status",
+            `aria-hidden` = "true"
+          )
         )
       )
     )
@@ -617,6 +633,12 @@ hglobe_module_server <- function(id, con) {
         # Reset any previous generation chain — a fresh "Render Map" click
         # starts a new seed, discarding whatever `Next step` expanded before.
         drop_session_tables()
+        # Bump the generation epoch and zero pending_gens so any in-flight
+        # later::later() callbacks from the previous batch see a stale
+        # epoch and bail out instead of continuing to enqueue Generate
+        # iterations on top of the new seed.
+        gen_epoch(shiny::isolate(gen_epoch()) + 1L)
+        pending_gens(0L)
         seed <- data.frame(
           docdb_family_id = dat$docdb_family_id,
           ctry_code       = dat$ctry_code,
@@ -925,6 +947,15 @@ hglobe_module_server <- function(id, con) {
       # user sees the chain build up incrementally instead of waiting for the
       # whole batch to finish in one frozen blob.
       pending_gens <- shiny::reactiveVal(0L)
+      # gen_epoch identifies a single multi-generation batch. Render Map
+      # bumps it; the deferred later::later() callback that schedules the
+      # next iteration captures the epoch as it was when scheduling and
+      # bails out if it no longer matches — so a click on Initiate
+      # Innovation cancels any pending iterations from the previous batch.
+      # (The currently running do_one_generation cannot be aborted because
+      # R is single-threaded; the in-flight iteration finishes, but no
+      # further iterations are kicked off.)
+      gen_epoch <- shiny::reactiveVal(0L)
       # Inputs needed by each iteration are captured when "Generate" is
       # pressed, so changes to the sliders mid-batch don't surprise the
       # user (the Render Map seed locked the toflow already).
@@ -952,6 +983,10 @@ hglobe_module_server <- function(id, con) {
       shiny::observeEvent(pending_gens(), ignoreInit = TRUE, {
         rem <- pending_gens()
         if (rem <= 0) return()
+        # Snapshot the epoch we're working under; if Render Map fires
+        # mid-batch it will bump gen_epoch and our scheduled callback will
+        # see the mismatch and exit.
+        my_epoch <- shiny::isolate(gen_epoch())
         ok <- do_one_generation(pending_pct(), pending_flow())
         if (!ok) {
           pending_gens(0L)
@@ -962,10 +997,50 @@ hglobe_module_server <- function(id, con) {
           # the leaflet markers / polylines / stats row added above paint
           # to the browser before the next iteration starts.
           later::later(function() {
+            if (!isTRUE(shiny::isolate(gen_epoch()) == my_epoch)) return()
             shiny::isolate(pending_gens(rem - 1L))
           }, delay = 0.15)
         } else {
           pending_gens(0L)
+        }
+      })
+
+      # URL-driven auto-Generate: when ?higglobe_gen=N is on the URL the
+      # server-side handler has already preset input$add_generations and
+      # (likely) clicked Initiate Innovation. We just need to wait for
+      # gen 0 to be seeded (gen_next() flips from NULL to 1L) and then
+      # fire the Generate button once. `auto_gen_armed` ensures we do this
+      # at most once per arrival, even if the user clicks Initiate
+      # Innovation again later.
+      auto_gen_armed <- shiny::reactiveVal(FALSE)
+      shiny::observe({
+        rp  <- session$userData$restore_params %||% list()
+        raw <- rp$higglobe_gen
+        if (is.null(raw) || !nzchar(raw)) return()
+        n_gen <- suppressWarnings(as.integer(raw))
+        if (length(n_gen) == 1L && !is.na(n_gen) && n_gen > 0)
+          auto_gen_armed(TRUE)
+      })
+      shiny::observe({
+        if (!isTRUE(auto_gen_armed())) return()
+        g <- gen_next()
+        if (is.null(g) || g != 1L) return()
+        auto_gen_armed(FALSE)
+        later::later(function() {
+          shinyjs::click(id = "next_step")
+        }, delay = 0.4)
+      })
+
+      # Spinner: visible whenever a multi-generation batch is mid-flight,
+      # i.e. pending_gens > 0. Toggling this with shinyjs::show / hide is
+      # cheap and works regardless of the bslib task-button's per-iteration
+      # busy reset.
+      shiny::observe({
+        rem <- pending_gens()
+        if (is.null(rem) || rem <= 0) {
+          shinyjs::hide(id = "next_step_spinner")
+        } else {
+          shinyjs::show(id = "next_step_spinner")
         }
       })
 

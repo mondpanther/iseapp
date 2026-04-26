@@ -161,6 +161,50 @@ server <- function(input, output, session, con) {
     if (!is.null(q$top_n_ids))
       shiny::updateNumericInput(session, "region-top_n_ids_region",
                                 value = suppressWarnings(as.integer(q$top_n_ids)))
+
+    # --- HiGGlobe URL params (also accept ctry / firm / tech / flow /
+    # granted / multifam — those are forwarded by the country-tab handlers
+    # above only when ctry / firm / tech are present, but HiGGlobe uses
+    # the same input ids prefixed `hglobe-`, so we mirror them here).
+    if (!is.null(q$ctry))
+      shiny::updateSelectizeInput(session, "hglobe-country",
+                                  selected = csv(q$ctry))
+    if (!is.null(q$tech))
+      shiny::updateSelectizeInput(session, "hglobe-techs",
+                                  selected = csv(q$tech))
+    if (!is.null(q$firm))
+      shiny::updateSelectizeInput(session, "hglobe-firm",
+                                  selected = csv(q$firm))
+    if (!is.null(q$flow))
+      shiny::updateSelectizeInput(session, "hglobe-toflow", selected = q$flow)
+    if (!is.null(q$granted))
+      shiny::updateCheckboxInput(session, "hglobe-granted_only",
+                                 value = as_bool(q$granted))
+    if (!is.null(q$multifam))
+      shiny::updateCheckboxInput(session, "hglobe-multifam_only",
+                                 value = as_bool(q$multifam))
+
+    # higglobe_gen=N preloads the "Add Generations" field. The actual click
+    # is wired up inside the module so it can wait for gen 0 to be seeded
+    # before firing Generate.
+    if (!is.null(q$higglobe_gen)) {
+      n_gen <- suppressWarnings(as.integer(q$higglobe_gen))
+      if (!is.na(n_gen) && n_gen > 0)
+        shiny::updateNumericInput(session, "hglobe-add_generations",
+                                  value = n_gen)
+    }
+
+    # higglobe_run=1 auto-fires Initiate Innovation a moment after the
+    # module has booted. The hglobe_module_server is initialised lazily on
+    # first HiGGlobe tab visit, so we both switch to the tab and schedule
+    # the click on a delay long enough to let the inputs above settle.
+    if (as_bool(q$higglobe_run)) {
+      bslib::nav_select(id = "navbar_page", selected = "HiGGlobe",
+                        session = session)
+      later::later(function() {
+        shinyjs::click("hglobe-render_map")
+      }, delay = 2.0)
+    }
   })
 
   # Call Modules
