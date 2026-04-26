@@ -50,7 +50,10 @@ build_app_url <- function(country, toflow, granted_only = TRUE,
                           multifam_only = FALSE,
                           base = "https://mondpanther-iseapp2.share.connect.posit.cloud/",
                           tech_categories = c(
-                            "Green Technology", "AI", "Green Transport",
+                            "All innovations",
+                            "Green Technology",
+                            "Battery Technology",
+                            "AI", "Green Transport",
                             "Green Manufacturing", "GHG Capture",
                             "Green Energy", "Adaptation", "Green Housing",
                             "Circular Economy", "Green ICT",
@@ -112,7 +115,10 @@ build_combined <- function(lmic_csv, hic_csv, all_csv) {
   list(combined = combined, lmic_share = lmic_share)
 }
 
-# Shared grouped-bar + share-circle renderer (figures 1 & 2)
+# Shared grouped-bar + share-circle renderer (figures 1 & 2).
+# Technology categories sit on the vertical axis so longer names don't
+# need rotation. tech_order is reversed before being applied as factor
+# levels so the largest-bar category sits at the *top* of the figure.
 plot_flows <- function(combined, lmic_share, destination_label,
                        flow_code, sample_label,
                        origin_colors = c(
@@ -124,29 +130,29 @@ plot_flows <- function(combined, lmic_share, destination_label,
     dplyr::arrange(dplyr::desc(mean)) |>
     dplyr::pull(technology)
 
-  plot_df  <- combined   |> dplyr::mutate(technology = factor(technology, levels = tech_order))
-  share_df <- lmic_share |> dplyr::mutate(technology = factor(technology, levels = tech_order))
+  plot_df  <- combined   |> dplyr::mutate(technology = factor(technology, levels = rev(tech_order)))
+  share_df <- lmic_share |> dplyr::mutate(technology = factor(technology, levels = rev(tech_order)))
 
-  bar_ymax  <- max(plot_df$mean + plot_df$sem, na.rm = TRUE)
+  bar_xmax  <- max(plot_df$mean + plot_df$sem, na.rm = TRUE)
   share_max <- max(share_df$share, na.rm = TRUE)
   axis_cap  <- ceiling(share_max * 20) / 20
-  scale_k   <- bar_ymax / axis_cap
+  scale_k   <- bar_xmax / axis_cap
 
-  ggplot(plot_df, aes(x = technology, y = mean, fill = origin)) +
+  ggplot(plot_df, aes(y = technology, x = mean, fill = origin)) +
     geom_col(position = position_dodge(width = 0.8), width = 0.75) +
     geom_errorbar(
-      aes(ymin = pmax(mean - sem, 0), ymax = mean + sem),
+      aes(xmin = pmax(mean - sem, 0), xmax = mean + sem),
       position = position_dodge(width = 0.8),
       width = 0.2, colour = "grey30", linewidth = 0.3
     ) +
     geom_point(
       data = share_df,
-      aes(x = technology, y = share * scale_k, shape = "LMIC share of innovation"),
+      aes(y = technology, x = share * scale_k, shape = "LMIC share of innovation"),
       inherit.aes = FALSE,
       colour = "grey15", fill = "white", size = 4, stroke = 1.2
     ) +
     scale_shape_manual(name = NULL, values = c("LMIC share of innovation" = 21)) +
-    scale_y_continuous(
+    scale_x_continuous(
       labels   = scales::comma,
       sec.axis = sec_axis(
         transform = ~ . / scale_k,
@@ -162,28 +168,32 @@ plot_flows <- function(combined, lmic_share, destination_label,
                          destination_label, sample_label),
       subtitle = sprintf("By technology and origin - destination flow: %s | bars: spillover +/- SEM | circles: LMIC share of total innovation",
                          flow_code),
-      x = NULL, y = sprintf("Spillover to %s per innovation (+/- 1 SEM)", destination_label),
+      y = NULL, x = sprintf("Spillover to %s per innovation (+/- 1 SEM)", destination_label),
       fill = NULL,
       caption = "Source: Innovation Strategy Explorer, Country Explorer CSV downloads"
     ) +
     theme_minimal(base_size = 12) +
     theme(
-      axis.text.x        = element_text(angle = 35, hjust = 1),
       legend.position    = "top",
-      panel.grid.major.x = element_blank()
+      panel.grid.major.y = element_blank()
     )
 }
 
-# Marimekko-style LMIC-origin -> HIC plot (figure 3)
+# Marimekko-style LMIC-origin -> HIC plot (figure 3). Technology bands
+# now sit on the vertical axis: each band's *height* (ymax-ymin)
+# represents the share of LMIC-origin innovations in that category, the
+# rectangle's horizontal extent is the per-innovation spillover. Bands
+# are drawn ascending so the largest-spillover category lands at the
+# top.
 plot_marimekko <- function(combined, sample_label) {
   mm_df <- combined |>
     dplyr::filter(origin == "LMIC-origin (excl. China)") |>
-    dplyr::arrange(dplyr::desc(mean)) |>
+    dplyr::arrange(mean) |>
     dplyr::mutate(
       w           = innos / sum(innos),
-      xmax        = cumsum(w),
-      xmin        = xmax - w,
-      xmid        = (xmin + xmax) / 2,
+      ymax        = cumsum(w),
+      ymin        = ymax - w,
+      ymid        = (ymin + ymax) / 2,
       total_value = mean * innos,
       total_label = sprintf("$%s M",
                             formatC(round(total_value), format = "d", big.mark = ","))
@@ -191,15 +201,15 @@ plot_marimekko <- function(combined, sample_label) {
 
   ggplot(mm_df) +
     geom_rect(
-      aes(xmin = xmin, xmax = xmax, ymin = 0, ymax = mean),
+      aes(ymin = ymin, ymax = ymax, xmin = 0, xmax = mean),
       fill = "#ff7f0e", colour = "white", linewidth = 0.3
     ) +
     geom_errorbar(
-      aes(x = xmid, ymin = pmax(mean - sem, 0), ymax = mean + sem),
-      width = 0.005, colour = "grey30", linewidth = 0.4
+      aes(y = ymid, xmin = pmax(mean - sem, 0), xmax = mean + sem),
+      height = 0.005, colour = "grey30", linewidth = 0.4
     ) +
     ggrepel::geom_label_repel(
-      aes(x = xmid, y = mean / 2, label = total_label),
+      aes(x = mean / 2, y = ymid, label = total_label),
       colour = "grey20", fill = "white",
       label.size = 0.25,
       label.padding = grid::unit(0.2, "lines"),
@@ -209,23 +219,83 @@ plot_marimekko <- function(combined, sample_label) {
       box.padding = 0.4, force = 2,
       max.overlaps = Inf, direction = "both", seed = 1
     ) +
-    scale_x_continuous(
-      breaks = mm_df$xmid,
+    scale_y_continuous(
+      breaks = mm_df$ymid,
       labels = mm_df$technology,
       expand = expansion(mult = c(0.01, 0.01))
     ) +
-    scale_y_continuous(labels = scales::comma) +
+    scale_x_continuous(labels = scales::comma) +
     labs(
-      title    = sprintf("Spillovers to HICs per LMIC-origin innovation - bar width prop. to N innovations (%s)",
+      title    = sprintf("Spillovers to HICs per LMIC-origin innovation - bar height prop. to N innovations (%s)",
                          sample_label),
-      subtitle = "Wider bars = more LMIC-origin innovations in that category | height = mean spillover",
-      x = NULL, y = "Spillover to HICs per innovation (+/- 1 SEM)",
+      subtitle = "Taller bars = more LMIC-origin innovations in that category | width = mean spillover",
+      y = NULL, x = "Spillover to HICs per innovation (+/- 1 SEM)",
       caption = "Source: Innovation Strategy Explorer, Country Explorer CSV downloads"
     ) +
     theme_minimal(base_size = 12) +
     theme(
-      axis.text.x        = element_text(angle = 35, hjust = 1),
-      panel.grid.major.x = element_blank()
+      panel.grid.major.y = element_blank()
+    )
+}
+
+# Same scaffold as plot_flows, but for the per-innovation citation-count
+# CSVs (toflow = cit_count). Citation counts have no notion of a
+# "destination" — every family carries one scalar count — so the title
+# / y-axis labels are simpler.
+plot_citations <- function(combined, lmic_share, sample_label,
+                           origin_colors = c(
+                             "LMIC-origin (excl. China)" = "#ff7f0e",
+                             "HIC-origin"                = "#1f77b4"
+                           )) {
+  tech_order <- combined |>
+    dplyr::filter(origin == "HIC-origin") |>
+    dplyr::arrange(dplyr::desc(mean)) |>
+    dplyr::pull(technology)
+
+  plot_df  <- combined   |> dplyr::mutate(technology = factor(technology, levels = rev(tech_order)))
+  share_df <- lmic_share |> dplyr::mutate(technology = factor(technology, levels = rev(tech_order)))
+
+  bar_xmax  <- max(plot_df$mean + plot_df$sem, na.rm = TRUE)
+  share_max <- max(share_df$share, na.rm = TRUE)
+  axis_cap  <- ceiling(share_max * 20) / 20
+  scale_k   <- bar_xmax / axis_cap
+
+  ggplot(plot_df, aes(y = technology, x = mean, fill = origin)) +
+    geom_col(position = position_dodge(width = 0.8), width = 0.75) +
+    geom_errorbar(
+      aes(xmin = pmax(mean - sem, 0), xmax = mean + sem),
+      position = position_dodge(width = 0.8),
+      width = 0.2, colour = "grey30", linewidth = 0.3
+    ) +
+    geom_point(
+      data = share_df,
+      aes(y = technology, x = share * scale_k, shape = "LMIC share of innovation"),
+      inherit.aes = FALSE,
+      colour = "grey15", fill = "white", size = 4, stroke = 1.2
+    ) +
+    scale_shape_manual(name = NULL, values = c("LMIC share of innovation" = 21)) +
+    scale_x_continuous(
+      labels   = scales::comma,
+      sec.axis = sec_axis(
+        transform = ~ . / scale_k,
+        name      = paste0("LMIC share of total innovation in category (axis capped at ",
+                           scales::percent(axis_cap, accuracy = 0.1), ")"),
+        labels    = scales::percent_format(accuracy = 0.1),
+        breaks    = scales::pretty_breaks(n = 5)
+      )
+    ) +
+    scale_fill_manual(values = origin_colors) +
+    labs(
+      title    = sprintf("Average citation count per innovation (%s)", sample_label),
+      subtitle = "By technology and origin | flow: cit_count | bars: mean +/- SEM | circles: LMIC share of total innovation",
+      y = NULL, x = "Citations received per innovation (+/- 1 SEM)",
+      fill = NULL,
+      caption = "Source: Innovation Strategy Explorer, Country Explorer CSV downloads"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position    = "top",
+      panel.grid.major.y = element_blank()
     )
 }
 
@@ -276,10 +346,13 @@ run_sample <- function(suffix, granted_only, multifam_only,
     list(country = "All countries",         toflow = "ev_hic"),
     list(country = "LMICs (excl. China)",   toflow = "ev_emdenocn"),
     list(country = "High income countries", toflow = "ev_emdenocn"),
-    list(country = "All countries",         toflow = "ev_emdenocn")
+    list(country = "All countries",         toflow = "ev_emdenocn"),
+    list(country = "LMICs (excl. China)",   toflow = "cit_count"),
+    list(country = "High income countries", toflow = "cit_count"),
+    list(country = "All countries",         toflow = "cit_count")
   )
-  short <- c("LMIC", "HIC", "All", "LMIC", "HIC", "All")
-  dest  <- c("HIC",  "HIC", "HIC", "LMIC", "LMIC", "LMIC")
+  short <- c("LMIC", "HIC", "All", "LMIC", "HIC", "All", "LMIC", "HIC", "All")
+  dest  <- c("HIC",  "HIC", "HIC", "LMIC", "LMIC", "LMIC", "cit", "cit", "cit")
   for (i in seq_along(specs)) {
     specs[[i]]$name          <- sprintf("%s_to_%s_%s", short[i], dest[i], suffix)
     specs[[i]]$granted_only  <- granted_only
@@ -299,7 +372,11 @@ run_sample <- function(suffix, granted_only, multifam_only,
     to_lmic = build_combined(
       sprintf("flow_LMIC_to_LMIC_%s.csv", suffix),
       sprintf("flow_HIC_to_LMIC_%s.csv",  suffix),
-      sprintf("flow_All_to_LMIC_%s.csv",  suffix))
+      sprintf("flow_All_to_LMIC_%s.csv",  suffix)),
+    to_cit = build_combined(
+      sprintf("flow_LMIC_to_cit_%s.csv", suffix),
+      sprintf("flow_HIC_to_cit_%s.csv",  suffix),
+      sprintf("flow_All_to_cit_%s.csv",  suffix))
   )
 }
 ```
@@ -350,6 +427,13 @@ plot_flows(a$to_lmic$combined, a$to_lmic$lmic_share,
 plot_marimekko(a$to_hic$combined, sample_label = "no restriction")
 ```
 
+## Figure 4 (no restriction) — Average citation count per innovation
+
+```{r fig-cit-all}
+plot_citations(a$to_cit$combined, a$to_cit$lmic_share,
+               sample_label = "no restriction")
+```
+
 ## Summary table (no restriction)
 
 ```{r table-all}
@@ -396,6 +480,13 @@ plot_flows(g$to_lmic$combined, g$to_lmic$lmic_share,
 
 ```{r fig-marimekko-granted, fig.height=6}
 plot_marimekko(g$to_hic$combined, sample_label = "granted families only")
+```
+
+## Figure 4 (granted) — Average citation count per innovation
+
+```{r fig-cit-granted}
+plot_citations(g$to_cit$combined, g$to_cit$lmic_share,
+               sample_label = "granted families only")
 ```
 
 ## Summary table (granted)
@@ -449,6 +540,13 @@ plot_flows(m$to_lmic$combined, m$to_lmic$lmic_share,
 
 ```{r fig-marimekko-multifam, fig.height=6}
 plot_marimekko(m$to_hic$combined, sample_label = "fam_size >= 2")
+```
+
+## Figure 4 (fam_size > 1) — Average citation count per innovation
+
+```{r fig-cit-multifam}
+plot_citations(m$to_cit$combined, m$to_cit$lmic_share,
+               sample_label = "fam_size >= 2")
 ```
 
 ## Summary table (fam_size > 1)

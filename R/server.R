@@ -194,6 +194,27 @@ server <- function(input, output, session, con) {
                                   value = n_gen)
     }
 
+    # `step=N` is the bookmarkable shorthand: the URL records the number of
+    # generations currently displayed, and reopening that URL replays the
+    # full sequence (init + N generations). It mirrors the effect of
+    # higglobe_run=1 + higglobe_gen=N. The module's observer reads
+    # higglobe_gen from restore_params to arm the auto-Generate, so we
+    # also stash the value there if the URL only carried `step`.
+    step_val <- suppressWarnings(as.integer(q$step))
+    if (length(step_val) == 1L && !is.na(step_val) && step_val > 0L) {
+      shiny::updateNumericInput(session, "hglobe-add_generations",
+                                value = step_val)
+      if (is.null(session$userData$restore_params))
+        session$userData$restore_params <- list()
+      session$userData$restore_params$higglobe_gen <-
+        as.character(step_val)
+      bslib::nav_select(id = "navbar_page", selected = "HiGGlobe",
+                        session = session)
+      later::later(function() {
+        shinyjs::click("hglobe-render_map")
+      }, delay = 2.0)
+    }
+
     # higglobe_run=1 auto-fires Initiate Innovation a moment after the
     # module has booted. The hglobe_module_server is initialised lazily on
     # first HiGGlobe tab visit, so we both switch to the tab and schedule

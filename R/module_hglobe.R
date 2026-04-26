@@ -1044,6 +1044,21 @@ hglobe_module_server <- function(id, con) {
         }
       })
 
+      # Reflect the current generation count in the URL as `step=N`. We
+      # use history.replaceState() (via raw JS) so we can patch a single
+      # query param without disturbing whatever else Shiny's native
+      # bookmarking has put into the URL. Bookmarking the URL with
+      # step=N > 0 makes the page replay the init + N generations on
+      # reopen via the URL handler in server.R.
+      shiny::observe({
+        g <- gen_next()
+        step_val <- if (is.null(g)) 0L else max(0L, as.integer(g) - 1L)
+        shinyjs::runjs(sprintf(
+          "(function(){var u=new URL(window.location);u.searchParams.set('step','%d');window.history.replaceState({},'',u);})()",
+          step_val
+        ))
+      })
+
     }
   )
 }
