@@ -47,9 +47,33 @@ runAppPackage <- function() {
     ), t, t, t, t)
   }, character(1)), collapse = ",\n")
 
+  # `emdenocnin` (LMICs excl. China & India) was never materialised in the
+  # parquet build (`01-build-app-parquets.R` lists `emdenocn` but not
+  # `emdenocnin`). The dropdown in `02-build-app-sysdata.R` still exposes
+  # the option, so we derive it here as
+  #   ev_emdenocnin = ev_emdenocn - ev_in   (LMICs excl. CN, then minus IN)
+  # and feed that through the same is_/av_ formulas as the other targets.
+  # COALESCE keeps the result well-defined when either input is NULL.
+  emdenocnin_sql <- paste(
+    "  COALESCE(ev_emdenocn, 0) - COALESCE(ev_in, 0) AS ev_emdenocnin",
+    paste0(
+      "  CASE WHEN cost IS NULL OR cost = 0 THEN 0\n",
+      "       ELSE ((alpha + 1) / cost) ",
+      "* (COALESCE(ev_emdenocn, 0) - COALESCE(ev_in, 0)) ",
+      "* CAST(pv <= 2 * cost AS DOUBLE)\n",
+      "  END AS is_emdenocnin"
+    ),
+    paste0(
+      "  CASE WHEN cost IS NULL OR cost = 0 THEN 0\n",
+      "       ELSE (pv + COALESCE(ev_emdenocn, 0) - COALESCE(ev_in, 0)) / cost\n",
+      "  END AS av_emdenocnin"
+    ),
+    sep = ",\n"
+  )
+
   DBI::dbExecute(con, sprintf(
-    "CREATE OR REPLACE VIEW full_patent_database AS\nSELECT *,\n%s\nFROM read_parquet('%s')",
-    derived_sql, full_db_path
+    "CREATE OR REPLACE VIEW full_patent_database AS\nSELECT *,\n%s,\n%s\nFROM read_parquet('%s')",
+    derived_sql, emdenocnin_sql, full_db_path
   ))
   
   patents_x_tech_path <- system.file("extdata", "patents_x_tech.parquet", package = "innovationStrategyExplorer")

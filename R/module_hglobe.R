@@ -83,96 +83,168 @@ hglobe_module_sidebar <- function(id) {
       )
     ),
 
+    # Compact CSS shared by both sampling sections: sit the two
+    # radioGroupButtons rows next to each other on one line and shrink
+    # their bottom margin so the integer input below docks tight.
+    # Padding / font-size overrides go beyond what bslib's `size = "xs"`
+    # offers — they let both toggle pairs fit on a single 330 px sidebar
+    # line without wrapping.
+    shiny::tags$style(shiny::HTML(
+      ".hglobe-toggle-row { display:flex; gap:6px; flex-wrap:nowrap;
+                            align-items:center; margin-bottom: 4px; }
+       .hglobe-toggle-row .shiny-input-radiogroup { margin-bottom: 0; }
+       .hglobe-toggle-row .btn-group { flex-wrap: nowrap; }
+       .hglobe-toggle-row .btn { padding: 1px 7px; font-size: 11px;
+                                  line-height: 1.4; }
+       .hglobe-sample-section { margin-bottom: 4px; }
+       .hglobe-sample-section .form-group { margin-bottom: 6px; }"
+    )),
+
+    # ----- SECTION 1: Generation 0 sampling --------------------------------
+    # Two segmented toggles (Top|Random + Percent|Number) decide HOW the
+    # filtered universe is reduced to the seed set. The single integer
+    # input below carries either a percentage (0-100) or a row count,
+    # depending on the right-hand toggle. The label flips dynamically in
+    # an observer below.
     shiny::div(
-      shiny::h5("SAMPLING", style = "font-weight: 600; margin-bottom: 10px;"),
+      class = "hglobe-sample-section",
+      shiny::h5("GENERATION 0 SAMPLING",
+                style = "font-weight: 600; margin-bottom: 10px;"),
       shiny::div(
-        class = "side_input",
-        shiny::radioButtons(
-          inputId = ns("sampling_mode"),
-          label   = "Sampling mode",
-          choices = c("Percent", "Number", "Top"),
+        class = "hglobe-toggle-row",
+        shinyWidgets::radioGroupButtons(
+          inputId  = ns("gen0_select_mode"),
+          label    = NULL,
+          choices  = c("Random", "Top"),
+          selected = "Random",
+          size     = "xs"
+        ),
+        shinyWidgets::radioGroupButtons(
+          inputId  = ns("gen0_unit_mode"),
+          label    = NULL,
+          choices  = c("Percent", "Number"),
           selected = "Percent",
-          inline   = TRUE
+          size     = "xs"
         )
       ),
-      shiny::div(
-        class = "side_input",
-        shiny::numericInput(
-          inputId = ns("sampling_rate"),
-          label   = "Sampling rate [%]",
-          value   = 1,
-          min     = 0,
-          max     = 100,
-          step    = 0.1
-        )
-      ),
-      shiny::div(
-        class = "side_input",
-        shiny::numericInput(
-          inputId = ns("edge_sampling_rate"),
-          label   = "Edge sampling rate [%]",
-          value   = 1,
-          min     = 0,
-          max     = 100,
-          step    = 0.1
+      # Sample-value input + Initiate button on the same row. The input
+      # is narrowed to ~95 px so the button can grow to fill the
+      # remaining sidebar width without wrapping. `.hglobe-gen-row`
+      # already zeroes the form-group margin so the button bottom-aligns
+      # with the input baseline.
+      shiny::tags$div(
+        class = "hglobe-gen-row",
+        style = "display: flex; gap: 8px; align-items: flex-end;",
+        shiny::div(
+          style = "flex: 0 0 95px;",
+          shiny::numericInput(
+            inputId = ns("gen0_sample_val"),
+            label   = "Sampling rate [%]",
+            value   = 1,
+            min     = 0,
+            max     = 100,
+            step    = 0.1
+          )
+        ),
+        shiny::div(
+          style = "flex: 1; min-width: 0;",
+          bslib::input_task_button(
+            ns("render_map"),
+            "Initiate Innovation",
+            label_busy = "Initiating...",
+            class = "btn-primary",
+            width = "100%"
+          )
         )
       )
     ),
 
-    bslib::input_task_button(
-      ns("render_map"),
-      "Initiate Innovation",
-      label_busy = "Initiating...",
-      class = "btn-primary",
-      width = "100%"
-    ),
-
-    # The numericInput is wrapped in a <div class="form-group"> with a
-    # default 1rem bottom margin; a flex row with align-items:flex-end then
-    # leaves the button hovering above the input's bottom edge. Inline CSS
-    # zeroes that margin only inside this container.
-    shiny::tags$div(
-      class = "hglobe-gen-row",
-      style = paste0(
-        "display: flex; gap: 8px; align-items: flex-end; margin-top: 6px;"
-      ),
-      shiny::tags$style(shiny::HTML(
-        ".hglobe-gen-row .form-group { margin-bottom: 0; }
-         .hglobe-gen-row .shiny-input-container { width: 100%; }"
-      )),
+    # ----- SECTION 2: Edge sampling (citation linkages) --------------------
+    # Same shape as section 1 but applied to the (next-generation docdb x
+    # ctry) candidates citing the previous frontier. Top mode picks the
+    # citing units with the highest toflow; Random falls back to the
+    # bernoulli/reservoir sample DuckDB has shipped from the start.
+    shiny::div(
+      class = "hglobe-sample-section",
+      shiny::h5("EDGE SAMPLING",
+                style = "font-weight: 600; margin-bottom: 10px;"),
       shiny::div(
-        style = "flex: 0 0 120px;",
-        shiny::numericInput(
-          inputId = ns("add_generations"),
-          label   = "Add Generations",
-          value   = 1,
-          min     = 1,
-          step    = 1
+        class = "hglobe-toggle-row",
+        shinyWidgets::radioGroupButtons(
+          inputId  = ns("edge_select_mode"),
+          label    = NULL,
+          choices  = c("Random", "Top"),
+          selected = "Random",
+          size     = "xs"
+        ),
+        shinyWidgets::radioGroupButtons(
+          inputId  = ns("edge_unit_mode"),
+          label    = NULL,
+          choices  = c("Percent", "Number"),
+          selected = "Percent",
+          size     = "xs"
         )
       ),
-      shiny::div(
-        style = "flex: 1; min-width: 0; position: relative;",
-        bslib::input_task_button(
-          ns("next_step"),
-          "Generate",
-          label_busy = "Generating...",
-          class = "btn-secondary",
-          width = "100%"
+      # Three controls on one row: edge sample value, Add Generations,
+      # Generate button. Both numeric inputs are narrowed (95 px / 80 px)
+      # so the button still has room to render its label.
+      # `.hglobe-gen-row` zeroes the form-group margin so the button
+      # bottom-aligns with the input baselines.
+      shiny::tags$div(
+        class = "hglobe-gen-row",
+        style = paste0(
+          "display: flex; gap: 8px; align-items: flex-end; margin-top: 6px;"
         ),
-        # Persistent spinner overlay shown for the *whole* multi-generation
-        # batch, not just one iteration. The bslib task button reverts to
-        # its idle look between iterations because each iteration is a
-        # separate observer firing; this overlay keeps the user aware that
-        # the server is still working until pending_gens hits 0.
-        shiny::tags$div(
-          id    = ns("next_step_spinner"),
-          style = paste0(
-            "display:none;position:absolute;top:50%;right:10px;",
-            "transform:translateY(-50%);pointer-events:none;"),
-          shiny::tags$span(
-            class = "spinner-border spinner-border-sm",
-            role  = "status",
-            `aria-hidden` = "true"
+        shiny::tags$style(shiny::HTML(
+          ".hglobe-gen-row .form-group { margin-bottom: 0; }
+           .hglobe-gen-row .shiny-input-container { width: 100%; }"
+        )),
+        shiny::div(
+          style = "flex: 0 0 95px;",
+          shiny::numericInput(
+            inputId = ns("edge_sample_val"),
+            label   = "Sampling rate [%]",
+            value   = 1,
+            min     = 0,
+            max     = 100,
+            step    = 0.1
+          )
+        ),
+        shiny::div(
+          style = "flex: 0 0 80px;",
+          shiny::numericInput(
+            inputId = ns("add_generations"),
+            label   = "Add Gens",
+            value   = 1,
+            min     = 1,
+            step    = 1
+          )
+        ),
+        shiny::div(
+          style = "flex: 1; min-width: 0; position: relative;",
+          bslib::input_task_button(
+            ns("next_step"),
+            "Generate",
+            label_busy = "Generating...",
+            class = "btn-secondary",
+            width = "100%"
+          ),
+          # Persistent spinner overlay shown for the *whole* multi-
+          # generation batch, not just one iteration. The bslib task
+          # button reverts to its idle look between iterations because
+          # each iteration is a separate observer firing; this overlay
+          # keeps the user aware that the server is still working until
+          # pending_gens hits 0.
+          shiny::tags$div(
+            id    = ns("next_step_spinner"),
+            style = paste0(
+              "display:none;position:absolute;top:50%;right:10px;",
+              "transform:translateY(-50%);pointer-events:none;"),
+            shiny::tags$span(
+              class = "spinner-border spinner-border-sm",
+              role  = "status",
+              `aria-hidden` = "true"
+            )
           )
         )
       )
@@ -348,20 +420,26 @@ hglobe_module_server <- function(id, con) {
           "higglobe_capture('%s', 'copy');", session$ns("map")))
       }, ignoreInit = TRUE)
 
-      # Re-label the Step 1 sample-size input when the sampling mode toggles.
-      # Bounds and step also change so percent stays clamped to 0-100 with a
-      # 0.1 step, while integer counts get a step of 1 with no upper bound.
-      shiny::observeEvent(input$sampling_mode, {
-        if (identical(input$sampling_mode, "Number") ||
-            identical(input$sampling_mode, "Top")) {
-          shiny::updateNumericInput(session, "sampling_rate",
+      # Re-label / re-bound the integer input under each sampling section
+      # when the Percent|Number toggle flips. Percent stays clamped to
+      # 0-100 with a 0.1 step (so 1.5 % is allowed); Number uses unbounded
+      # integers with step 1.
+      relabel_sample_input <- function(input_id, unit_mode) {
+        if (identical(unit_mode, "Number")) {
+          shiny::updateNumericInput(session, input_id,
             label = "Sample size [#]",
             min = 0, max = NA, step = 1)
         } else {
-          shiny::updateNumericInput(session, "sampling_rate",
+          shiny::updateNumericInput(session, input_id,
             label = "Sampling rate [%]",
             min = 0, max = 100, step = 0.1)
         }
+      }
+      shiny::observeEvent(input$gen0_unit_mode, {
+        relabel_sample_input("gen0_sample_val", input$gen0_unit_mode)
+      }, ignoreInit = TRUE)
+      shiny::observeEvent(input$edge_unit_mode, {
+        relabel_sample_input("edge_sample_val", input$edge_unit_mode)
       }, ignoreInit = TRUE)
 
       # Bootstrap an empty leaflet base layer.
@@ -394,6 +472,10 @@ hglobe_module_server <- function(id, con) {
           cb_id <- sprintf("show_gen_%d", g)
           prev  <- shiny::isolate(input[[cb_id]])
           val   <- if (is.null(prev)) TRUE else isTRUE(prev)
+          fmt_num <- function(x) {
+            if (is.null(x) || length(x) == 0 || is.na(x)) "—"
+            else format(x, big.mark = ",", digits = 4, scientific = FALSE)
+          }
           shiny::tags$tr(
             shiny::tags$td(
               shiny::checkboxInput(ns(cb_id), label = NULL, value = val,
@@ -401,14 +483,9 @@ hglobe_module_server <- function(id, con) {
             ),
             shiny::tags$td(shiny::HTML(df$color[i])),
             shiny::tags$td(df$step[i]),
-            shiny::tags$td(if (is.na(df$avg_flow[i])) "—"
-                           else format(df$avg_flow[i],
-                                       big.mark = ",", digits = 4,
-                                       scientific = FALSE)),
-            shiny::tags$td(if (is.null(df$avg_pv[i]) || is.na(df$avg_pv[i])) "—"
-                           else format(df$avg_pv[i],
-                                       big.mark = ",", digits = 4,
-                                       scientific = FALSE)),
+            shiny::tags$td(fmt_num(df$avg_flow_pop[i])),
+            shiny::tags$td(fmt_num(df$avg_flow_sample[i])),
+            shiny::tags$td(fmt_num(df$avg_pv[i])),
             shiny::tags$td(format(df$nodes_found[i], big.mark = ",")),
             shiny::tags$td(format(df$nodes_kept[i],  big.mark = ","))
           )
@@ -421,7 +498,8 @@ hglobe_module_server <- function(id, con) {
             shiny::tags$th("Show"),
             shiny::tags$th("Color"),
             shiny::tags$th("Step"),
-            shiny::tags$th("Avg flow"),
+            shiny::tags$th("Avg flow (pop)"),
+            shiny::tags$th("Avg flow (sample)"),
             shiny::tags$th("Avg pv"),
             shiny::tags$th("Nodes found"),
             shiny::tags$th("Nodes kept")
@@ -447,11 +525,112 @@ hglobe_module_server <- function(id, con) {
         }
       })
 
+      # Color legend overlay. Lives inside the leaflet container so that
+      # html2canvas (used by the Save PNG / Copy buttons) rasterises it
+      # together with the map. Re-painted whenever the set of generations
+      # or the per-gen visibility checkboxes change. Only currently-
+      # visible generations appear, so a saved snapshot's legend always
+      # matches what the user actually sees on the map.
+      shiny::observe({
+        df <- stats_rv()
+        proxy <- leaflet::leafletProxy("map")
+        # Always tear down the old control first, even if no rows — that
+        # way the legend disappears between sessions instead of going
+        # stale after a fresh "Initiate Innovation".
+        leaflet::removeControl(proxy, layerId = "gen_legend")
+        if (is.null(df) || nrow(df) == 0) return()
+
+        # Filter to visible generations using the same default-TRUE rule
+        # as the show/hide handler above.
+        keep <- vapply(df$gen, function(g) {
+          val <- input[[sprintf("show_gen_%d", g)]]
+          if (is.null(val)) TRUE else isTRUE(val)
+        }, logical(1))
+        vis <- df[keep, , drop = FALSE]
+        if (nrow(vis) == 0) return()
+
+        # Per-gen swatch + short label. gen 0 is the seed, gen N is just
+        # "gen N". Circles instead of squares to match the marker shape.
+        items <- vapply(seq_len(nrow(vis)), function(i) {
+          g     <- vis$gen[i]
+          color <- pick_color(g)
+          label <- if (g == 0L) "gen 0" else sprintf("gen %d", g)
+          sprintf(paste0(
+            '<span style="display:inline-flex;align-items:center;',
+            'gap:4px;margin-right:8px;">',
+            '<span style="display:inline-block;width:10px;height:10px;',
+            'border-radius:50%%;background:%s;border:1px solid #555;">',
+            '</span>%s</span>'),
+            color, label)
+        }, character(1))
+
+        legend_html <- paste0(
+          '<div style="background:rgba(255,255,255,0.92);',
+          'border:1px solid #aaa;border-radius:4px;',
+          'padding:4px 8px;font-size:11px;line-height:1.4;',
+          'font-family:sans-serif;color:#222;',
+          'box-shadow:0 1px 2px rgba(0,0,0,0.15);">',
+          '<b>Generations:</b> ',
+          paste(items, collapse = ""),
+          '</div>'
+        )
+
+        leaflet::addControl(
+          proxy,
+          html     = legend_html,
+          position = "bottomleft",
+          layerId  = "gen_legend"
+        )
+      })
+
       # Map a vector of flow values to marker radii on a log(1 + v) scale,
       # normalised so the largest value gets the largest radius within this
       # draw. NA or non-positive values fall back to the minimum radius.
       # Defaults sized for clickability at max zoom — at radius 5 px the
       # circle is a comfortable touch/click target on most displays.
+      # Build the SAMPLE / ORDER BY clause appended to the row source
+      # being sampled. The same logic is shared between the gen-0
+      # selection (filtered docdb x ctry universe) and the per-edge
+      # selection (next-generation docdb x ctry candidates citing the
+      # frontier). The candidate row source is expected to expose a
+      # `toflow_val` column for Top mode; both call sites already do.
+      #
+      # Args
+      #   select_mode "Random" | "Top"
+      #   unit_mode   "Percent" | "Number"
+      #   sample_val  numeric. Percent: 0-100. Number: non-negative int.
+      #   total_n     integer (or NA). Required for Top + Percent so the
+      #               percentage can be translated into an integer LIMIT;
+      #               ignored otherwise.
+      #
+      # Returns a SQL fragment, e.g.:
+      #   "USING SAMPLE 1.5 PERCENT (bernoulli)"
+      #   "USING SAMPLE 100 ROWS (reservoir)"
+      #   "ORDER BY toflow_val DESC NULLS LAST LIMIT 50"
+      build_sample_clause_v2 <- function(select_mode, unit_mode, sample_val,
+                                         total_n = NA_integer_) {
+        if (identical(select_mode, "Top")) {
+          if (identical(unit_mode, "Percent")) {
+            if (is.na(total_n))
+              stop("Top + Percent requires total_n to size the LIMIT.")
+            n <- max(0L, as.integer(ceiling(total_n * sample_val / 100)))
+            return(sprintf(
+              "ORDER BY toflow_val DESC NULLS LAST LIMIT %d", n))
+          }
+          # Top + Number
+          return(sprintf(
+            "ORDER BY toflow_val DESC NULLS LAST LIMIT %d",
+            as.integer(sample_val)))
+        }
+        # Random
+        if (identical(unit_mode, "Percent")) {
+          return(sprintf("USING SAMPLE %s PERCENT (bernoulli)",
+                         format(sample_val, nsmall = 4)))
+        }
+        # Random + Number
+        sprintf("USING SAMPLE %d ROWS (reservoir)", as.integer(sample_val))
+      }
+
       radius_from_flow <- function(v, r_min = 5, r_max = 16) {
         v  <- suppressWarnings(as.numeric(v))
         lv <- log1p(pmax(v, 0, na.rm = FALSE))
@@ -504,7 +683,7 @@ hglobe_module_server <- function(id, con) {
       drop_session_tables <- function() {
         tabs <- tryCatch(DBI::dbListTables(con),
                          error = function(e) character())
-        pat  <- sprintf("^hglobe_(gen[0-9]+|edges_tmp|passing_tmp)_%s$", tok)
+        pat  <- sprintf("^hglobe_(gen[0-9]+|edges_tmp|cand_tmp|passing_tmp)_%s$", tok)
         for (t in tabs[grepl(pat, tabs)]) {
           try(DBI::dbExecute(con, sprintf("DROP TABLE IF EXISTS %s", t)),
               silent = TRUE)
@@ -515,35 +694,23 @@ hglobe_module_server <- function(id, con) {
 
       shiny::observeEvent(input$render_map, ignoreInit = TRUE, {
         shiny::req(input$toflow, input$country, input$techs)
-        sample_mode <- input$sampling_mode %||% "Percent"
-        sample_val  <- suppressWarnings(as.numeric(input$sampling_rate))
-        if (identical(sample_mode, "Number")) {
-          if (!is.finite(sample_val) || sample_val < 0) {
-            status_msg("Sample size must be a non-negative integer.")
-            return()
-          }
-          sample_clause <- sprintf("USING SAMPLE %d ROWS (reservoir)",
-                                   as.integer(sample_val))
-        } else if (identical(sample_mode, "Top")) {
-          # Deterministic top-N by the chosen flow value — same logic the
-          # Country Explorer's Value-flows-by-Technology bar chart uses to
-          # build "Top N patent IDs" lists. The `toflow_val` column on
-          # `passing_tbl` is the per-(docdb, ctry) MAX of input$toflow,
-          # so an ORDER BY ... DESC LIMIT N gives the highest-flow
-          # families. NULLS LAST keeps any unscored rows out of the top.
-          if (!is.finite(sample_val) || sample_val < 0) {
-            status_msg("Sample size must be a non-negative integer.")
-            return()
-          }
-          sample_clause <- sprintf("ORDER BY toflow_val DESC NULLS LAST LIMIT %d",
-                                   as.integer(sample_val))
-        } else {
-          if (!is.finite(sample_val) || sample_val < 0 || sample_val > 100) {
+        gen0_select <- input$gen0_select_mode %||% "Random"
+        gen0_unit   <- input$gen0_unit_mode   %||% "Percent"
+        gen0_val    <- suppressWarnings(as.numeric(input$gen0_sample_val))
+        # Validate the integer / percentage up front; the actual SAMPLE /
+        # ORDER BY clause is built once n_found is known (Top+Percent
+        # needs the candidate count to translate the percentage into an
+        # integer LIMIT).
+        if (identical(gen0_unit, "Percent")) {
+          if (!is.finite(gen0_val) || gen0_val < 0 || gen0_val > 100) {
             status_msg("Sampling rate must be between 0 and 100.")
             return()
           }
-          sample_clause <- sprintf("USING SAMPLE %s PERCENT (bernoulli)",
-                                   format(sample_val, nsmall = 4))
+        } else {
+          if (!is.finite(gen0_val) || gen0_val < 0) {
+            status_msg("Sample size must be a non-negative integer.")
+            return()
+          }
         }
 
         selected_countries <- expand_country_selection(input$country)
@@ -621,13 +788,39 @@ hglobe_module_server <- function(id, con) {
 
         n_found <- DBI::dbGetQuery(con,
           sprintf("SELECT COUNT(*) AS n FROM %s", passing_tbl))$n
-        # Mean of the chosen flow column AND the patent value (pv) over the
-        # nodes FOUND (pre-sample). One round-trip carries both averages.
-        agg_found <- DBI::dbGetQuery(con, sprintf(
+
+        # Build the gen-0 sampling clause now that we know the candidate
+        # count. The clause is appended to the (passing_tbl) row source —
+        # see the SQL fragment further down. Top + Percent translates the
+        # percentage into an integer LIMIT against the now-known total.
+        sample_clause <- build_sample_clause_v2(
+          select_mode = gen0_select,
+          unit_mode   = gen0_unit,
+          sample_val  = gen0_val,
+          total_n     = n_found
+        )
+
+        # Two means each, in one round-trip:
+        #   - population mean (over the full filtered universe, before
+        #     any sampling). For Percent / Number this is what users
+        #     intuitively expect; for Top it lets you compare against
+        #     the universe-wide average.
+        #   - sample mean (over the rows sample_clause actually keeps,
+        #     i.e. the rows ending up on the map). For Percent / Number
+        #     this is approximately equal to the population mean; for
+        #     Top mode it's the only number that tracks "what the user
+        #     is looking at".
+        agg_pop <- DBI::dbGetQuery(con, sprintf(
           "SELECT AVG(toflow_val) AS avg_flow, AVG(pv_val) AS avg_pv FROM %s",
           passing_tbl))
-        avg_flow_found <- agg_found$avg_flow
-        avg_pv_found   <- agg_found$avg_pv
+        agg_smp <- DBI::dbGetQuery(con, sprintf(
+          "SELECT AVG(toflow_val) AS avg_flow, AVG(pv_val) AS avg_pv
+           FROM (SELECT * FROM %s %s) sampled",
+          passing_tbl, sample_clause))
+        avg_flow_pop    <- agg_pop$avg_flow
+        avg_flow_sample <- agg_smp$avg_flow
+        avg_pv_pop      <- agg_pop$avg_pv
+        avg_pv_sample   <- agg_smp$avg_pv
 
         # Sample over the filtered set, then join countrymap for geo. The
         # SAMPLE clause goes inside a subquery because DuckDB's parser won't
@@ -705,8 +898,9 @@ hglobe_module_server <- function(id, con) {
           gen             = 0L,
           color           = color_swatch_html(pick_color(0)),
           step            = "gen 0 (seed)",
-          avg_flow        = avg_flow_found,
-          avg_pv          = avg_pv_found,
+          avg_flow_pop    = avg_flow_pop,
+          avg_flow_sample = avg_flow_sample,
+          avg_pv          = avg_pv_sample,
           nodes_found     = n_found,
           nodes_kept      = nrow(dat),
           stringsAsFactors = FALSE,
@@ -789,36 +983,38 @@ hglobe_module_server <- function(id, con) {
       # side) becomes the new frontier. We rename:
       #   cited_docdb_family_id -> prev_docdb_family_id
       #   docdb_family_id       -> next_docdb_family_id
-      # to keep the semantics explicit at each level. Within every
-      # prev-generation docdb we keep `edge_sampling_rate` percent of its
-      # citing rows (at least one), resolve coordinates via countrymap, and
-      # persist the resulting distinct next-generation docdbs as the new
-      # frontier table for the next click.
+      # to keep the semantics explicit at each level. The candidate set
+      # of next-generation (docdb x ctry) targets is sampled per the
+      # EDGE SAMPLING toggles (Random/Top + Percent/Number) before
+      # rebuilding the (prev, next) edge rows; the resulting distinct
+      # next-generation docdbs are persisted as the new frontier table
+      # for the next click.
       # Per-iteration worker: advances exactly ONE generation. Returns TRUE
       # on success, FALSE if the SQL failed or there were zero citations
       # (the latter still appends a stats row before returning). Defined
       # here so both the immediate first-iteration path and the deferred
       # later::later() path can reuse it.
-      do_one_generation <- function(pct_edge, toflow_col) {
+      do_one_generation <- function(edge_select, edge_unit, edge_val,
+                                    toflow_col) {
         g        <- gen_next()
         prev_tbl <- frontier_tbl(g - 1)
         new_tbl  <- frontier_tbl(g)
         tmp_tbl  <- sprintf("hglobe_edges_tmp_%s", tok)
+        cand_tbl <- sprintf("hglobe_cand_tmp_%s",  tok)
 
-        sql_edges <- glue::glue("
-          CREATE OR REPLACE TABLE {tmp_tbl} AS
-          WITH citations AS (
-            SELECT c.cited_docdb_family_id AS prev_docdb_family_id,
-                   c.docdb_family_id       AS next_docdb_family_id
+        # Step A: candidate (next-docdb x chosen ctry) targets — one row
+        # per citing docdb_family_id, with the geocoded ctry that
+        # countrymap supplies. Targets are sampled in step C; we
+        # materialise them first so we can both (a) count rows for
+        # Top+Percent and (b) reuse the table when stitching edges.
+        sql_candidates <- glue::glue("
+          CREATE OR REPLACE TABLE {cand_tbl} AS
+          WITH citing AS (
+            SELECT DISTINCT c.docdb_family_id AS docdb_family_id
             FROM citenet c
             WHERE c.cited_docdb_family_id IN (
               SELECT docdb_family_id FROM {prev_tbl}
             )
-          ),
-          sampled_edges AS (
-            SELECT prev_docdb_family_id, next_docdb_family_id
-            FROM citations
-            USING SAMPLE {format(pct_edge, nsmall = 4)} PERCENT (bernoulli)
           ),
           flow_per_fam AS (
             SELECT docdb_family_id, ctry_code,
@@ -827,29 +1023,69 @@ hglobe_module_server <- function(id, con) {
             FROM full_patent_database
             WHERE {toflow_col} IS NOT NULL
             GROUP BY docdb_family_id, ctry_code
-          ),
-          target_geo AS (
-            SELECT DISTINCT ON (c.docdb_family_id)
-                   c.docdb_family_id, c.ctry_code, c.city, c.lat, c.lon,
-                   fpf.toflow_val, fpf.appln_id
-            FROM countrymap c
-            JOIN flow_per_fam fpf
-              ON fpf.docdb_family_id = c.docdb_family_id
-             AND fpf.ctry_code       = c.ctry_code
-            WHERE c.lat IS NOT NULL AND c.lon IS NOT NULL
-            ORDER BY c.docdb_family_id, c.ctry_code
+          )
+          SELECT DISTINCT ON (cm.docdb_family_id)
+                 cm.docdb_family_id,
+                 cm.ctry_code,
+                 cm.city,
+                 cm.lat,
+                 cm.lon,
+                 fpf.toflow_val,
+                 fpf.appln_id
+          FROM countrymap cm
+          JOIN citing ci      ON ci.docdb_family_id  = cm.docdb_family_id
+          JOIN flow_per_fam fpf
+            ON fpf.docdb_family_id = cm.docdb_family_id
+           AND fpf.ctry_code       = cm.ctry_code
+          WHERE cm.lat IS NOT NULL AND cm.lon IS NOT NULL
+          ORDER BY cm.docdb_family_id, cm.ctry_code
+        ")
+
+        ok <- tryCatch({
+          DBI::dbExecute(con, sql_candidates); TRUE
+        }, error = function(e) {
+          status_msg(paste("Edge candidate query failed:",
+                           conditionMessage(e))); FALSE
+        })
+        if (!ok) return(FALSE)
+
+        # Step B: candidate count, needed by Top + Percent to translate
+        # the percentage into an integer LIMIT. Cheap — DuckDB tables
+        # carry row counts in metadata.
+        n_candidates <- DBI::dbGetQuery(con,
+          sprintf("SELECT COUNT(*) AS n FROM %s", cand_tbl))$n
+        edge_sample_clause <- build_sample_clause_v2(
+          select_mode = edge_select,
+          unit_mode   = edge_unit,
+          sample_val  = edge_val,
+          total_n     = n_candidates
+        )
+
+        # Step C: sample the candidate targets, then expand back to
+        # (prev, next) edge rows by joining citenet to the prev frontier.
+        # The unit being sampled here is (docdb x ctry), i.e. one row per
+        # citing docdb — not per edge — so a hot citing docdb consumes a
+        # single Top "slot" rather than one per cited prev.
+        sql_edges <- glue::glue("
+          CREATE OR REPLACE TABLE {tmp_tbl} AS
+          WITH sampled_targets AS (
+            SELECT * FROM {cand_tbl}
+            {edge_sample_clause}
           )
           SELECT
-            se.prev_docdb_family_id,
-            se.next_docdb_family_id,
+            c.cited_docdb_family_id AS prev_docdb_family_id,
+            c.docdb_family_id       AS next_docdb_family_id,
             pf.ctry_code AS src_ctry, pf.lat AS src_lat, pf.lon AS src_lon,
-            tg.ctry_code AS tgt_ctry, tg.lat AS tgt_lat, tg.lon AS tgt_lon,
-            tg.city      AS tgt_city,
-            tg.toflow_val,
-            tg.appln_id  AS tgt_appln_id
-          FROM sampled_edges se
-          JOIN {prev_tbl} pf   ON pf.docdb_family_id = se.prev_docdb_family_id
-          JOIN target_geo tg   ON tg.docdb_family_id = se.next_docdb_family_id
+            st.ctry_code AS tgt_ctry, st.lat AS tgt_lat, st.lon AS tgt_lon,
+            st.city      AS tgt_city,
+            st.toflow_val,
+            st.appln_id  AS tgt_appln_id
+          FROM citenet c
+          JOIN sampled_targets st ON st.docdb_family_id = c.docdb_family_id
+          JOIN {prev_tbl} pf      ON pf.docdb_family_id = c.cited_docdb_family_id
+          WHERE c.cited_docdb_family_id IN (
+            SELECT docdb_family_id FROM {prev_tbl}
+          )
         ")
 
         ok <- tryCatch({
@@ -857,6 +1093,8 @@ hglobe_module_server <- function(id, con) {
         }, error = function(e) {
           status_msg(paste("Edge query failed:", conditionMessage(e))); FALSE
         })
+        try(DBI::dbExecute(con, sprintf("DROP TABLE IF EXISTS %s", cand_tbl)),
+            silent = TRUE)
         if (!ok) return(FALSE)
 
         n_edges <- DBI::dbGetQuery(con,
@@ -883,9 +1121,10 @@ hglobe_module_server <- function(id, con) {
             (SELECT AVG(toflow_val)  FROM per_fam) AS avg_flow,
             (SELECT AVG(pv_val)      FROM per_fam) AS avg_pv
         ", prev_tbl, toflow_col, toflow_col))
-        n_found_nodes  <- found_stats$n
-        avg_flow_found <- found_stats$avg_flow
-        avg_pv_found   <- found_stats$avg_pv
+        n_found_nodes <- found_stats$n
+        # Population (pre-sample) means over the citing docdb universe.
+        avg_flow_pop  <- found_stats$avg_flow
+        avg_pv_found  <- found_stats$avg_pv
 
         if (n_edges == 0) {
           status_msg(sprintf(
@@ -894,7 +1133,8 @@ hglobe_module_server <- function(id, con) {
             gen             = as.integer(g),
             color           = color_swatch_html(pick_color(g)),
             step            = sprintf("gen %d", g),
-            avg_flow        = avg_flow_found,
+            avg_flow_pop    = avg_flow_pop,
+            avg_flow_sample = NA_real_,
             avg_pv          = avg_pv_found,
             nodes_found     = n_found_nodes,
             nodes_kept      = 0L,
@@ -923,11 +1163,20 @@ hglobe_module_server <- function(id, con) {
             silent = TRUE)
 
         n_kept_nodes <- length(unique(edges$next_docdb_family_id))
+        # Sample mean: average flow over only the docdbs that survived the
+        # sampling step (this is what the user actually sees rendered on the
+        # map). Differs from the population mean above whenever the chosen
+        # sampling mode is biased — in particular `Top` deliberately picks
+        # the highest-flow rows.
+        unique_kept <- edges[!duplicated(edges$next_docdb_family_id), ]
+        avg_flow_sample <- if (nrow(unique_kept) == 0) NA_real_ else
+          mean(unique_kept$toflow_val, na.rm = TRUE)
         stats_rv(rbind(stats_rv(), data.frame(
           gen             = as.integer(g),
           color           = color_swatch_html(pick_color(g)),
           step            = sprintf("gen %d", g),
-          avg_flow        = avg_flow_found,
+          avg_flow_pop    = avg_flow_pop,
+          avg_flow_sample = avg_flow_sample,
           avg_pv          = avg_pv_found,
           nodes_found     = n_found_nodes,
           nodes_kept      = n_kept_nodes,
@@ -1006,23 +1255,39 @@ hglobe_module_server <- function(id, con) {
       # Inputs needed by each iteration are captured when "Generate" is
       # pressed, so changes to the sliders mid-batch don't surprise the
       # user (the Render Map seed locked the toflow already).
-      pending_pct  <- shiny::reactiveVal(NA_real_)
-      pending_flow <- shiny::reactiveVal(NA_character_)
+      # Inputs needed by each iteration are captured when "Generate" is
+      # pressed, so changes to the toggles mid-batch don't surprise the
+      # user. The Render Map seed already locks the toflow.
+      pending_select <- shiny::reactiveVal(NA_character_)
+      pending_unit   <- shiny::reactiveVal(NA_character_)
+      pending_val    <- shiny::reactiveVal(NA_real_)
+      pending_flow   <- shiny::reactiveVal(NA_character_)
 
       shiny::observeEvent(input$next_step, ignoreInit = TRUE, {
         if (is.null(gen_next())) {
           status_msg("Run 'Render Map' first to seed generation 0.")
           return()
         }
-        pct_edge <- suppressWarnings(as.numeric(input$edge_sampling_rate))
-        if (!is.finite(pct_edge) || pct_edge < 0 || pct_edge > 100) {
-          status_msg("Edge sampling rate must be between 0 and 100.")
-          return()
+        edge_select <- input$edge_select_mode %||% "Random"
+        edge_unit   <- input$edge_unit_mode   %||% "Percent"
+        edge_val    <- suppressWarnings(as.numeric(input$edge_sample_val))
+        if (identical(edge_unit, "Percent")) {
+          if (!is.finite(edge_val) || edge_val < 0 || edge_val > 100) {
+            status_msg("Edge sampling rate must be between 0 and 100.")
+            return()
+          }
+        } else {
+          if (!is.finite(edge_val) || edge_val < 0) {
+            status_msg("Edge sample size must be a non-negative integer.")
+            return()
+          }
         }
         n_steps <- suppressWarnings(as.integer(input$add_generations))
         if (is.na(n_steps) || n_steps < 1) n_steps <- 1L
 
-        pending_pct(pct_edge)
+        pending_select(edge_select)
+        pending_unit(edge_unit)
+        pending_val(edge_val)
         pending_flow(input$toflow)
         pending_gens(n_steps)
       })
@@ -1034,7 +1299,8 @@ hglobe_module_server <- function(id, con) {
         # mid-batch it will bump gen_epoch and our scheduled callback will
         # see the mismatch and exit.
         my_epoch <- shiny::isolate(gen_epoch())
-        ok <- do_one_generation(pending_pct(), pending_flow())
+        ok <- do_one_generation(pending_select(), pending_unit(),
+                                pending_val(),    pending_flow())
         if (!ok) {
           pending_gens(0L)
           return()
