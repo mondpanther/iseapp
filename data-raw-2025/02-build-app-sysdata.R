@@ -220,12 +220,59 @@ cat("Building country groups...\n")
 
 country_groups_raw <- arrow::read_parquet("inst/extdata/country_lookup.parquet")
 
-group_definitions <- list(
-  "All countries"         = country_choices |> unname(),
-  "LMICs"                 = country_groups_raw |> dplyr::filter(is_lmic)            |> dplyr::pull(ctry_code),
-  "LMICs (excl. China)"   = country_groups_raw |> dplyr::filter(is_lmic_excl_china) |> dplyr::pull(ctry_code),
-  "EU countries"          = country_groups_raw |> dplyr::filter(is_eu)              |> dplyr::pull(ctry_code),
-  "High income countries" = country_groups_raw |> dplyr::filter(is_hic)             |> dplyr::pull(ctry_code)
+# LMICs excluding China & India: derived from the existing
+# is_lmic_excl_china flag by also dropping "IN". Cheaper than adding a
+# new column to country_lookup.parquet and lets the group ride alongside
+# the other LMIC variants in the dropdown.
+lmic_excl_cn_in <- country_groups_raw |>
+  dplyr::filter(is_lmic_excl_china, ctry_code != "IN") |>
+  dplyr::pull(ctry_code)
+
+# World Bank geographic regions (the seven-region scheme used by OWID at
+# https://ourworldindata.org/grapher/world-regions-according-to-the-world-bank).
+# `countrycode::countrycode(..., destination = "region")` returns the
+# canonical WB region label for each ISO2; we keep only codes that
+# appear in our country_lookup so groups are guaranteed to resolve to
+# selectable countries.
+all_codes_in_lookup <- country_groups_raw |> dplyr::pull(ctry_code)
+wb_region_lookup <- suppressWarnings(
+  countrycode::countrycode(
+    all_codes_in_lookup,
+    origin      = "iso2c",
+    destination = "region"
+  )
+)
+wb_region_df <- data.frame(
+  ctry_code = all_codes_in_lookup,
+  region    = wb_region_lookup,
+  stringsAsFactors = FALSE
+) |> dplyr::filter(!is.na(region))
+
+wb_region_groups <- split(wb_region_df$ctry_code, wb_region_df$region)
+# Standard WB seven-region order (matches OWID's ordering).
+wb_region_order <- c(
+  "East Asia & Pacific",
+  "Europe & Central Asia",
+  "Latin America & Caribbean",
+  "Middle East & North Africa",
+  "North America",
+  "South Asia",
+  "Sub-Saharan Africa"
+)
+wb_region_groups <- wb_region_groups[
+  intersect(wb_region_order, names(wb_region_groups))
+]
+
+group_definitions <- c(
+  list(
+    "All countries"                       = country_choices |> unname(),
+    "LMICs"                               = country_groups_raw |> dplyr::filter(is_lmic)            |> dplyr::pull(ctry_code),
+    "LMICs (excl. China)"                 = country_groups_raw |> dplyr::filter(is_lmic_excl_china) |> dplyr::pull(ctry_code),
+    "LMICs (excl. China & India)"         = lmic_excl_cn_in,
+    "EU countries"                        = country_groups_raw |> dplyr::filter(is_eu)              |> dplyr::pull(ctry_code),
+    "High income countries"               = country_groups_raw |> dplyr::filter(is_hic)             |> dplyr::pull(ctry_code)
+  ),
+  wb_region_groups
 )
 
 grouped_choices <- list(

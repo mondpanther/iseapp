@@ -588,6 +588,26 @@ hglobe_module_server <- function(id, con) {
       # draw. NA or non-positive values fall back to the minimum radius.
       # Defaults sized for clickability at max zoom — at radius 5 px the
       # circle is a comfortable touch/click target on most displays.
+      # ---------------------------------------------------------------------
+      # Deterministic per-(docdb, ctry) jitter applied at the countrymap
+      # join so every generation — including arc endpoints — uses the
+      # same offset for the same pair. DuckDB's hash() is stable, so
+      # repeat sessions land identical points; the offset is band-
+      # limited to ±`jitter_amp` degrees on each axis.
+      # Returns a single SQL scalar expression evaluating to the jittered
+      # value, e.g. `(CAST(hash(c.docdb_family_id, c.ctry_code, 'lat') AS
+      # DOUBLE) / 18446744073709551616.0 - 0.5) * 0.5 + c.lat`.
+      # ---------------------------------------------------------------------
+      jitter_amp <- 0.25  # degrees, per-axis half-range
+      jitter_expr <- function(alias, axis) {
+        sprintf(paste0(
+          "(CAST(hash(%s.docdb_family_id, %s.ctry_code, '%s') AS DOUBLE) ",
+          "/ 18446744073709551616.0 - 0.5) * %s + %s.%s"),
+          alias, alias, axis,
+          format(2 * jitter_amp, nsmall = 4),
+          alias, axis)
+      }
+
       # Build the SAMPLE / ORDER BY clause appended to the row source
       # being sampled. The same logic is shared between the gen-0
       # selection (filtered docdb x ctry universe) and the per-edge
@@ -832,9 +852,19 @@ hglobe_module_server <- function(id, con) {
         #     "USING SAMPLE <pct> PERCENT (bernoulli)"           (Percent)
         #     "USING SAMPLE <n> ROWS (reservoir)"                (Number)
         #     "ORDER BY toflow_val DESC NULLS LAST LIMIT <n>"    (Top)
+        # Jitter is applied at the countrymap join so the seed table we
+        # persist (frontier_tbl(0)) carries jittered lat/lon. Any
+        # downstream consumer that joins back to this table — including
+        # the citation arcs in do_one_generation — automatically gets the
+        # same offset for the same (docdb, ctry).
+        jit_lat_c <- jitter_expr("c", "lat")
+        jit_lon_c <- jitter_expr("c", "lon")
         sql <- sprintf("
           SELECT p.docdb_family_id, p.ctry_code, p.toflow_val, p.appln_id,
-                 c.city, c.lat, c.lon, c.geocode_missing
+                 c.city,
+                 %s AS lat,
+                 %s AS lon,
+                 c.geocode_missing
           FROM (
             SELECT * FROM %s %s
           ) p
@@ -842,7 +872,7 @@ hglobe_module_server <- function(id, con) {
             ON c.docdb_family_id = p.docdb_family_id
            AND c.ctry_code       = p.ctry_code
           WHERE c.lat IS NOT NULL AND c.lon IS NOT NULL
-        ", passing_tbl, sample_clause)
+        ", jit_lat_c, jit_lon_c, passing_tbl, sample_clause)
 
         dat <- tryCatch(
           DBI::dbGetQuery(con, sql),
@@ -912,13 +942,12 @@ hglobe_module_server <- function(id, con) {
           format(nrow(dat), big.mark = ","),
           format(n_found,   big.mark = ",")))
 
-        # Tiny jitter so overlapping points are individually visible; the
-        # deterministic lat/lon coming from countrymap would otherwise stack
-        # every city onto one pixel.
-        set.seed(42)
-        jit <- 0.25
-        dat$lon_j <- dat$lon + stats::runif(nrow(dat), -jit, jit)
-        dat$lat_j <- dat$lat + stats::runif(nrow(dat), -jit, jit)
+        # NOTE: jitter is no longer applied here — `dat$lat` / `dat$lon`
+        # already carry the per-(docdb, ctry) deterministic offset from
+        # the SQL query above. Doing it upstream means the seed table
+        # and every downstream gen-N frontier carry the same jittered
+        # coordinates, so citation arcs land exactly on the marker the
+        # user clicks.
 
         appln_link <- espacenet_link(dat$appln_id)
         appln_html <- ifelse(
@@ -940,8 +969,8 @@ hglobe_module_server <- function(id, con) {
           leaflet::clearMarkers() |>
           leaflet::clearShapes() |>
           leaflet::addCircleMarkers(
-            lng          = dat$lon_j,
-            lat          = dat$lat_j,
+            lng          = dat$lon,
+            lat          = dat$lat,
             radius       = radius_from_flow(dat$toflow_val),
             stroke       = FALSE,
             fillOpacity  = 0.6,
@@ -1007,6 +1036,13 @@ hglobe_module_server <- function(id, con) {
         # countrymap supplies. Targets are sampled in step C; we
         # materialise them first so we can both (a) count rows for
         # Top+Percent and (b) reuse the table when stitching edges.
+        # Same per-(docdb, ctry) jitter formula used for the gen-0 seed.
+        # Embedding it here means the candidate table — and therefore
+        # the new frontier we persist below — already carries jittered
+        # coordinates; arc endpoints in the next iteration land exactly
+        # on the markers we draw.
+        jit_lat_cm <- jitter_expr("cm", "lat")
+        jit_lon_cm <- jitter_expr("cm", "lon")
         sql_candidates <- glue::glue("
           CREATE OR REPLACE TABLE {cand_tbl} AS
           WITH citing AS (
@@ -1028,8 +1064,8 @@ hglobe_module_server <- function(id, con) {
                  cm.docdb_family_id,
                  cm.ctry_code,
                  cm.city,
-                 cm.lat,
-                 cm.lon,
+                 {jit_lat_cm} AS lat,
+                 {jit_lon_cm} AS lon,
                  fpf.toflow_val,
                  fpf.appln_id
           FROM countrymap cm
