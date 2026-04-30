@@ -99,12 +99,32 @@ cat("  ✓", length(uk_regions), "regions\n")
 # ============================================================
 cat("Detecting return flow columns...\n")
 
-parquet_cols <- DBI::dbGetQuery(con, 
+parquet_cols <- DBI::dbGetQuery(con,
   "SELECT column_name FROM information_schema.columns WHERE table_name = 'patent_database'"
 ) |> dplyr::pull(column_name)
-flow_cols <- parquet_cols[grepl("^(is|av|ev)_|^cit_count$", parquet_cols)]
 
-cat("  ✓", length(flow_cols), "flow columns found\n")
+# `is_*` and `av_*` columns are no longer materialised in the parquet —
+# they're derived at runtime by `runAppPackage.R` from the corresponding
+# `ev_*` column plus `cost`, `alpha`, `pv`. So when we validate the
+# declared toflow_choices below, we must include the derived twins of
+# every ev_* column the parquet ships, plus the special `emdenocnin`
+# variant that's also derived in the runtime view (from ev_emdenocn -
+# ev_in). Keeping flow_cols as a superset of parquet_cols means the
+# validator stops dropping every Marginal/Average Return entry.
+ev_cols      <- parquet_cols[grepl("^ev_", parquet_cols)]
+derived_is   <- sub("^ev_", "is_", ev_cols)
+derived_av   <- sub("^ev_", "av_", ev_cols)
+extra_runtime_cols <- c("ev_emdenocnin", "is_emdenocnin", "av_emdenocnin")
+
+flow_cols <- unique(c(
+  parquet_cols[grepl("^(is|av|ev)_|^cit_count$", parquet_cols)],
+  derived_is,
+  derived_av,
+  extra_runtime_cols
+))
+
+cat("  ✓", length(flow_cols),
+    "flow columns recognised (parquet + runtime-derived)\n")
 
 # ============================================================
 # 5. TECHNOLOGY GROUPINGS
@@ -220,18 +240,94 @@ cat("Building country groups...\n")
 
 country_groups_raw <- arrow::read_parquet("inst/extdata/country_lookup.parquet")
 
-group_definitions <- list(
-  "All countries"         = country_choices |> unname(),
-  "LMICs"                 = country_groups_raw |> dplyr::filter(is_lmic)            |> dplyr::pull(ctry_code),
-  "LMICs (excl. China)"   = country_groups_raw |> dplyr::filter(is_lmic_excl_china) |> dplyr::pull(ctry_code),
-  "EU countries"          = country_groups_raw |> dplyr::filter(is_eu)              |> dplyr::pull(ctry_code),
-  "High income countries" = country_groups_raw |> dplyr::filter(is_hic)             |> dplyr::pull(ctry_code)
+# LMICs excluding China & India: derived from the existing
+# is_lmic_excl_china flag by also dropping "IN". Cheaper than adding a
+# new column to country_lookup.parquet and lets the group ride alongside
+# the other LMIC variants in the dropdown.
+lmic_excl_cn_in <- country_groups_raw |>
+  dplyr::filter(is_lmic_excl_china, ctry_code != "IN") |>
+  dplyr::pull(ctry_code)
+
+# World Bank geographic regions (the seven-region scheme used by OWID at
+# https://ourworldindata.org/grapher/world-regions-according-to-the-world-bank).
+# `countrycode::countrycode(..., destination = "region")` returns the
+# canonical WB region label for each ISO2; we keep only codes that
+# appear in our country_lookup so groups are guaranteed to resolve to
+# selectable countries.
+all_codes_in_lookup <- country_groups_raw |> dplyr::pull(ctry_code)
+wb_region_lookup <- suppressWarnings(
+  countrycode::countrycode(
+    all_codes_in_lookup,
+    origin      = "iso2c",
+    destination = "region"
+  )
+)
+wb_region_df <- data.frame(
+  ctry_code = all_codes_in_lookup,
+  region    = wb_region_lookup,
+  stringsAsFactors = FALSE
+) |> dplyr::filter(!is.na(region))
+
+wb_region_groups <- split(wb_region_df$ctry_code, wb_region_df$region)
+# Standard WB seven-region order (matches OWID's ordering).
+wb_region_order <- c(
+  "East Asia & Pacific",
+  "Europe & Central Asia",
+  "Latin America & Caribbean",
+  "Middle East & North Africa",
+  "North America",
+  "South Asia",
+  "Sub-Saharan Africa"
+)
+wb_region_groups <- wb_region_groups[
+  intersect(wb_region_order, names(wb_region_groups))
+]
+
+group_definitions <- c(
+  list(
+    "All countries"                       = country_choices |> unname(),
+    "LMICs"                               = country_groups_raw |> dplyr::filter(is_lmic)            |> dplyr::pull(ctry_code),
+    "LMICs (excl. China)"                 = country_groups_raw |> dplyr::filter(is_lmic_excl_china) |> dplyr::pull(ctry_code),
+    "LMICs (excl. China & India)"         = lmic_excl_cn_in,
+    "EU countries"                        = country_groups_raw |> dplyr::filter(is_eu)              |> dplyr::pull(ctry_code),
+    "High income countries"               = country_groups_raw |> dplyr::filter(is_hic)             |> dplyr::pull(ctry_code)
+  ),
+  wb_region_groups
 )
 
 grouped_choices <- list(
   "Predefined Groups" = as.list(setNames(names(group_definitions), names(group_definitions))),
   "Individual Countries" = as.list(country_choices)
 )
+
+# ============================================================
+# 6b. CITY LOOKUP (HiGGlo city filter)
+# Distinct cities with real geocoding — used by the HiGGlo sidebar's
+# city filter. Capital-fallback rows (geocode_missing = TRUE) are
+# excluded here because the dropdown should only offer "real" cities;
+# whether a docdb mapped to its capital fallback is *included* in the
+# filtered output is governed by a separate per-session checkbox.
+# ============================================================
+cat("Building city choices...\n")
+countrymap_for_cities <- arrow::read_parquet(
+  "inst/extdata/countrymap.parquet",
+  col_select = c("city", "geocode_missing")
+)
+city_choices_vec <- countrymap_for_cities |>
+  dplyr::filter(!geocode_missing, !is.na(city), nzchar(city)) |>
+  dplyr::distinct(city) |>
+  dplyr::arrange(city) |>
+  dplyr::pull(city)
+
+# selectize uses a named-list shape consistent with country / firm
+# choices. The synthetic "No city filter" sentinel is what the
+# HiGGlo sidebar defaults to and what `expand_city_selection()`
+# treats as "ignore" — same idiom we use for "No firm filter".
+city_grouped_choices <- list(
+  "Filter Mode"        = list("No city filter" = "No city filter"),
+  "Individual Cities"  = as.list(setNames(city_choices_vec, city_choices_vec))
+)
+cat("  ✓", length(city_choices_vec), "distinct cities (excl. capital fallbacks)\n")
 
 # ============================================================
 # 7. REGION GROUPS
@@ -345,48 +441,12 @@ default_region  <- if (length(names(uk_regions)) > 0) names(uk_regions)[1] else 
 cat("  ✓ default_country:", default_country, "\n")
 cat("  ✓ default_region: ", default_region,  "\n")
 
-# ============================================================
-# 10. PRE-COMPUTED RTA BASELINES
-# ============================================================
-cat("Pre-computing allinnos baselines...\n")
-
-patent_database <- arrow::read_parquet("inst/extdata/patent_database.parquet",
-                                        col_select = c("docdb_family_id", "ctry_code"))
-
-allinnos_baseline <- patent_database |>
-  left_join(patents_x_firm, by = "docdb_family_id", relationship = "many-to-many") |>
-  count(ctry_code, firm, name = "allinnos")
-
-sum_allinnos_baseline <- allinnos_baseline |>
-  group_by(ctry_code) |>
-  summarise(sum_allinnos = sum(allinnos), .groups = "drop")
-
-sum_allinnos_firm_baseline <- allinnos_baseline |>
-  group_by(firm) |>
-  summarise(sum_allinnos = sum(allinnos), .groups = "drop")
-
-cat("  ✓", nrow(allinnos_baseline), "ctry/firm combinations pre-computed\n")
-cat("  ✓", nrow(sum_allinnos_baseline), "ctry combinations pre-computed\n")
-
-# ============================================================
-# 11. PRE-COMPUTED REGION RTA BASELINES
-# ============================================================
-cat("Pre-computing region allinnos baselines...\n")
-
-allinnos_region_baseline <- patents_x_region |>
-  left_join(patents_x_firm, by = "docdb_family_id", relationship = "many-to-many") |>
-  count(region_code, firm, name = "allinnos")
-
-sum_allinnos_region_baseline <- allinnos_region_baseline |>
-  group_by(region_code) |>
-  summarise(sum_allinnos = sum(allinnos), .groups = "drop")
-
-sum_allinnos_region_firm_baseline <- allinnos_region_baseline |>
-  group_by(firm) |>
-  summarise(sum_allinnos = sum(allinnos), .groups = "drop")
-
-cat("  ✓", nrow(allinnos_region_baseline), "region/firm combinations pre-computed\n")
-cat("  ✓", nrow(sum_allinnos_region_baseline), "region combinations pre-computed\n")
+# Sections 10 and 11 (pre-computed `allinnos_baseline` /
+# `sum_allinnos_*` / `..._region_baseline` objects) used to live here.
+# They were dead weight: nothing in R/ reads them since the v2 SQL
+# refactor, which computes RTA denominators on the fly via
+# sql_ctry_allinnos_v2() and sql_region_allinnos_v2(). Removing them
+# saves a second parquet pass during the build and trims R/sysdata.rda.
 
 # ============================================================
 # 11. PRE-COMPUTED Some inglobe tab stuff
@@ -430,6 +490,57 @@ cat(sprintf("  ✓ n_docdbs_total = %s\n",
 # from .bigdata/. Restricted to families that actually appear in the app's
 # patent_database.parquet. Subclass titles are shortened to <= 4 words for
 # wordcloud rendering.
+
+# ----------------------------------------------------------------------
+# Freshness gate. The actual computation is expensive (loads .bigdata/
+# techmap.fst + cpcs.fst, joins them, filters to the app universe, then
+# does the same for the defining-CPC code lookup). It only changes when
+#   - .bigdata/techmap.fst or cpcs.fst change,
+#   - any file under classifications/ changes,
+#   - or inst/extdata/patent_database.parquet changes.
+# So if R/sysdata.rda is newer than all of those AND already contains
+# both objects we want, just reuse them and skip the whole block.
+# Force a rebuild by deleting R/sysdata.rda or touching a watched
+# input.
+# ----------------------------------------------------------------------
+.tech_cpc_inputs <- c(
+  ".bigdata/techmap.fst",
+  ".bigdata/cpcs.fst",
+  "inst/extdata/patent_database.parquet",
+  list.files("classifications", full.names = TRUE,
+             recursive = TRUE)
+)
+.tech_cpc_inputs <- .tech_cpc_inputs[file.exists(.tech_cpc_inputs)]
+
+.sysdata_path     <- "R/sysdata.rda"
+.sysdata_exists   <- file.exists(.sysdata_path)
+.sysdata_has_objs <- FALSE
+if (.sysdata_exists) {
+  .tmp_env <- new.env(parent = emptyenv())
+  try(load(.sysdata_path, envir = .tmp_env), silent = TRUE)
+  .sysdata_has_objs <- all(c("tech_subclass_counts", "tech_defining_cpcs")
+                           %in% ls(.tmp_env))
+}
+
+.needs_rebuild <- !.sysdata_exists || !.sysdata_has_objs ||
+  (length(.tech_cpc_inputs) > 0L &&
+   max(file.info(.tech_cpc_inputs)$mtime, na.rm = TRUE) >
+     file.info(.sysdata_path)$mtime)
+
+if (!.needs_rebuild) {
+  cat("Tech x CPC-subclass counts unchanged — reusing previous values.\n")
+  tech_subclass_counts <- .tmp_env$tech_subclass_counts
+  tech_defining_cpcs   <- .tmp_env$tech_defining_cpcs
+  rm(.tmp_env, .tech_cpc_inputs, .sysdata_path, .sysdata_exists,
+     .sysdata_has_objs, .needs_rebuild)
+  cat("  ✓", nrow(tech_subclass_counts),
+      "tech × subclass rows;",
+      nrow(tech_defining_cpcs), "defining CPC code rows (cached)\n")
+} else {
+
+if (exists(".tmp_env", inherits = FALSE)) rm(.tmp_env)
+rm(.tech_cpc_inputs, .sysdata_path, .sysdata_exists,
+   .sysdata_has_objs, .needs_rebuild)
 
 cat("Pre-computing tech x CPC-subclass counts...\n")
 
@@ -505,8 +616,8 @@ cpcs_dt    <- cpcs_dt[docdb_family_id %in% final_fams]
 cpcs_dt[, subclass := substr(cpc_class_symbol, 1, 4)]
 cpcs_dt <- unique(cpcs_dt[, .(docdb_family_id, subclass)])
 
-setkey(techmap_dt, docdb_family_id)
-setkey(cpcs_dt,    docdb_family_id)
+data.table::setkey(techmap_dt, docdb_family_id)
+data.table::setkey(cpcs_dt,    docdb_family_id)
 joined <- cpcs_dt[techmap_dt, on = "docdb_family_id", allow.cartesian = TRUE]
 joined <- joined[!is.na(subclass)]
 
@@ -670,6 +781,8 @@ cat("  ✓", nrow(tech_subclass_counts),
     "tech × subclass rows across",
     data.table::uniqueN(tech_subclass_counts$technology), "technologies\n")
 
+}  # end if (.needs_rebuild) — closes the freshness gate above.
+
 # ============================================================
 # 13. SAVE AS INTERNAL PACKAGE DATA
 # usethis::use_data(internal = TRUE) writes ALL listed objects
@@ -687,6 +800,9 @@ usethis::use_data(
   group_definitions,
   grouped_choices,
   default_country,
+  # Cities (HiGGlo)
+  city_choices_vec,
+  city_grouped_choices,
   # Regions
   uk_regions,
   region_choices,
@@ -707,12 +823,12 @@ usethis::use_data(
   # Flow choices
   toflow_choices,
   flow_cols,
-  allinnos_baseline,
-  sum_allinnos_baseline,
-  sum_allinnos_firm_baseline,
-  allinnos_region_baseline,
-  sum_allinnos_region_baseline,
-  sum_allinnos_region_firm_baseline,
+  # NOTE: the six pre-computed RTA baseline objects that used to be
+  # listed here (allinnos_baseline, sum_allinnos_baseline,
+  # sum_allinnos_firm_baseline, allinnos_region_baseline,
+  # sum_allinnos_region_baseline, sum_allinnos_region_firm_baseline)
+  # are gone — RTA is now computed on the fly by sql_ctry_allinnos_v2
+  # / sql_region_allinnos_v2 so they were dead in sysdata.rda.
   # About-page tech definitions
   tech_subclass_counts,
   tech_defining_cpcs,

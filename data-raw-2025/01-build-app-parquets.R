@@ -1010,19 +1010,17 @@ write_parquet_atomic(region_lookup, "inst/extdata/region_lookup.parquet",
 cat("    ", nrow(region_lookup), "rows (restricted to regions with final docdbs)\n")
 
 # -- patents_x_firm (from old iseapp) --
-# Read firmmap ONCE (it's not tiny) and derive both top_companies and the
-# filtered bridge from the same in-memory copy.
+# Carry every harmonised firm in firmmap that maps to a final-docdb
+# family. The previous build slice_max'd to the top-100 firms by raw
+# count, which silently kicked thousands of mid-tier firms out of
+# the bundle and made HiGGlo / Country Explorer firm filters miss
+# the long tail. The cap was a holdover from the original 2021 code
+# path — we want the full bridge.
 cat("  Writing patents_x_firm.parquet...\n")
 firmmap_full <- arrow::read_parquet(file.path(iseapp_dir, "firmmap.parquet"))
 
-top_companies <- firmmap_full |>
-  dplyr::count(company_raw, name = "n") |>
-  dplyr::slice_max(n, n = 100, with_ties = FALSE) |>
-  dplyr::pull(company_raw)
-
 patents_x_firm <- firmmap_full |>
-  dplyr::filter(company_raw %in% top_companies,
-                docdb_family_id %in% final_docdbs) |>
+  dplyr::filter(docdb_family_id %in% final_docdbs) |>
   dplyr::rename(firm = company_raw) |>
   dplyr::select(docdb_family_id, firm) |>
   dplyr::distinct()
@@ -1031,6 +1029,7 @@ rm(firmmap_full); gc()
 write_parquet_atomic(patents_x_firm, "inst/extdata/patents_x_firm.parquet",
                      compression = "zstd", compression_level = 3)
 cat("    ", nrow(patents_x_firm), "rows (restricted to final docdbs)\n")
+cat("    ", dplyr::n_distinct(patents_x_firm$firm), "distinct firms\n")
 
 # -- firm_lookup --
 # Restrict to firms that actually appear in patents_x_firm (top companies

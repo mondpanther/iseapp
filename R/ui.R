@@ -104,7 +104,11 @@ ui <- function(req) {
       region_module_ui("region")
     ),
     shiny::tabPanel(
-      "HiGGlobe",
+      title = "HiGGlo",
+      # Keep the underlying input$navbar_page value as "HiGGlobe" so that
+      # existing bookmarked URLs (which encode navbar_page="HiGGlobe")
+      # still resolve to this tab. Only the visible label changes.
+      value = "HiGGlobe",
       hglobe_module_ui("hglobe")
     ),
     shiny::tabPanel(
