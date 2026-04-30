@@ -1012,31 +1012,75 @@ for (i in seq_len(nrow(city_summaries))) {
 
 ## Firm word cloud per city
 
-These wordclouds use the **harmonised firm data shipped with the
-Innovation Strategy Explorer** (`inst/extdata/patents_x_firm.parquet`)
-rather than EPO OPS applicants. That avoids the need for OPS API
-calls and a GPT harmonisation pass, and the names are already
-canonical. The trade-off: `patents_x_firm.parquet` is restricted to
-the **top-100 firms by patent count globally** (see
-`data-raw-2025/01-build-app-parquets.R`). Patents whose owners are
-not in that top-100 list contribute nothing to a city's wordcloud,
-which leaves smaller LMIC cities sparse or empty. Where that happens,
-the OPS-based wordclouds (in earlier git history) are the more
-inclusive view.
+These wordclouds use the **raw PATSTAT person + appln tables** from
+the local Dropbox export (`patstat_clean/tls206_person.parquet` and
+`tls207_pers_appln.parquet`). For each highlighted city we:
 
-Each wordcloud word is sized by how many patent families in the city
-are mapped to the firm. Colour encodes `firm_sector` from
-`firm_lookup.parquet` when available.
+1. Resolve the city's docdb set via `countrymap.parquet` (which is
+   itself derived from those same PATSTAT person addresses, so any
+   docdb the app sees attached to the city has at least one person
+   record we can read here).
+2. Look up every applicant / holder person on those docdbs in
+   `tls207_pers_appln`.
+3. Apply a firm-detection regex (legal-form suffixes like
+   `INC / CORP / GMBH / SARL / KK / OY / SPA / LTD / UNIVERSITY /
+   INSTITUTE / FOUNDATION` etc.) to filter out individuals.
+4. Send the unique firm names to `gpt-4o-mini` for canonical
+   harmonisation (`Robert Bosch GmbH` + `Bosch Sensortec` →
+   `Bosch`), keyed and cached on disk so repeat knits skip the LLM
+   call.
+5. Render one wordcloud per city, plus a top-10 firms table.
 
-```{r firms_local_query}
+This is more inclusive than the previous `patents_x_firm.parquet`
+view (which was top-100 only), and unlike the EPO OPS pass it
+doesn't depend on which patents OPS happens to surface — every
+docdb in the bundle has at least one applicant row in PATSTAT.
+
+```{r firms_dropbox_setup}
 library(ggwordcloud)
 
-# Resolve the bundle paths the same way the data chunk did. The
-# helper was defined inside the `data` chunk above, so it's already
-# in scope here, but redefining the path lookups locally keeps this
-# section readable on its own.
-pxf_path <- find_extdata("patents_x_firm.parquet")
-fl_path  <- find_extdata("firm_lookup.parquet")
+# Dropbox auto-discovery — same logic 01-build-app-parquets.R uses.
+# Looks for $ISEAPP_DROPBOX_DIR first; otherwise reads the platform
+# Dropbox info.json (Windows %APPDATA%/Dropbox/info.json,
+# Mac/Linux ~/.dropbox/info.json). Returns NULL if neither is
+# resolvable so the chunk can degrade gracefully instead of bombing
+# the entire knit.
+find_dropbox_dir_safely <- function() {
+  override <- Sys.getenv("ISEAPP_DROPBOX_DIR", unset = "")
+  if (nzchar(override) && dir.exists(override))
+    return(normalizePath(override, winslash = "/", mustWork = TRUE))
+
+  info_paths <- c(
+    file.path(Sys.getenv("APPDATA",  unset = ""), "Dropbox", "info.json"),
+    file.path(Sys.getenv("LOCALAPPDATA", unset = ""), "Dropbox", "info.json"),
+    "~/.dropbox/info.json"
+  )
+  hit <- info_paths[nzchar(info_paths) & file.exists(info_paths)]
+  if (length(hit) == 0L) return(NULL)
+  info <- tryCatch(jsonlite::fromJSON(hit[[1L]]),
+                   error = function(e) NULL)
+  if (is.null(info)) return(NULL)
+  root <- info$personal$path %||% info$business$path
+  if (is.null(root) || !dir.exists(root)) return(NULL)
+  normalizePath(root, winslash = "/", mustWork = TRUE)
+}
+
+dropbox_dir   <- find_dropbox_dir_safely()
+patstat_clean <- if (!is.null(dropbox_dir))
+  file.path(dropbox_dir, "PATSTAT autumn 2025 data", "patstat_clean")
+  else NULL
+
+tls206_path <- if (!is.null(patstat_clean))
+  file.path(patstat_clean, "tls206_person.parquet") else NULL
+tls207_path <- if (!is.null(patstat_clean))
+  file.path(patstat_clean, "tls207_pers_appln.parquet") else NULL
+tls201_path <- if (!is.null(patstat_clean))
+  file.path(patstat_clean, "tls201_appln.parquet") else NULL
+
+have_patstat <-
+  !is.null(tls206_path) && file.exists(tls206_path) &&
+  !is.null(tls207_path) && file.exists(tls207_path) &&
+  !is.null(tls201_path) && file.exists(tls201_path)
 
 # All highlighted cities — same set used by the abstract summaries
 # and the HiGGlo PNG capture.
@@ -1045,83 +1089,255 @@ cities_for_wc <- cities |>
   dplyr::arrange(dplyr::desc(n_docdbs)) |>
   dplyr::pull(city)
 
-# One row per (city, firm) with patent-family count. We query
-# DuckDB directly so we don't have to materialise the full
-# patents_x_firm bridge in R memory. Firms are joined to
-# firm_lookup for the sector colour; LEFT JOIN so firms missing
-# from the lookup still render (with `firm_sector = NA`).
+if (!have_patstat) {
+  message("[firm wordcloud] PATSTAT person parquets not found — ",
+          "the wordcloud section will render a placeholder. ",
+          "Set ISEAPP_DROPBOX_DIR or check that ",
+          "patstat_clean/tls206_person.parquet etc. exist.")
+}
+```
+
+```{r firms_query, eval = have_patstat}
+# Step 1 — pull every applicant/holder person attached to a
+# docdb that countrymap maps to one of the highlighted cities.
+# `applt_seq_nr > 0` is PATSTAT's marker for an applicant role
+# (inventor-only persons have applt_seq_nr = 0 and invt_seq_nr > 0;
+# a person can be both, in which case they show up here). We keep
+# the raw psn_name string — harmonisation happens downstream via
+# GPT.
 con <- dbConnect(duckdb::duckdb())
-city_firms <- dbGetQuery(con, sprintf("
+
+city_list_sql <- paste0(
+  "'", gsub("'", "''", cities_for_wc, fixed = TRUE), "'",
+  collapse = ", "
+)
+
+city_holders_raw <- dbGetQuery(con, sprintf("
   WITH
-    cm  AS (
-      SELECT * FROM read_parquet('%s')
+    cm AS (
+      SELECT docdb_family_id, ctry_code, city
+      FROM read_parquet('%s')
       WHERE geocode_missing = FALSE
-        AND city IS NOT NULL
-        AND city <> ''
+        AND city IN (%s)
     ),
-    pxf AS (SELECT * FROM read_parquet('%s')),
-    fl  AS (SELECT * FROM read_parquet('%s'))
+    a  AS (
+      SELECT appln_id, docdb_family_id
+      FROM read_parquet('%s')
+    ),
+    pa AS (
+      SELECT person_id, appln_id, applt_seq_nr
+      FROM read_parquet('%s')
+      WHERE applt_seq_nr > 0
+    ),
+    p  AS (
+      SELECT person_id, psn_name
+      FROM read_parquet('%s')
+    )
   SELECT
     cm.city,
-    pxf.firm,
-    fl.firm_sector,
-    COUNT(DISTINCT pxf.docdb_family_id) AS n
-  FROM pxf
-  JOIN cm ON cm.docdb_family_id = pxf.docdb_family_id
-  LEFT JOIN fl ON fl.firm = pxf.firm
-  WHERE cm.city IN (%s)
-  GROUP BY cm.city, pxf.firm, fl.firm_sector
-", cm_path, pxf_path, fl_path,
-   paste0("'", gsub("'", "''", cities_for_wc, fixed = TRUE), "'",
-          collapse = ", ")))
+    p.psn_name AS holder_name,
+    COUNT(DISTINCT a.docdb_family_id) AS n
+  FROM pa
+  JOIN a  ON a.appln_id  = pa.appln_id
+  JOIN p  ON p.person_id = pa.person_id
+  JOIN cm ON cm.docdb_family_id = a.docdb_family_id
+  WHERE p.psn_name IS NOT NULL AND p.psn_name <> ''
+  GROUP BY cm.city, p.psn_name
+",
+  cm_path, city_list_sql,
+  tls201_path, tls207_path, tls206_path))
+
 dbDisconnect(con, shutdown = TRUE)
+
+cat(sprintf("raw holder rows: %s   unique names: %s   cities with hits: %d / %d\n",
+            format(nrow(city_holders_raw),                 big.mark = ","),
+            format(dplyr::n_distinct(city_holders_raw$holder_name),
+                   big.mark = ","),
+            dplyr::n_distinct(city_holders_raw$city),
+            length(cities_for_wc)))
+```
+
+```{r firms_filter_orgs, eval = have_patstat}
+# Step 2 — filter to firm-like names only. Same regex set the
+# patent_cluster_compare.Rmd helpers use, plus a few extras to
+# catch cooperatives and Asian legal forms.
+firm_regex <- stringr::regex(
+  paste0(
+    "\\b(",
+    # corporate suffixes
+    "inc|corp|corporation|co|company|companies|ltd|limited|llc|",
+    "gmbh|ag|kg|sa|sas|spa|srl|bv|nv|plc|pty|pte|kk|kabushiki|",
+    "ab|oy|oyj|as|se|sl|aps|hf|kft|sp z oo|sa de cv|",
+    # universities + research institutions
+    "univ|univers|universidad|universita|universit|college|polytechnic|",
+    "institute|institut|instituto|academy|academia|school|schule|",
+    "hochschule|ecole|escuela|scuola|faculty|laboratory|laboratoire|",
+    "laboratorio|research|forschung|fraunhofer|max planck|cnrs|",
+    "csic|csiro|csir|riken|helmholtz|",
+    # government / non-profit
+    "ministry|ministr|agency|commission|council|consejo|conseil|",
+    "foundation|fundacion|fonds|fund|stiftung",
+    ")\\b"
+  ),
+  ignore_case = TRUE
+)
+
+# Reject things that are clearly persons even if they happen to
+# match a corporate-suffix regex (rare but possible — e.g. a name
+# ending in "INC" with no preceding company words).
+person_pattern <- stringr::regex(
+  "^[A-Z][A-Z'\\-]+(?:,)?\\s+[A-Z][A-Z'\\-]+(?:\\s+[A-Z]\\.?)*$",
+  ignore_case = FALSE
+)
+
+city_holders_firms <- city_holders_raw |>
+  dplyr::filter(stringr::str_detect(holder_name, firm_regex)) |>
+  dplyr::filter(!stringr::str_detect(holder_name, person_pattern))
+
+cat(sprintf(
+  "after firm filter: %s rows  %s unique firm names  cities with firms: %d / %d\n",
+  format(nrow(city_holders_firms),                 big.mark = ","),
+  format(dplyr::n_distinct(city_holders_firms$holder_name),
+         big.mark = ","),
+  dplyr::n_distinct(city_holders_firms$city),
+  length(cities_for_wc)))
+```
+
+```{r firms_harmonise, eval = have_patstat && have_oai}
+# Step 3 — GPT harmonisation. Sends unique firm names in batches
+# and asks for canonical short names. The result is cached on
+# disk keyed on the unique-name set, so repeat knits cost nothing
+# even if downstream cities shift. Skip silently if no OpenAI
+# key — the unharmonised raw names will be used instead.
+unique_firms <- city_holders_firms |>
+  dplyr::group_by(holder_name) |>
+  dplyr::summarise(freq = sum(n), .groups = "drop") |>
+  dplyr::arrange(dplyr::desc(freq))
+
+firm_cache_file <- file.path(
+  cache_dir,
+  sprintf("oai_firmharm_%s.rds",
+          substr(digest::digest(list(unique_firms$holder_name,
+                                      unique_firms$freq),
+                                algo = "md5"), 1L, 8L))
+)
+
+if (file.exists(firm_cache_file)) {
+  firm_map <- readRDS(firm_cache_file)
+} else {
+  openai_key <- Sys.getenv("OPENAI_API_KEY")
+  call_batch <- function(batch_df) {
+    entries <- paste0("- ", batch_df$holder_name,
+                      " (n=", batch_df$freq, ")",
+                      collapse = "\n")
+    prompt <- paste0(
+      "Below is a list of raw patent applicant names from PATSTAT, ",
+      "with frequencies. HARMONISE variants to a SHORT canonical ",
+      "name (Title Case, 1-4 words; drop generic suffixes like ",
+      "Inc/Corp/Ltd/GmbH/SA). Examples: 'ROBERT BOSCH GMBH' + ",
+      "'BOSCH SENSORTEC GMBH' both -> 'Bosch'. Classify each as ",
+      "company / university / research_institute / government / other.\n\n",
+      entries, "\n\n---\n",
+      "Return ONLY a JSON array of {\"from\", \"to\", \"entity_type\"}. ",
+      "EVERY input MUST appear in the output."
+    )
+    raw <- chat_completion(prompt, openai_key,
+                           temperature = 0.1, max_tokens = 6000)
+    raw <- stringr::str_remove_all(raw, "```json\\s*|```\\s*")
+    tryCatch(
+      jsonlite::fromJSON(raw) |>
+        tibble::as_tibble() |>
+        dplyr::mutate(
+          from = stringr::str_squish(from),
+          to   = if (is.character(to)) stringr::str_squish(to)
+                 else as.character(to),
+          to   = dplyr::na_if(to, "NA"),
+          to   = dplyr::na_if(to, ""),
+          entity_type = stringr::str_to_lower(
+            stringr::str_squish(entity_type))
+        ),
+      error = function(e) {
+        warning("[firmharm] batch parse failed: ", e$message)
+        tibble::tibble(from = character(), to = character(),
+                       entity_type = character())
+      }
+    )
+  }
+
+  batch_size <- 150L
+  batches <- split(unique_firms,
+                    ceiling(seq_len(nrow(unique_firms)) / batch_size))
+  message("[firmharm] sending ", length(batches), " batches to GPT...")
+  firm_map <- lapply(seq_along(batches), function(bi) {
+    message("  batch ", bi, "/", length(batches),
+            " (", nrow(batches[[bi]]), " names)")
+    call_batch(batches[[bi]])
+  }) |> dplyr::bind_rows()
+  saveRDS(firm_map, firm_cache_file)
+}
+```
+
+```{r firms_postprocess, eval = have_patstat}
+# Apply the GPT mapping back onto each (city, raw name) row,
+# falling through to the raw name if GPT didn't return a canonical
+# form (or if no OpenAI key was configured). Then collapse to
+# (city, canonical) and pick the most common entity_type per
+# canonical for colouring.
+if (exists("firm_map", inherits = FALSE) && nrow(firm_map) > 0L) {
+  city_firms <- city_holders_firms |>
+    dplyr::left_join(firm_map, by = c("holder_name" = "from")) |>
+    dplyr::mutate(
+      canonical   = dplyr::if_else(!is.na(to) & nchar(to) > 0L,
+                                   to, holder_name),
+      entity_type = dplyr::if_else(!is.na(entity_type) &
+                                      nchar(entity_type) > 0L,
+                                   entity_type, "company")
+    ) |>
+    dplyr::filter(entity_type != "person")
+} else {
+  city_firms <- city_holders_firms |>
+    dplyr::mutate(canonical = holder_name, entity_type = "company")
+}
+
+city_firms <- city_firms |>
+  dplyr::group_by(city, canonical) |>
+  dplyr::summarise(
+    n           = sum(n),
+    entity_type = names(sort(table(entity_type), decreasing = TRUE))[1L],
+    .groups     = "drop"
+  )
 
 # Top firms per city for the wordcloud.
 max_firms_per_city <- 30L
 city_firms <- city_firms |>
   dplyr::group_by(city) |>
   dplyr::slice_max(n, n = max_firms_per_city, with_ties = FALSE) |>
-  dplyr::ungroup() |>
-  dplyr::mutate(
-    firm_sector = dplyr::if_else(is.na(firm_sector) | firm_sector == "",
-                                 "Unclassified", firm_sector)
-  )
+  dplyr::ungroup()
 
-cat(sprintf("city x firm rows kept: %s across %d cities (%d distinct sectors)\n",
+cat(sprintf("after harmonisation: %s rows kept across %d cities\n",
             format(nrow(city_firms), big.mark = ","),
-            dplyr::n_distinct(city_firms$city),
-            dplyr::n_distinct(city_firms$firm_sector)))
+            dplyr::n_distinct(city_firms$city)))
 ```
 
-```{r firms_wordcloud, fig.width=10, fig.height=4.5}
-# Distinct sector colours. Sectors not in this palette fall back to
-# a neutral grey via the named-vector default.
-sector_palette <- c(
-  "Pharmaceuticals"      = "#377eb8",
-  "Chemicals"            = "#e41a1c",
-  "Electronics"          = "#4daf4a",
-  "Automotive"           = "#984ea3",
-  "Energy"               = "#ff7f00",
-  "Aerospace & Defense"  = "#a65628",
-  "Industrial"           = "#1b9e77",
-  "Consumer Goods"       = "#d95f02",
-  "Telecommunications"   = "#7570b3",
-  "Software"             = "#66a61e",
-  "Materials"            = "#e7298a",
-  "Unclassified"         = "#999999"
+```{r firms_wordcloud, eval = have_patstat, fig.width=10, fig.height=4.5}
+# Colour by entity_type (company / university / research_institute /
+# government / other) — the GPT pass classifies each canonical name.
+entity_type_colors <- c(
+  "company"            = "#377eb8",
+  "university"         = "#e41a1c",
+  "research_institute" = "#4daf4a",
+  "government"         = "#984ea3",
+  "other"              = "#999999"
 )
 fallback_color <- "#777777"
 
-color_for_sector <- function(s) {
-  out <- sector_palette[s]
+color_for_type <- function(s) {
+  out <- entity_type_colors[s]
   out[is.na(out)] <- fallback_color
   unname(out)
 }
 
-# Loop city-by-city. One plot per city so individual labels can use
-# a much larger max_size; empty cities (no top-100 firms in the
-# patent set) get an italic placeholder. Cities are ordered by
-# patent count, biggest first.
+# Loop city-by-city, one plot per city, biggest first.
 for (target_city in cities_for_wc) {
   cnt <- city_firms |>
     dplyr::filter(city == target_city)
@@ -1131,10 +1347,10 @@ for (target_city in cities_for_wc) {
       annotate(
         "text", x = 0.5, y = 0.5,
         label = paste0(
-          "No top-100 firms identified for ", target_city, ".\n",
-          "patents_x_firm.parquet only carries the global top 100 ",
-          "firms by patent count;\nLMIC cities often sit below that ",
-          "threshold."
+          "No firm applicants identified for ", target_city, ".\n",
+          "Either the city has no patents in the database, or every\n",
+          "applicant looks like an individual person rather than a\n",
+          "firm/institution under the legal-form regex."
         ),
         size = 4, fontface = "italic", colour = "#666"
       ) +
@@ -1148,9 +1364,9 @@ for (target_city in cities_for_wc) {
       ) +
       xlim(0, 1) + ylim(0, 1)
   } else {
-    cnt$colour <- color_for_sector(cnt$firm_sector)
+    cnt$colour <- color_for_type(cnt$entity_type)
     p <- ggplot(cnt,
-                aes(label = firm, size = n, colour = I(colour))) +
+                aes(label = canonical, size = n, colour = I(colour))) +
       ggwordcloud::geom_text_wordcloud_area(
         rm_outside   = TRUE,
         shape        = "square",
@@ -1170,25 +1386,24 @@ for (target_city in cities_for_wc) {
 }
 ```
 
-```{r firms_wordcloud_legend, fig.width=10, fig.height=0.6}
-# Single colour-by-sector legend at the end of the section, showing
-# only the sectors that actually appear in any of the rendered
-# wordclouds.
-present_sectors <- intersect(names(sector_palette),
-                              unique(city_firms$firm_sector))
-if (length(present_sectors) > 0L) {
+```{r firms_wordcloud_legend, eval = have_patstat, fig.width=10, fig.height=0.6}
+# Single colour-by-entity_type legend at the end of the section,
+# showing only the types that actually appear.
+present_types <- intersect(names(entity_type_colors),
+                            unique(city_firms$entity_type))
+if (length(present_types) > 0L) {
   legend_df <- data.frame(
-    firm_sector = factor(present_sectors, levels = present_sectors),
-    x           = seq_along(present_sectors),
+    entity_type = factor(present_types, levels = present_types),
+    x           = seq_along(present_types),
     y           = 1
   )
   ggplot(legend_df,
-         aes(x, y, colour = firm_sector, label = firm_sector)) +
+         aes(x, y, colour = entity_type, label = entity_type)) +
     geom_point(size = 6) +
     geom_text(nudge_x = 0.15, hjust = 0, size = 5, colour = "#222") +
-    scale_colour_manual(values = sector_palette[present_sectors],
+    scale_colour_manual(values = entity_type_colors[present_types],
                         guide  = "none") +
-    coord_cartesian(xlim = c(0.5, length(present_sectors) + 1.5),
+    coord_cartesian(xlim = c(0.5, length(present_types) + 1.5),
                     ylim = c(0.5, 1.5)) +
     theme_void() +
     theme(plot.margin = margin(2, 2, 2, 2))
