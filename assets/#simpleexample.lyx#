@@ -249,5 +249,61 @@ Hence all we need is
 
 \end_layout
 
+\begin_layout Standard
+—
+—
+—
+—
+–
+\end_layout
+
+\begin_layout Standard
+Dealing with the sampling of edges...???
+\end_layout
+
+\begin_layout Standard
+Example
+\end_layout
+
+\begin_layout Standard
+2 firms with 10 edges...
+\end_layout
+
+\begin_layout Standard
+probability that firm is included 
+\begin_inset Formula $10\times\rho$
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+other example...
+\end_layout
+
+\begin_layout Standard
+2 firms one with 10 one with 1 edge...
+\end_layout
+
+\begin_layout Standard
+Probability that firm 1 is included 
+\begin_inset Formula $10\times\rho$
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+Probability that firm 2 is included 
+\begin_inset Formula $1\times\rho$
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+
+\end_layout
+
 \end_body
 \end_document
