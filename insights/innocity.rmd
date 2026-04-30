@@ -1066,16 +1066,21 @@ find_dropbox_dir_safely <- function() {
 }
 
 dropbox_dir   <- find_dropbox_dir_safely()
-patstat_clean <- if (!is.null(dropbox_dir))
+patstat_clean <- if (!is.null(dropbox_dir)) {
   file.path(dropbox_dir, "PATSTAT autumn 2025 data", "patstat_clean")
-  else NULL
+} else {
+  NULL
+}
 
-tls206_path <- if (!is.null(patstat_clean))
-  file.path(patstat_clean, "tls206_person.parquet") else NULL
-tls207_path <- if (!is.null(patstat_clean))
-  file.path(patstat_clean, "tls207_pers_appln.parquet") else NULL
-tls201_path <- if (!is.null(patstat_clean))
-  file.path(patstat_clean, "tls201_appln.parquet") else NULL
+tls206_path <- if (!is.null(patstat_clean)) {
+  file.path(patstat_clean, "tls206_person.parquet")
+} else NULL
+tls207_path <- if (!is.null(patstat_clean)) {
+  file.path(patstat_clean, "tls207_pers_appln.parquet")
+} else NULL
+tls201_path <- if (!is.null(patstat_clean)) {
+  file.path(patstat_clean, "tls201_appln.parquet")
+} else NULL
 
 have_patstat <-
   !is.null(tls206_path) && file.exists(tls206_path) &&
@@ -1204,6 +1209,31 @@ cat(sprintf(
 ```
 
 ```{r firms_harmonise, eval = have_patstat && have_oai}
+# `chat_completion()` is defined in `summary_helpers` above, but
+# that chunk is gated on `have_ops && have_oai`. If only OpenAI
+# (not OPS) is configured we still want to harmonise firms, so
+# provide a local fallback definition keyed on the same OpenAI
+# endpoint.
+if (!exists("chat_completion", inherits = FALSE)) {
+  chat_completion <- function(prompt, api_key, model = "gpt-4o-mini",
+                              temperature = 0.2, max_tokens = 700) {
+    resp <- httr2::request(
+      "https://api.openai.com/v1/chat/completions"
+    ) |>
+      httr2::req_headers(
+        Authorization  = paste("Bearer", api_key),
+        `Content-Type` = "application/json") |>
+      httr2::req_body_json(list(
+        model       = model,
+        messages    = list(list(role = "user", content = prompt)),
+        temperature = temperature,
+        max_tokens  = max_tokens
+      )) |>
+      httr2::req_perform()
+    httr2::resp_body_json(resp)$choices[[1]]$message$content
+  }
+}
+
 # Step 3 — GPT harmonisation. Sends unique firm names in batches
 # and asks for canonical short names. The result is cached on
 # disk keyed on the unique-name set, so repeat knits cost nothing
@@ -1410,20 +1440,20 @@ if (length(present_types) > 0L) {
 }
 ```
 
-```{r firms_table_render, results='asis'}
-# Top-10 firms per city in table form. Mirrors the previous
-# OPS-based table but uses the local firm names directly.
+```{r firms_table_render, eval = have_patstat, results='asis'}
+# Top-10 firms per city in table form, using the GPT-harmonised
+# canonical names + entity_type.
 top_firms_table <- city_firms |>
   dplyr::group_by(city) |>
-  dplyr::arrange(dplyr::desc(n), firm, .by_group = TRUE) |>
+  dplyr::arrange(dplyr::desc(n), canonical, .by_group = TRUE) |>
   dplyr::slice_head(n = 10L) |>
   dplyr::mutate(rank = dplyr::row_number()) |>
   dplyr::ungroup() |>
   dplyr::transmute(
     City        = city,
     Rank        = rank,
-    Firm        = firm,
-    Sector      = firm_sector,
+    Firm        = canonical,
+    Type        = entity_type,
     `# patents` = n
   )
 
@@ -1435,9 +1465,26 @@ if (nrow(top_firms_table) > 0L) {
       full_width = FALSE
     )
 } else {
-  cat("<p><em>No firms identified for any of the highlighted cities ",
-      "in the top-100 firm subset.</em></p>", sep = "")
+  cat("<p><em>No firms identified for any of the highlighted cities.</em></p>",
+      sep = "")
 }
+```
+
+```{r firms_no_patstat_warn, eval = !have_patstat, results='asis'}
+cat(
+  "<div style='padding:12px;border:1px solid #d62728;",
+  "background:#fff3f3;border-radius:6px;color:#600;'>",
+  "<b>Firm word cloud skipped.</b> The PATSTAT person tables ",
+  "(<code>tls206_person.parquet</code> + ",
+  "<code>tls207_pers_appln.parquet</code> + ",
+  "<code>tls201_appln.parquet</code>) were not found in the ",
+  "Dropbox <code>patstat_clean/</code> directory. Set the ",
+  "environment variable <code>ISEAPP_DROPBOX_DIR</code> to point at ",
+  "your Dropbox root, or check that the parquets exist alongside ",
+  "the existing <code>countrymap.parquet</code>.",
+  "</div>",
+  sep = ""
+)
 ```
 
 ```{r firms_legacy_block_dropped, eval = FALSE}
