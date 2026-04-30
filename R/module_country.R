@@ -73,6 +73,35 @@ country_module_sidebar <- function(id) {
         )
       ),
 
+      # City filter — currently wired into the "Value flows by
+      # Technology" pipeline only; the panel is hidden on other inner
+      # tabs to avoid suggesting it has effect there. Mirrors the
+      # HiGGlo controls so users get a consistent vocabulary.
+      # `choices = NULL` here; the full list is pushed via
+      # updateSelectizeInput(..., server = TRUE) in the server body
+      # below to avoid Shiny's large-options performance warning.
+      shiny::conditionalPanel(
+        condition = is_tech,
+        shiny::div(
+          class = "side_input",
+          shiny::selectizeInput(
+            inputId  = ns("city"),
+            label    = "City",
+            choices  = NULL,
+            multiple = TRUE,
+            options  = list(placeholder = 'Choose cities...')
+          )
+        ),
+        shiny::div(
+          class = "side_input",
+          shiny::checkboxInput(
+            inputId = ns("include_fallback"),
+            label   = "Include capital city fallback",
+            value   = FALSE
+          )
+        )
+      )
+
     ),
 
     # --- Value Flow: Tech + Country only ---
@@ -305,9 +334,48 @@ country_module_server <- function(id, parent_session, con) {
     id,
     function(input, output, session) {
       ns <- session$ns
+      # Local null-coalesce. R 4.4+ ships `%||%` natively, but defining
+      # it here keeps the module compatible with earlier installs and
+      # mirrors the same idiom used in module_hglobe.R.
+      `%||%` <- function(a, b) if (is.null(a) || !length(a)) b else a
 
       # Reactive store for ggplot objects and data (for download handlers)
       plot_store <- shiny::reactiveValues()
+
+      # Server-side selectize for the City filter (Value flows by
+      # Technology tab). Same reasoning as the HiGGlo module: we
+      # leave `choices = NULL` in the UI and push the full list via
+      # updateSelectizeInput(server = TRUE) so type-ahead is handled
+      # incrementally on the server rather than shipping the entire
+      # city list to the browser at page-load.
+      #
+      # Bookmark restore: read the original URL query string directly
+      # rather than relying on `isolate(input$city)`. Lazy module
+      # initialisation + server-side selectize together drop the
+      # restored value off the input registry — the URL is the only
+      # stable source of truth at this point in the lifecycle. See
+      # module_hglobe.R for the same fix.
+      url_q     <- shiny::parseQueryString(
+        session$clientData$url_search %||% "")
+      city_key  <- session$ns("city")
+      raw_city  <- url_q[[city_key]]
+      restored_city <- if (!is.null(raw_city) && nzchar(raw_city)) {
+        tryCatch(jsonlite::fromJSON(raw_city),
+                 error = function(e) gsub('^"|"$', '', raw_city))
+      } else NULL
+      city_default <- if (length(restored_city) > 0L &&
+                          any(nzchar(as.character(restored_city)))) {
+        restored_city
+      } else {
+        "No city filter"
+      }
+      shiny::updateSelectizeInput(
+        session  = session,
+        inputId  = "city",
+        choices  = city_grouped_choices,
+        selected = city_default,
+        server   = TRUE
+      )
 
       # Expand "All categories" into all individual broad techs in the selectizeInput
       shiny::observeEvent(input$tech_categories_plot1, {
@@ -364,9 +432,14 @@ country_module_server <- function(id, parent_session, con) {
         firm_clause  <- build_firm_clause_v2(selected_firms, no_filter = no_firm_filter)
         tech_filters <- build_tech_filter_v2(input$tech_categories_plot1)
 
-        sql <- sql_country_tech_combined_v2(toflow, country_sql, tech_filters, firm_clause,
-                                             top_n_ids   = input$top_n_ids,
-                                             granted_only = isTRUE(input$granted_only), multifam_only = isTRUE(input$multifam_only))
+        sql <- sql_country_tech_combined_v2(
+          toflow, country_sql, tech_filters, firm_clause,
+          top_n_ids        = input$top_n_ids,
+          granted_only     = isTRUE(input$granted_only),
+          multifam_only    = isTRUE(input$multifam_only),
+          selected_cities  = input$city,
+          include_fallback = isTRUE(input$include_fallback)
+        )
 
         out <- DBI::dbGetQuery(con, sql)
 
@@ -404,7 +477,8 @@ country_module_server <- function(id, parent_session, con) {
 
       }) |> shiny::bindCache(input$toflow, input$country, input$tech_categories_plot1,
                              sort(input$firm), input$top_n_ids,
-                             isTRUE(input$granted_only), isTRUE(input$multifam_only))
+                             isTRUE(input$granted_only), isTRUE(input$multifam_only),
+                             sort(input$city), isTRUE(input$include_fallback))
 
       # DuckDB query for Plot 2 / World Map (by-country)
       fallback_by_country <- shiny::reactive({

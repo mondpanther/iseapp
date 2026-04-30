@@ -84,6 +84,45 @@ build_multifam_clause_v2 <- function(multifam_only = FALSE) {
   if (isTRUE(multifam_only)) "AND p.fam_size_min2 = TRUE" else ""
 }
 
+#' Build a SQL clause restricting to selected cities + capital-fallback toggle
+#'
+#' Used by query builders that join \code{countrymap} (alias \code{c} below).
+#' Mirrors the HiGGlo helper \code{build_city_filter_sql()}: a vector of
+#' city names is whitelisted (AND clause), and unless \code{include_fallback}
+#' is TRUE rows where \code{c.geocode_missing = TRUE} are dropped. The
+#' "No city filter" sentinel from the dropdown disables the city
+#' whitelist exactly the same way "No firm filter" does for firms.
+#'
+#' @param selected_cities  Character vector from input$city. Empty / NULL
+#'                          / containing "No city filter" disables the
+#'                          city whitelist.
+#' @param include_fallback Logical. TRUE keeps capital-fallback rows;
+#'                          FALSE (default) drops them.
+#' @param alias            SQL alias of the countrymap row in the
+#'                          surrounding query (default "c").
+#' @return Character. Empty string, or an \code{AND ...} fragment safe
+#'   to append to a WHERE clause.
+build_city_clause_v2 <- function(selected_cities,
+                                 include_fallback = FALSE,
+                                 alias            = "c") {
+  clauses <- character(0)
+  if (length(selected_cities) > 0L &&
+      !"No city filter" %in% selected_cities) {
+    cs <- setdiff(selected_cities, "No city filter")
+    if (length(cs) > 0L) {
+      quoted <- paste0("'", gsub("'", "''", cs, fixed = TRUE),
+                       "'", collapse = ", ")
+      clauses <- c(clauses, sprintf("%s.city IN (%s)", alias, quoted))
+    }
+  }
+  if (!isTRUE(include_fallback)) {
+    clauses <- c(clauses, sprintf("(NOT %s.geocode_missing)", alias))
+  }
+  if (length(clauses) == 0L) "" else paste("AND",
+                                            paste(clauses,
+                                                  collapse = " AND "))
+}
+
 #' Generate SQL combined query for country aggregation (v2)
 #'
 #' Joins slim bridge parquets for tech and firm at query time.
@@ -285,7 +324,9 @@ sql_ctry_allinnos_v2 <- function(toflow, country_sql, firm_clause,
 #'
 #' @return Character. SQL query string
 sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm_clause,
-                                           top_n_ids = 10, granted_only = FALSE, multifam_only = FALSE) {
+                                           top_n_ids = 10, granted_only = FALSE, multifam_only = FALSE,
+                                           selected_cities = character(0),
+                                           include_fallback = FALSE) {
 
   filter_clauses <- unlist(tech_filters)
   filter_clauses <- filter_clauses[nchar(trimws(filter_clauses)) > 0]
@@ -304,8 +345,26 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
     ""
   }
 
-  granted_clause <- build_granted_clause_v2(granted_only)
+  granted_clause  <- build_granted_clause_v2(granted_only)
   multifam_clause <- build_multifam_clause_v2(multifam_only)
+
+  # City filter (Value flows by Technology only, for now). When the
+  # filter is active we INNER JOIN countrymap to expose the city +
+  # geocode_missing columns the WHERE clause needs. The clause / join
+  # collapse to empty strings when the user keeps the default ("No
+  # city filter" + "Include capital city fallback" off implies a join
+  # is still needed to evaluate `NOT c.geocode_missing`).
+  city_clause <- build_city_clause_v2(
+    selected_cities  = selected_cities,
+    include_fallback = include_fallback,
+    alias            = "c"
+  )
+  city_join_active <- nchar(trimws(city_clause)) > 0
+  city_join <- if (city_join_active) {
+    "INNER JOIN countrymap c
+       ON c.docdb_family_id = p.docdb_family_id
+      AND c.ctry_code       = p.ctry_code"
+  } else ""
 
   # Build filtered_tech CTE:
   # "All innovations" = all patents regardless of tech mapping (single bar)
@@ -371,10 +430,12 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
       FROM full_patent_database p
       INNER JOIN filtered_tech ft ON p.docdb_family_id = ft.docdb_family_id
       {firm_join}
+      {city_join}
       WHERE p.ctry_code IN ({country_sql})
         AND p.{toflow} IS NOT NULL
         {granted_clause}
         {multifam_clause}
+        {city_clause}
     ),
 
     ranked AS (
@@ -396,10 +457,12 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
         SELECT DISTINCT ON (p.docdb_family_id) p.docdb_family_id, p.{toflow}
         FROM full_patent_database p
         {firm_join}
+        {city_join}
         WHERE p.ctry_code IN ({country_sql})
           AND p.{toflow} IS NOT NULL
           {granted_clause}
-        {multifam_clause}
+          {multifam_clause}
+          {city_clause}
       ) t
     )
 
@@ -430,8 +493,10 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
 #' Mirrors sql_country_combined_v2 but filters and partitions on
 #' region_code via the patents_x_region bridge JOIN.
 #' Returns per-region aggregates plus an overall 'All' row.
-#' RTA fields are computed in R after this query via a left_join
-#' to allinnos_region_baseline.
+#' RTA fields are computed in R after this query via a left_join to
+#' the per-call denominator returned by sql_region_allinnos_v2() —
+#' the previous static `allinnos_region_baseline` from sysdata.rda
+#' was retired alongside the v2 SQL refactor.
 #'
 #' @param toflow Character. Column name for the return flow measure.
 #' @param region_sql Character. Comma-separated quoted region codes.

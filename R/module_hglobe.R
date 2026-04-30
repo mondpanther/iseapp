@@ -50,6 +50,27 @@ hglobe_module_sidebar <- function(id) {
           options = list(placeholder = 'Choose technologies...')
         )
       ),
+      # City filter — restricts the patent universe to docdbs whose
+      # countrymap row points at one of the chosen cities. The "No city
+      # filter" sentinel is the default and means "ignore", same idiom
+      # we use for firms above. Server-side option enabled because the
+      # full city list can run into the thousands.
+      shiny::div(
+        class = "side_input",
+        # `choices = NULL` here. The full city list is pushed into the
+        # widget by `updateSelectizeInput(..., server = TRUE)` in the
+        # module server below — that's the only way to enable Shiny's
+        # genuine server-side selectize. Setting `server = TRUE` inside
+        # `options =` does NOT do the same thing and triggers the
+        # large-options performance warning.
+        shiny::selectizeInput(
+          inputId  = ns("city"),
+          label    = "City",
+          choices  = NULL,
+          multiple = TRUE,
+          options  = list(placeholder = 'Choose cities...')
+        )
+      ),
       shiny::div(
         class = "side_input",
         shiny::div(
@@ -62,6 +83,17 @@ hglobe_module_sidebar <- function(id) {
           shiny::checkboxInput(
             inputId = ns("multifam_only"),
             label   = "Multi-application families only",
+            value   = FALSE
+          ),
+          # When unticked (default), rows whose countrymap.city is the
+          # country's capital used as a *fallback* (geocode_missing =
+          # TRUE) are dropped from both the seed and any follow-on
+          # generation. Tick to include them back — useful when you
+          # want the "country-level" view rather than the
+          # geographically-precise one.
+          shiny::checkboxInput(
+            inputId = ns("include_fallback"),
+            label   = "Include capital city fallback",
             value   = FALSE
           )
         )
@@ -281,6 +313,19 @@ hglobe_module_ui <- function(id) {
       # html2canvas drives both the "Save PNG" download and the "Copy to
       # clipboard" path. Loaded once from CDN; no R-package dependency.
       shiny::tags$head(
+        # CSS hook: when an external capture (chromote, Selenium, etc.)
+        # adds the `higglobe-capture-mode` class to <body> before
+        # screenshot, the leaflet zoom +/- controls disappear from the
+        # rasterised image. The interactive UI keeps them as long as
+        # nobody flips the class. The html2canvas Save PNG path already
+        # excludes them via its `ignoreElements` callback below, so
+        # this CSS rule is the canonical "make the map clean for
+        # screenshots" hook for any non-html2canvas capture mechanism.
+        shiny::tags$style(shiny::HTML(
+          "body.higglobe-capture-mode .leaflet-control-zoom {
+             display: none !important;
+           }"
+        )),
         shiny::tags$script(
           src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"
         ),
@@ -381,6 +426,49 @@ hglobe_module_server <- function(id, con) {
     id,
     function(input, output, session) {
       ns <- session$ns
+
+      # Server-side selectize for the City filter. The full
+      # `city_grouped_choices` list runs to thousands of entries;
+      # pushing them all to the browser at UI-init time triggers
+      # Shiny's large-options performance warning. Doing it via
+      # updateSelectizeInput(server = TRUE) defers the heavy lifting
+      # to incremental, type-as-you-go server queries instead.
+      #
+      # Bookmark restore: reading `isolate(input$city)` was unreliable
+      # because the HiGGlo module is initialised LAZILY (only after
+      # the user lands on the HiGGlobe tab). By that point Shiny has
+      # already fired the bookmark-restore pass, but the selectize
+      # widget client-side never had any options registered, so the
+      # restored value can be silently dropped. The fix is to bypass
+      # Shiny's bookmark machinery entirely and read the original URL
+      # query string directly. `session$clientData$url_search` is the
+      # URL the page was loaded with — stable across the lazy-init
+      # gap.
+      url_q     <- shiny::parseQueryString(
+        session$clientData$url_search %||% "")
+      city_key  <- session$ns("city")
+      raw_city  <- url_q[[city_key]]
+      restored_city <- if (!is.null(raw_city) && nzchar(raw_city)) {
+        # Shiny URL-encodes scalar strings as `"X"` and arrays as JSON
+        # `["X","Y"]`. fromJSON handles both; if anything goes wrong
+        # we fall back to the literal value with surrounding quotes
+        # stripped.
+        tryCatch(jsonlite::fromJSON(raw_city),
+                 error = function(e) gsub('^"|"$', '', raw_city))
+      } else NULL
+      city_default <- if (length(restored_city) > 0L &&
+                          any(nzchar(as.character(restored_city)))) {
+        restored_city
+      } else {
+        "No city filter"
+      }
+      shiny::updateSelectizeInput(
+        session  = session,
+        inputId  = "city",
+        choices  = city_grouped_choices,
+        selected = city_default,
+        server   = TRUE
+      )
 
       # "Include all categories" expansion — mirrors country-tab behaviour.
       shiny::observeEvent(input$techs, {
@@ -608,6 +696,57 @@ hglobe_module_server <- function(id, con) {
           alias, axis)
       }
 
+      # ---------------------------------------------------------------------
+      # SQL fragment for the HiGGlo city filter + capital-fallback toggle.
+      # Both controls live in the GLOBAL FILTERS section of the sidebar
+      # and are applied at the countrymap join (so they affect Gen 0 and
+      # every subsequent generation identically).
+      #
+      # Args
+      #   alias              SQL alias of the countrymap row to filter
+      #                       (e.g. "c" inside the gen-0 join, "cm" inside
+      #                       the gen-N candidate join).
+      #   selected_cities    character vector from input$city. The
+      #                       "No city filter" sentinel disables the
+      #                       city restriction entirely.
+      #   include_fallback   logical from input$include_fallback. TRUE
+      #                       keeps capital-fallback rows; FALSE drops
+      #                       any row with geocode_missing = TRUE.
+      #
+      # Returns a string starting with "AND ..." (or "" if no filtering),
+      # safe to concatenate after an existing WHERE in any countrymap
+      # join.
+      # ---------------------------------------------------------------------
+      build_city_filter_sql <- function(alias,
+                                        selected_cities,
+                                        include_fallback) {
+        clauses <- character(0)
+
+        # City whitelist
+        if (length(selected_cities) > 0L &&
+            !"No city filter" %in% selected_cities) {
+          # Drop the sentinel if the user picked it alongside real
+          # cities, keep only the actual city names. SQL-quote each.
+          cs <- setdiff(selected_cities, "No city filter")
+          if (length(cs) > 0L) {
+            quoted <- paste0("'", gsub("'", "''", cs, fixed = TRUE),
+                             "'", collapse = ", ")
+            clauses <- c(clauses,
+                         sprintf("%s.city IN (%s)", alias, quoted))
+          }
+        }
+
+        # Capital-fallback exclusion (default)
+        if (!isTRUE(include_fallback)) {
+          clauses <- c(clauses,
+                       sprintf("(NOT %s.geocode_missing)", alias))
+        }
+
+        if (length(clauses) == 0L) "" else paste("AND",
+                                                 paste(clauses,
+                                                       collapse = " AND "))
+      }
+
       # Build the SAMPLE / ORDER BY clause appended to the row source
       # being sampled. The same logic is shared between the gen-0
       # selection (filtered docdb x ctry universe) and the per-edge
@@ -774,22 +913,43 @@ hglobe_module_server <- function(id, con) {
         # and (b) pull the chosen flow value for each (docdb, ctry) alongside
         # the row for marker sizing. MAX() aggregates across duplicate
         # appln_ids per (docdb, ctry), giving one row per pair.
-        passing_tbl <- sprintf("hglobe_passing_tmp_%s", tok)
-        toflow_col  <- input$toflow
+        #
+        # The countrymap join is folded INTO this CTE so the city /
+        # capital-fallback filters apply before sampling and the stats
+        # rollups below — without that, "Avg flow (sample)" would still
+        # be computed against the unfiltered universe.
+        passing_tbl  <- sprintf("hglobe_passing_tmp_%s", tok)
+        toflow_col   <- input$toflow
+        city_filter  <- build_city_filter_sql(
+          "c",
+          selected_cities  = input$city,
+          include_fallback = isTRUE(input$include_fallback)
+        )
+        jit_lat_pass <- jitter_expr("c", "lat")
+        jit_lon_pass <- jitter_expr("c", "lon")
         passing_sql <- glue::glue("
           passing AS (
             SELECT p.docdb_family_id,
                    p.ctry_code,
                    MAX(p.{toflow_col}) AS toflow_val,
                    MAX(p.pv)             AS pv_val,
-                   ANY_VALUE(p.appln_id) AS appln_id
+                   ANY_VALUE(p.appln_id) AS appln_id,
+                   ANY_VALUE(c.city)    AS city,
+                   ANY_VALUE({jit_lat_pass}) AS lat,
+                   ANY_VALUE({jit_lon_pass}) AS lon,
+                   BOOL_OR(c.geocode_missing) AS geocode_missing
             FROM full_patent_database p
             {if (has_tech) 'INNER JOIN filtered_tech ft ON p.docdb_family_id = ft.docdb_family_id' else ''}
             {if (has_firm) 'INNER JOIN filtered_firm ff ON p.docdb_family_id = ff.docdb_family_id' else ''}
+            INNER JOIN countrymap c
+              ON c.docdb_family_id = p.docdb_family_id
+             AND c.ctry_code       = p.ctry_code
             WHERE p.ctry_code IN ({country_sql})
               AND p.{toflow_col} IS NOT NULL
+              AND c.lat IS NOT NULL AND c.lon IS NOT NULL
               {granted_clause}
               {multifam_clause}
+              {city_filter}
             GROUP BY p.docdb_family_id, p.ctry_code
           )")
         ctes <- c(ctes, passing_sql)
@@ -842,37 +1002,23 @@ hglobe_module_server <- function(id, con) {
         avg_pv_pop      <- agg_pop$avg_pv
         avg_pv_sample   <- agg_smp$avg_pv
 
-        # Sample over the filtered set, then join countrymap for geo. The
-        # SAMPLE clause goes inside a subquery because DuckDB's parser won't
-        # accept USING SAMPLE between FROM and an explicit JOIN, and sampling
-        # BEFORE the join ensures each (docdb, ctry) gets an independent
-        # inclusion decision regardless of how many rows the countrymap join
-        # produces downstream.
-        #   sample_clause is one of:
+        # passing_tbl already carries city / lat / lon / geocode_missing
+        # because the countrymap join + city + capital-fallback filters
+        # were folded into the `passing` CTE above. The final read is
+        # therefore just a sample applied to the prepared table.
+        # Jitter on lat/lon was likewise computed inside `passing` via
+        # jitter_expr("c", ...), so frontier_tbl(0) inherits the exact
+        # same per-(docdb, ctry) offset used by every later generation.
+        # sample_clause is one of:
         #     "USING SAMPLE <pct> PERCENT (bernoulli)"           (Percent)
         #     "USING SAMPLE <n> ROWS (reservoir)"                (Number)
         #     "ORDER BY toflow_val DESC NULLS LAST LIMIT <n>"    (Top)
-        # Jitter is applied at the countrymap join so the seed table we
-        # persist (frontier_tbl(0)) carries jittered lat/lon. Any
-        # downstream consumer that joins back to this table — including
-        # the citation arcs in do_one_generation — automatically gets the
-        # same offset for the same (docdb, ctry).
-        jit_lat_c <- jitter_expr("c", "lat")
-        jit_lon_c <- jitter_expr("c", "lon")
         sql <- sprintf("
-          SELECT p.docdb_family_id, p.ctry_code, p.toflow_val, p.appln_id,
-                 c.city,
-                 %s AS lat,
-                 %s AS lon,
-                 c.geocode_missing
-          FROM (
-            SELECT * FROM %s %s
-          ) p
-          INNER JOIN countrymap c
-            ON c.docdb_family_id = p.docdb_family_id
-           AND c.ctry_code       = p.ctry_code
-          WHERE c.lat IS NOT NULL AND c.lon IS NOT NULL
-        ", jit_lat_c, jit_lon_c, passing_tbl, sample_clause)
+          SELECT docdb_family_id, ctry_code, toflow_val, appln_id,
+                 city, lat, lon, geocode_missing
+          FROM %s
+          %s
+        ", passing_tbl, sample_clause)
 
         dat <- tryCatch(
           DBI::dbGetQuery(con, sql),
@@ -1041,6 +1187,14 @@ hglobe_module_server <- function(id, con) {
         # the new frontier we persist below — already carries jittered
         # coordinates; arc endpoints in the next iteration land exactly
         # on the markers we draw.
+        #
+        # IMPORTANT: NONE of the GLOBAL FILTERS (country / firm / techs /
+        # granted_only / multifam_only / city / include_fallback) are
+        # applied here. They constrain the *seed* set only — citations
+        # from gen 0 are free to lead anywhere. The only conditions on
+        # this query are data-validity (NOT NULL coordinates and a
+        # sizeable flow value), which are required for any docdb to be
+        # drawable at all.
         jit_lat_cm <- jitter_expr("cm", "lat")
         jit_lon_cm <- jitter_expr("cm", "lon")
         sql_candidates <- glue::glue("

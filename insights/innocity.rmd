@@ -1,0 +1,1787 @@
+---
+title: "City-level innovation spillovers: global vs. LMICs (excl. China)"
+author: "Innovation Strategy Explorer — insights"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    self_contained: true
+    toc: true
+    toc_depth: 2
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      fig.width = 12, fig.height = 7.5, dpi = 150)
+
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(ggrepel)
+library(DBI)
+library(duckdb)
+library(htmltools)
+```
+
+## What this note shows
+
+For every city in the app's `countrymap`, two per-city averages are
+computed:
+
+* **Average Global Spillover** — the mean of `ev_global` (Watson average
+  global spillover per patent family) across all docdbs mapped to the
+  city.
+* **Average Spillover to LMICs (excl. China)** — the mean of
+  `ev_emdenocn` across the same docdbs, i.e. the share of those
+  spillovers that land in low- and middle-income countries other than
+  China.
+
+The scatter plot below shows one dot per city. A linear trend line
+summarises the overall relationship; the largest cities (by patent
+count) are highlighted, and a hand-picked list of LMIC / mid-tier
+cities is always labelled regardless of size.
+
+```{r data}
+# Locate inst/extdata regardless of where the Rmd is rendered from.
+find_extdata <- function(file) {
+  cand <- c(
+    system.file("extdata", file, package = "innovationStrategyExplorer"),
+    file.path("..", "inst", "extdata", file),
+    file.path("inst", "extdata", file)
+  )
+  hit <- cand[nzchar(cand) & file.exists(cand)]
+  if (!length(hit)) stop("Could not locate ", file)
+  normalizePath(hit[[1]], winslash = "/")
+}
+pdb_path <- find_extdata("patent_database.parquet")
+cm_path  <- find_extdata("countrymap.parquet")
+pxt_path <- find_extdata("patents_x_tech.parquet")
+tl_path  <- find_extdata("tech_lookup.parquet")
+
+# Pull the per-city averages directly from DuckDB so we never hold the
+# 28 M-row patent_database in R memory. We:
+#   1. Collapse patent_database to one row per docdb_family_id (ev_*
+#      values don't vary across countries within a family).
+#   2. Tag each docdb as Green Technology if any of its
+#      patents_x_tech rows resolve to either tech_group = "Green
+#      Technology" OR technology = "Green Technology" — same logic
+#      the Country Explorer's tech filter uses, so the share matches
+#      what HiGGlo / Country Explorer "Green Technology" filtering
+#      would produce.
+#   3. Join countrymap to attach the city + capital-fallback flag.
+#   4. Drop capital-fallback rows (geocode_missing = TRUE) — those
+#      entries are positioned at the country's capital simply because
+#      no real address survived geocoding, so they would inflate the
+#      patent count of the wrong city.
+#   5. Aggregate per city: n_docdbs, n_green, avg ev_global overall,
+#      avg ev_global on the green subset, avg ev_emdenocn overall.
+con <- dbConnect(duckdb::duckdb())
+city_stats <- dbGetQuery(con, sprintf("
+  WITH
+    p AS (SELECT * FROM read_parquet('%s')),
+    cm AS (
+      SELECT * FROM read_parquet('%s')
+      WHERE geocode_missing = FALSE
+        AND city IS NOT NULL
+        AND city <> ''
+    ),
+    pxt AS (SELECT * FROM read_parquet('%s')),
+    tl  AS (SELECT * FROM read_parquet('%s')),
+    -- Distinct docdbs flagged green via tech_lookup. tech_group OR
+    -- technology so e.g. 'Battery Technology' (a sub-tech under the
+    -- Green Technology umbrella) also flips the flag.
+    green AS (
+      SELECT DISTINCT pxt.docdb_family_id
+      FROM pxt
+      JOIN tl ON tl.technology = pxt.technology
+      WHERE tl.tech_group = 'Green Technology'
+         OR pxt.technology = 'Green Technology'
+    ),
+    docdb AS (
+      SELECT
+        p.docdb_family_id,
+        ANY_VALUE(p.ev_global)   AS ev_global,
+        ANY_VALUE(p.ev_emdenocn) AS ev_emdenocn,
+        CASE WHEN MAX(g.docdb_family_id) IS NOT NULL THEN 1 ELSE 0 END
+                                  AS is_green
+      FROM p
+      LEFT JOIN green g ON g.docdb_family_id = p.docdb_family_id
+      WHERE p.ev_global IS NOT NULL
+      GROUP BY p.docdb_family_id
+    ),
+    docdb_city AS (
+      -- Each (docdb, ctry) row in countrymap gives one city to credit.
+      -- A single docdb may show up under multiple cities (multi-country
+      -- families); each city sees the docdb's full ev value, which is
+      -- the natural per-city interpretation.
+      SELECT DISTINCT cm.city, d.docdb_family_id,
+             d.ev_global, d.ev_emdenocn, d.is_green
+      FROM cm
+      JOIN docdb d ON d.docdb_family_id = cm.docdb_family_id
+    )
+  SELECT
+    city,
+    COUNT(DISTINCT docdb_family_id)                       AS n_docdbs,
+    SUM(is_green)                                         AS n_green,
+    AVG(ev_global)                                        AS avg_ev_global,
+    AVG(ev_emdenocn)                                      AS avg_ev_emdenocn,
+    AVG(CASE WHEN is_green = 1 THEN ev_global END)        AS avg_ev_global_green
+  FROM docdb_city
+  GROUP BY city
+", pdb_path, cm_path, pxt_path, tl_path))
+dbDisconnect(con, shutdown = TRUE)
+
+# Derived city-level features.
+#   share_green  = fraction of city's docdbs flagged Green Technology
+#   green_premium = avg_ev_global_green / avg_ev_global
+#                   - 1 means green docdbs match the city average
+#                   > 1 means green docdbs over-perform vs the city's
+#                     overall innovation footprint
+#                   NA when there are no green docdbs OR avg is 0
+city_stats <- city_stats |>
+  dplyr::mutate(
+    share_green   = ifelse(n_docdbs > 0L, n_green / n_docdbs, NA_real_),
+    green_premium = dplyr::if_else(
+      !is.na(avg_ev_global_green) &
+        !is.na(avg_ev_global) &
+        avg_ev_global != 0,
+      avg_ev_global_green / avg_ev_global,
+      NA_real_
+    )
+  )
+
+cat(sprintf(
+  "cities seen: %s   (median patents/city: %s, max: %s, share_green median: %.1f%%)\n",
+  format(nrow(city_stats),                                    big.mark = ","),
+  format(stats::median(city_stats$n_docdbs),                  big.mark = ","),
+  format(max(city_stats$n_docdbs),                            big.mark = ","),
+  100 * stats::median(city_stats$share_green, na.rm = TRUE)
+))
+```
+
+## City selection
+
+To stop the scatter from being dominated by tiny cities with one
+outlier patent, we keep only those with at least `min_patents`
+distinct patent families. **The hand-picked label set is always kept,
+regardless of size** — otherwise small LMIC cities (Belém has only ~14
+families, Luang Prabang fewer still) would be dropped from the plot
+and from the abstract-summary section before they can be flagged.
+
+The patent universe here is the **"All innovations"** view: every
+docdb in `patent_database` with a non-null `ev_global`, no tech
+filter and no granted-only filter. This matches the HiGGlo "All
+innovations" tab counts exactly — e.g. Belém: 14 families total,
+8 granted.
+
+```{r labels}
+min_patents <- 10L
+
+# Hand-picked cities. Each entry is a regex (case-insensitive) so we
+# can match common spelling variants — Belém vs Belem, Antalya vs
+# Antaya, etc.
+required_patterns <- c(
+  "Bogot[aá]",                       # Bogotá, Colombia
+  "Bel[eé]m",                        # Belém, Brazil
+  "Ibadan",                          # Ibadan, Nigeria
+  "Konya",                           # Konya, Turkey
+  "Antalya|Antaya",                  # Antalya, Turkey
+  "Sofia|Sofiya",                    # Sofia, Bulgaria
+  "Luang ?Prabang|Luangprabang|Luanpraban"  # Luang Prabang, Laos
+)
+required_re <- paste(required_patterns, collapse = "|")
+
+cities <- city_stats |>
+  dplyr::mutate(
+    is_required = grepl(required_re, city, ignore.case = TRUE)
+  ) |>
+  # Keep cities that EITHER pass the threshold OR are in the
+  # required label set. Without the OR-required clause, small LMIC
+  # cities get dropped before `is_required` even gets a chance to
+  # tag them.
+  dplyr::filter((n_docdbs >= min_patents) | is_required) |>
+  dplyr::filter(!is.na(avg_ev_global), !is.na(avg_ev_emdenocn)) |>
+  dplyr::mutate(
+    city_lc      = tolower(city),
+    rank_by_size = dplyr::min_rank(dplyr::desc(n_docdbs))
+  )
+
+cat(sprintf(
+  "after filter (>= %d patents OR in required list): %s cities kept (%.1f%% of all)\n",
+  min_patents,
+  format(nrow(cities),  big.mark = ","),
+  100 * nrow(cities) / nrow(city_stats)))
+
+big_n  <- 25L
+cities <- cities |>
+  dplyr::mutate(
+    is_big   = rank_by_size <= big_n,
+    label_me = is_required | is_big
+  )
+```
+
+```{r helper_links}
+# Helpers shared by the HiGGlo capture chunk, the HiGGlo PNG render
+# chunk, and the per-city summary render chunk. Defined once here so
+# all three sections produce the same URL / file paths and so the
+# render chunks can hyperlink even when `chromote` isn't installed.
+
+# Live app endpoint. Single source of truth — change here if the
+# Posit Connect URL ever moves.
+app_root <- "https://mondpanther-iseapp2.share.connect.posit.cloud/"
+
+# Build the bookmarked HiGGlo URL for a given city. Same shape Shiny
+# native bookmarks emit (each value is JSON, then URL-encoded). The
+# city literal is URL-encoded then wrapped in %22...%22 so accented
+# names like "Belém" survive UTF-8 round-tripping.
+build_higglo_url <- function(city) {
+  city_enc <- utils::URLencode(city, reserved = TRUE)
+  paste0(
+    app_root,
+    "?_inputs_",
+    "&hglobe-gen0_select_mode=%22Random%22",
+    "&hglobe-gen0_unit_mode=%22Number%22",
+    "&hglobe-edge_select_mode=%22Random%22",
+    "&hglobe-edge_unit_mode=%22Percent%22",
+    "&hglobe-render_map=1",
+    "&hglobe-next_step=1",
+    "&hglobe-sidebar=true",
+    "&navbar_page=%22HiGGlobe%22",
+    "&hglobe-country=%22All%20countries%22",
+    "&hglobe-firm=%22No%20firm%20filter%22",
+    "&hglobe-techs=%22All%20innovations%22",
+    "&hglobe-city=%22", city_enc, "%22",
+    "&hglobe-toflow=%22ev_global%22",
+    "&hglobe-granted_only=false",
+    "&hglobe-multifam_only=false",
+    "&hglobe-include_fallback=false",
+    "&hglobe-gen0_sample_val=100",
+    "&hglobe-edge_sample_val=100",
+    "&hglobe-add_generations=2",
+    "&hglobe-map_zoom=2",
+    "&hglobe-map_center=%7B%22lng%22%3A10%2C%22lat%22%3A20%7D"
+  )
+}
+
+# Filesystem-safe slug for the cached PNG.
+city_png_path <- function(city) {
+  slug <- gsub("[^A-Za-z0-9]+", "_", city)
+  slug <- gsub("^_|_$", "", slug)
+  file.path(cache_dir, sprintf("higglo_%s.png", slug))
+}
+
+# Markdown anchor pointing to the live HiGGlo view for a city.
+# `target="_blank"` so clicking doesn't navigate the user away from
+# the rendered insight HTML; arrow glyph signals "external link".
+higglo_link_md <- function(city) {
+  sprintf(
+    "<a href='%s' target='_blank' rel='noopener'>Open %s on HiGGlo &rarr;</a>",
+    build_higglo_url(city), city
+  )
+}
+
+# Quick visibility check: report whether each required city was found.
+required_check <- tibble::tibble(
+  pattern = required_patterns,
+  matches = vapply(required_patterns, function(p) {
+    paste(cities$city[grepl(p, cities$city, ignore.case = TRUE)],
+          collapse = ", ")
+  }, character(1))
+)
+required_check
+```
+
+## Scatter plot
+
+```{r scatter, fig.width=12, fig.height=8}
+# Background dots = every city. Highlighted dots overlay the big-city
+# anchors and the required-label set so they pop out.
+base_size <- 1.4
+hi_size   <- 3.2
+
+p <- ggplot(cities,
+            aes(x = avg_ev_global, y = avg_ev_emdenocn)) +
+  # Background cloud
+  geom_point(aes(size = n_docdbs),
+             colour = "#a8a8a8", alpha = 0.35) +
+  # Linear trend across all kept cities
+  geom_smooth(method = "lm", formula = y ~ x,
+              colour = "#1f77b4", fill = "#1f77b4", alpha = 0.15,
+              linewidth = 0.7) +
+  # Big-city anchors (orange)
+  geom_point(data = subset(cities, is_big & !is_required),
+             colour = "#ff7f0e", size = hi_size, alpha = 0.9) +
+  # Required label set (red)
+  geom_point(data = subset(cities, is_required),
+             colour = "#d62728", size = hi_size + 0.6, alpha = 0.95) +
+  # Repel labels for both sets, drawn together so the layout solver
+  # avoids the highlighted dots regardless of category.
+  ggrepel::geom_text_repel(
+    data            = subset(cities, label_me),
+    aes(label = city,
+        colour      = is_required),
+    size            = 3.4,
+    fontface        = "bold",
+    box.padding     = 0.45,
+    point.padding   = 0.35,
+    min.segment.length = 0,
+    segment.colour  = "grey50",
+    segment.size    = 0.3,
+    max.overlaps    = Inf,
+    show.legend     = FALSE
+  ) +
+  scale_colour_manual(values = c(`TRUE` = "#d62728", `FALSE` = "#333333")) +
+  scale_size_continuous(
+    name   = "Patent families per city",
+    range  = c(0.6, 8),
+    breaks = c(50, 500, 5000, 50000),
+    labels = scales::label_comma()
+  ) +
+  scale_x_continuous(labels = scales::label_number(accuracy = 0.01)) +
+  scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
+  labs(
+    title    = "City-level innovation spillovers",
+    subtitle = sprintf(
+      "All cities with >=%d patent families. Labelled: top %d by size + hand-picked LMIC / mid-tier cities.",
+      min_patents, big_n),
+    x        = "Average Global Spillover  (mean ev_global per city)",
+    y        = "Average Spillover to LMICs excl. China  (mean ev_emdenocn per city)",
+    caption  = "Each dot is one city. Trend line: OLS of LMICs-excl-China spillover on global spillover."
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title       = element_text(face = "bold"),
+    plot.subtitle    = element_text(colour = "#555"),
+    panel.grid.minor = element_blank(),
+    legend.position  = "right"
+  )
+
+print(p)
+```
+
+## Trend-line fit
+
+```{r fit}
+fit <- stats::lm(avg_ev_emdenocn ~ avg_ev_global, data = cities)
+fit_s <- summary(fit)
+cat(sprintf(
+  "OLS:  avg_ev_emdenocn = %.4f + %.4f * avg_ev_global\n  R^2 = %.3f, n = %d cities\n",
+  stats::coef(fit)[1L],
+  stats::coef(fit)[2L],
+  fit_s$r.squared,
+  nrow(cities)))
+```
+
+## Scatter: green-tech spillover vs overall spillover
+
+For every city we now have **two** average global-spillover numbers:
+the overall mean across all of its docdbs, and the mean restricted to
+docdbs flagged as Green Technology. Plotting them against each other
+shows whether a city's green innovations punch above or below its
+overall innovation-spillover footprint. The dashed grey line is the
+1:1 reference — points above it are cities whose green innovations
+generate higher-than-average global spillover for that city; points
+below sit on the other side of the gap.
+
+Cities with zero green docdbs drop out of this view automatically
+(no green mean to plot). The same big-city anchors and hand-picked
+LMIC cities are highlighted as in the first scatter.
+
+```{r scatter_green, fig.width=12, fig.height=8}
+cities_green <- cities |>
+  dplyr::filter(!is.na(avg_ev_global_green))
+
+axis_lim <- range(c(cities_green$avg_ev_global,
+                    cities_green$avg_ev_global_green),
+                  na.rm = TRUE, finite = TRUE)
+
+p_green <- ggplot(cities_green,
+                  aes(x = avg_ev_global, y = avg_ev_global_green)) +
+  # 1:1 reference line; anything above means green spillover beats
+  # the city's overall mean, anything below means it lags.
+  geom_abline(slope = 1, intercept = 0,
+              linetype = "dashed", colour = "#888888", linewidth = 0.5) +
+  # Background cloud, sized by the green-only docdb count so a city
+  # with 1 green family doesn't visually outweigh one with hundreds.
+  geom_point(aes(size = n_green),
+             colour = "#a8a8a8", alpha = 0.35) +
+  # OLS trend line over the city set
+  geom_smooth(method = "lm", formula = y ~ x,
+              colour = "#2ca02c", fill = "#2ca02c", alpha = 0.15,
+              linewidth = 0.7) +
+  # Big-city anchors (orange)
+  geom_point(data = subset(cities_green, is_big & !is_required),
+             colour = "#ff7f0e", size = hi_size, alpha = 0.9) +
+  # Required label set (red)
+  geom_point(data = subset(cities_green, is_required),
+             colour = "#d62728", size = hi_size + 0.6, alpha = 0.95) +
+  ggrepel::geom_text_repel(
+    data            = subset(cities_green, label_me),
+    aes(label = city, colour = is_required),
+    size            = 3.4,
+    fontface        = "bold",
+    box.padding     = 0.45,
+    point.padding   = 0.35,
+    min.segment.length = 0,
+    segment.colour  = "grey50",
+    segment.size    = 0.3,
+    max.overlaps    = Inf,
+    show.legend     = FALSE
+  ) +
+  scale_colour_manual(values = c(`TRUE` = "#d62728", `FALSE` = "#333333")) +
+  scale_size_continuous(
+    name   = "Green patent families per city",
+    range  = c(0.6, 8),
+    breaks = c(5, 50, 500, 5000),
+    labels = scales::label_comma()
+  ) +
+  scale_x_continuous(labels = scales::label_number(accuracy = 0.01),
+                     limits = axis_lim) +
+  scale_y_continuous(labels = scales::label_number(accuracy = 0.01),
+                     limits = axis_lim) +
+  coord_fixed() +
+  labs(
+    title    = "Green-tech spillover vs overall spillover, per city",
+    subtitle = sprintf(
+      "All cities with >=%d patent families and at least one Green Technology family. Dashed line: 1:1.",
+      min_patents),
+    x        = "Average Global Spillover  (mean ev_global, all docdbs)",
+    y        = "Average Global Spillover  (mean ev_global, Green Tech only)",
+    caption  = "Each dot is one city. Trend line: OLS of green-only on overall city mean."
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title       = element_text(face = "bold"),
+    plot.subtitle    = element_text(colour = "#555"),
+    panel.grid.minor = element_blank(),
+    legend.position  = "right"
+  )
+
+print(p_green)
+```
+
+```{r fit_green}
+fit_green <- stats::lm(avg_ev_global_green ~ avg_ev_global,
+                       data = cities_green)
+fit_green_s <- summary(fit_green)
+cat(sprintf(
+  "OLS:  avg_ev_global_green = %.4f + %.4f * avg_ev_global\n  R^2 = %.3f, n = %d cities\n",
+  stats::coef(fit_green)[1L],
+  stats::coef(fit_green)[2L],
+  fit_green_s$r.squared,
+  nrow(cities_green)))
+
+cat(sprintf(
+  "Cities where green > overall: %s of %s (%.1f%%)\n",
+  format(sum(cities_green$avg_ev_global_green > cities_green$avg_ev_global,
+             na.rm = TRUE),
+         big.mark = ","),
+  format(nrow(cities_green), big.mark = ","),
+  100 * mean(cities_green$avg_ev_global_green > cities_green$avg_ev_global,
+             na.rm = TRUE)
+))
+```
+
+## Top-of-table view
+
+```{r toptable}
+fmt_pct <- function(x, digits = 1) {
+  ifelse(is.na(x), NA_character_,
+         paste0(formatC(100 * x, format = "f", digits = digits), "%"))
+}
+fmt_num <- function(x, digits = 3) {
+  ifelse(is.na(x), NA_character_,
+         formatC(x, format = "f", digits = digits))
+}
+
+top_for_table <- cities |>
+  dplyr::arrange(dplyr::desc(n_docdbs)) |>
+  dplyr::slice_head(n = 30L) |>
+  dplyr::transmute(
+    city,
+    `# patents`               = n_docdbs,
+    `# green`                 = n_green,
+    `Share green`             = fmt_pct(share_green),
+    `Avg ev_global`           = fmt_num(avg_ev_global,       3),
+    `Avg ev_global (green)`   = fmt_num(avg_ev_global_green, 3),
+    `Green premium`           = fmt_num(green_premium,       2),
+    `Avg ev_emdenocn (LMICs)` = fmt_num(avg_ev_emdenocn,     3)
+  )
+
+required_for_table <- cities |>
+  dplyr::filter(is_required) |>
+  dplyr::arrange(dplyr::desc(n_docdbs)) |>
+  dplyr::transmute(
+    city,
+    `# patents`               = n_docdbs,
+    `# green`                 = n_green,
+    `Share green`             = fmt_pct(share_green),
+    `Avg ev_global`           = fmt_num(avg_ev_global,       3),
+    `Avg ev_global (green)`   = fmt_num(avg_ev_global_green, 3),
+    `Green premium`           = fmt_num(green_premium,       2),
+    `Avg ev_emdenocn (LMICs)` = fmt_num(avg_ev_emdenocn,     3)
+  )
+```
+
+### 30 largest cities
+
+`Share green` is the fraction of the city's `# patents` that are
+flagged as Green Technology (via `tech_lookup.tech_group = "Green
+Technology"` or `technology = "Green Technology"`). `Green premium`
+is `Avg ev_global (green) / Avg ev_global` — values **greater than
+1** mean the city's green innovations have higher-than-average global
+spillover for that city.
+
+```{r toptable_render}
+knitr::kable(top_for_table, format = "html",
+             format.args = list(big.mark = ","),
+             align = c("l", rep("r", ncol(top_for_table) - 1L))) |>
+  kableExtra::kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  )
+```
+
+### Hand-picked label set
+
+```{r requiredtable_render}
+knitr::kable(required_for_table, format = "html",
+             format.args = list(big.mark = ","),
+             align = c("l", rep("r", ncol(required_for_table) - 1L))) |>
+  kableExtra::kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  )
+```
+
+## Patent abstracts and OpenAI summaries
+
+For each highlighted city, we retrieve the top-N patent applications
+(ranked by `ev_global`) via the EPO Open Patent Services (OPS) API,
+then ask `gpt-4o-mini` to summarise the technological themes that
+emerge from the titles + abstracts.
+
+This section reuses the EPO/OPS plumbing from
+`insights/patent_cluster_compare.Rmd`. Two API keys are required as
+environment variables; if either is missing the section short-circuits
+to a warning rather than failing the knit.
+
+```{r summary_setup, results='asis'}
+have_ops <- nchar(Sys.getenv("OPS_CONSUMER_KEY",    unset = "")) > 0 &&
+            nchar(Sys.getenv("OPS_CONSUMER_SECRET", unset = "")) > 0
+have_oai <- nchar(Sys.getenv("OPENAI_API_KEY",      unset = "")) > 0
+
+if (!have_ops || !have_oai) {
+  cat(
+    "<div style='padding:12px;border:1px solid #d62728;",
+    "background:#fff3f3;border-radius:6px;color:#600;'>",
+    "<b>Skipping abstract fetch + summarisation.</b> ",
+    "Set the following environment variables before knitting to enable ",
+    "this section: <code>OPS_CONSUMER_KEY</code>, ",
+    "<code>OPS_CONSUMER_SECRET</code>, <code>OPENAI_API_KEY</code>.",
+    "</div>",
+    sep = "")
+}
+```
+
+```{r summary_helpers, eval = have_ops && have_oai}
+# --- Configuration --------------------------------------------------------
+# Which cities get full abstract fetch + summary. Defaults to just the
+# hand-picked LMIC / mid-tier list (those have a few hundred patents at
+# most — practical for OPS). Add `cities$city[cities$is_big]` here if
+# you also want summaries for the top-25 by size; expect the OPS
+# fetch to take much longer in that case.
+cities_to_summarise <- cities |>
+  dplyr::filter(is_required) |>
+  dplyr::pull(city)
+
+# Cap per city. ev_global ranks docdbs from highest to lowest; we ask
+# OPS for at most `max_per_city` of each city's patents. Keeps the
+# fetch budget bounded for huge cities and prevents Luang Prabang's
+# tiny universe from being silently extended past what it actually
+# has.
+max_per_city <- 75L
+
+cache_dir <- ".bigdata/innocity"
+if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
+
+# --- Libraries (only loaded for this section) -----------------------------
+library(httr2)
+library(xml2)
+library(jsonlite)
+library(stringr)
+library(digest)
+library(purrr)
+library(tibble)
+
+# --- EPO OPS helpers (ported from patent_cluster_compare.Rmd) -------------
+ns_epo <- c(ex = "http://www.epo.org/exchange", ops = "http://ops.epo.org")
+
+extract_en_abstract <- function(doc) {
+  abs_nodes <- xml2::xml_find_all(doc, ".//ex:abstract", ns_epo)
+  if (length(abs_nodes) == 0) return(NA_character_)
+  langs <- xml2::xml_attr(abs_nodes, "lang")
+  en <- abs_nodes[!is.na(langs) & langs == "en"]
+  node <- if (length(en) > 0) en[[1]] else abs_nodes[[1]]
+  p_nodes <- xml2::xml_find_all(node, ".//ex:p", ns_epo)
+  text <- if (length(p_nodes) > 0)
+    paste(xml2::xml_text(p_nodes), collapse = " ")
+  else xml2::xml_text(node)
+  text <- stringr::str_squish(text)
+  if (nchar(text) < 10) NA_character_ else text
+}
+
+extract_en_title <- function(doc) {
+  title_nodes <- xml2::xml_find_all(doc, ".//ex:invention-title", ns_epo)
+  if (length(title_nodes) == 0) return(NA_character_)
+  langs <- xml2::xml_attr(title_nodes, "lang")
+  en <- title_nodes[!is.na(langs) & langs == "en"]
+  node <- if (length(en) > 0) en[[1]] else title_nodes[[1]]
+  stringr::str_squish(xml2::xml_text(node))
+}
+
+parse_app_number <- function(x) {
+  m <- stringr::str_match(x, "^([A-Z]{2,4})(\\d.*)$")
+  tibble::tibble(raw = x, country = m[, 2], docnumber = m[, 3])
+}
+
+make_token_manager <- function(ops_key, ops_secret, initial_token) {
+  env <- new.env()
+  env$token      <- initial_token
+  env$expires_at <- Sys.time() + 15 * 60
+  env$refresh <- function() {
+    resp <- httr2::request("https://ops.epo.org/3.2/auth/accesstoken") |>
+      httr2::req_auth_basic(ops_key, ops_secret) |>
+      httr2::req_body_form(grant_type = "client_credentials") |>
+      httr2::req_perform()
+    env$token      <- httr2::resp_body_json(resp)$access_token
+    env$expires_at <- Sys.time() + 15 * 60
+  }
+  env$get <- function() {
+    if (Sys.time() > env$expires_at) env$refresh()
+    env$token
+  }
+  env
+}
+
+make_ops_request <- function(token_mgr, max_retries = 15) {
+  function(url) {
+    for (attempt in seq_len(max_retries + 1)) {
+      resp <- httr2::request(url) |>
+        httr2::req_headers(Authorization = paste("Bearer", token_mgr$get()),
+                           Accept        = "application/xml") |>
+        httr2::req_error(is_error = \(resp) FALSE) |>
+        httr2::req_perform()
+      status <- httr2::resp_status(resp)
+      throttle_hdr <- httr2::resp_header(resp, "X-Throttling-Control")
+      if (!is.null(throttle_hdr) &&
+          grepl("overloaded", throttle_hdr, ignore.case = TRUE)) {
+        Sys.sleep(60); next
+      }
+      if (status %in% c(401, 403)) { token_mgr$refresh(); Sys.sleep(5); next }
+      if (status %in% c(429, 500, 502, 503, 504)) { Sys.sleep(60); next }
+      if (status >= 400) return(NULL)
+      return(httr2::resp_body_xml(resp))
+    }
+    NULL
+  }
+}
+
+# Pull applicant names out of an OPS biblio XML doc. Mirrors the
+# patent_cluster_compare.Rmd `extract_applicants()` but returns just a
+# `;`-joined string of names (we'll explode + harmonise later); we
+# don't need the per-applicant types here.
+extract_applicants <- function(doc) {
+  app_nodes <- xml2::xml_find_all(doc,
+    ".//ex:applicant[@data-format='docdb']", ns_epo)
+  if (length(app_nodes) == 0L) {
+    app_nodes <- xml2::xml_find_all(doc, ".//ex:applicant", ns_epo)
+  }
+  if (length(app_nodes) == 0L) return(NA_character_)
+  names_vec <- vapply(app_nodes, function(node) {
+    name_nodes <- xml2::xml_find_all(node, ".//ex:applicant-name", ns_epo)
+    if (length(name_nodes) == 0L) return(NA_character_)
+    langs <- xml2::xml_attr(name_nodes, "lang")
+    en <- name_nodes[!is.na(langs) & langs == "en"]
+    nm <- if (length(en) > 0L) en[[1]] else name_nodes[[1]]
+    stringr::str_squish(xml2::xml_text(nm))
+  }, character(1))
+  names_vec <- unique(names_vec[!is.na(names_vec) & nzchar(names_vec)])
+  if (length(names_vec) == 0L) return(NA_character_)
+  paste(names_vec, collapse = "; ")
+}
+
+fetch_one_patent <- function(raw_id, ops_request) {
+  search_url <- paste0(
+    "https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=pn%3D",
+    raw_id
+  )
+  doc <- tryCatch(ops_request(search_url), error = function(e) NULL)
+  if (is.null(doc)) return(tibble::tibble(title = NA_character_,
+                                          abstract = NA_character_,
+                                          applicant_names = NA_character_))
+  tibble::tibble(
+    title           = extract_en_title(doc),
+    abstract        = extract_en_abstract(doc),
+    applicant_names = extract_applicants(doc)
+  )
+}
+
+fetch_for_city <- function(city_label, appln_ids, token_mgr,
+                            cache_file, sleep_between = 1.5) {
+  if (file.exists(cache_file)) {
+    return(readRDS(cache_file))
+  }
+  ops_request <- make_ops_request(token_mgr)
+  out <- vector("list", length(appln_ids))
+  for (i in seq_along(appln_ids)) {
+    if (i %% 10 == 0) message("    [", city_label, "] ", i, "/",
+                              length(appln_ids))
+    out[[i]] <- tryCatch(
+      fetch_one_patent(appln_ids[i], ops_request),
+      error = function(e) tibble::tibble(title = NA_character_,
+                                         abstract = NA_character_))
+    Sys.sleep(sleep_between)
+  }
+  res <- dplyr::bind_cols(
+    tibble::tibble(appln_id = appln_ids),
+    dplyr::bind_rows(out)
+  )
+  saveRDS(res, cache_file)
+  res
+}
+
+# --- OpenAI chat helper ---------------------------------------------------
+chat_completion <- function(prompt, api_key, model = "gpt-4o-mini",
+                            temperature = 0.2, max_tokens = 700) {
+  resp <- httr2::request("https://api.openai.com/v1/chat/completions") |>
+    httr2::req_headers(Authorization = paste("Bearer", api_key),
+                       `Content-Type` = "application/json") |>
+    httr2::req_body_json(list(
+      model = model,
+      messages = list(list(role = "user", content = prompt)),
+      temperature = temperature,
+      max_tokens = max_tokens
+    )) |>
+    httr2::req_perform()
+  httr2::resp_body_json(resp)$choices[[1]]$message$content
+}
+```
+
+```{r summary_get_appln_ids, eval = have_ops && have_oai}
+# For each city to summarise, query DuckDB for the top-N patents by
+# ev_global. We rejoin patent_database (for ev_global + appln_id) with
+# countrymap (filtered to the chosen city, geocode_missing = FALSE).
+# DISTINCT ON keeps one row per docdb_family_id — multi-country
+# families would otherwise show up multiple times.
+con <- dbConnect(duckdb::duckdb())
+
+city_top_apps <- purrr::map_dfr(cities_to_summarise, function(target_city) {
+  q <- sprintf("
+    WITH
+      p  AS (SELECT * FROM read_parquet('%s')),
+      cm AS (
+        SELECT * FROM read_parquet('%s')
+        WHERE city = '%s' AND geocode_missing = FALSE
+      ),
+      docdb AS (
+        SELECT
+          p.docdb_family_id,
+          ANY_VALUE(p.appln_id)  AS appln_id,
+          ANY_VALUE(p.ev_global) AS ev_global
+        FROM p
+        WHERE p.ev_global IS NOT NULL
+          AND p.docdb_family_id IN (SELECT docdb_family_id FROM cm)
+        GROUP BY p.docdb_family_id
+      )
+    SELECT appln_id, ev_global
+    FROM docdb
+    WHERE appln_id IS NOT NULL
+    ORDER BY ev_global DESC NULLS LAST
+    LIMIT %d
+  ",
+    pdb_path, cm_path,
+    gsub("'", "''", target_city, fixed = TRUE),
+    max_per_city)
+  res <- dbGetQuery(con, q)
+  res$city <- target_city
+  res
+})
+
+dbDisconnect(con, shutdown = TRUE)
+
+cat(sprintf("Will fetch up to %d patents for each of %d cities (total: %d).\n",
+            max_per_city,
+            length(cities_to_summarise),
+            nrow(city_top_apps)))
+```
+
+```{r summary_fetch_abstracts, eval = have_ops && have_oai}
+# Authenticate once; the token manager auto-refreshes during the run.
+ops_key    <- Sys.getenv("OPS_CONSUMER_KEY")
+ops_secret <- Sys.getenv("OPS_CONSUMER_SECRET")
+token_resp <- httr2::request("https://ops.epo.org/3.2/auth/accesstoken") |>
+  httr2::req_auth_basic(ops_key, ops_secret) |>
+  httr2::req_body_form(grant_type = "client_credentials") |>
+  httr2::req_perform()
+initial_token <- httr2::resp_body_json(token_resp)$access_token
+token_mgr <- make_token_manager(ops_key, ops_secret, initial_token)
+
+city_abstracts <- city_top_apps |>
+  dplyr::group_by(city) |>
+  dplyr::group_modify(~{
+    cache_key <- digest::digest(
+      list(.y$city, sort(.x$appln_id), max_per_city), algo = "md5")
+    cache_file <- file.path(
+      cache_dir,
+      sprintf("ops_%s_%s.rds",
+              gsub("[^A-Za-z0-9]", "_", .y$city),
+              substr(cache_key, 1L, 8L))
+    )
+    fetched <- fetch_for_city(.y$city, .x$appln_id, token_mgr, cache_file)
+    dplyr::left_join(.x, fetched, by = "appln_id")
+  }) |>
+  dplyr::ungroup()
+
+# Coverage report: how many abstracts came back per city.
+city_abstracts |>
+  dplyr::group_by(city) |>
+  dplyr::summarise(
+    requested = dplyr::n(),
+    titles    = sum(!is.na(title)),
+    abstracts = sum(!is.na(abstract)),
+    .groups   = "drop"
+  )
+```
+
+```{r summary_call_openai, eval = have_ops && have_oai}
+# Two summaries per city are produced:
+#   * "all"  — every fetched patent that returned usable text from
+#              OPS (titles and / or abstracts).
+#   * "top"  — the subset whose ev_global is strictly above the
+#              MEDIAN of the fetched set. With max_per_city = 75 this
+#              is roughly the top 35-37 patents per city, i.e. the
+#              very best of the best by global spillover.
+# Both summaries are cached separately, so adding the "top" cut here
+# does not invalidate the existing all-fetched cache.
+openai_key <- Sys.getenv("OPENAI_API_KEY")
+
+build_prompt <- function(city, df, scope_label = "all") {
+  texts <- df |>
+    dplyr::filter(!is.na(title) | !is.na(abstract)) |>
+    dplyr::mutate(
+      tt = dplyr::if_else(is.na(title),    "(no title)",    title),
+      ab = dplyr::if_else(is.na(abstract),
+                          "(no abstract)",
+                          stringr::str_trunc(abstract, 1200))
+    ) |>
+    dplyr::transmute(line = sprintf("- %s :: %s", tt, ab))
+
+  scope_blurb <- if (identical(scope_label, "top")) {
+    paste0(
+      "These are the patents whose `ev_global` Watson spillover is ",
+      "ABOVE the median of the fetched set for this city — i.e. the ",
+      "top half by global spillover."
+    )
+  } else {
+    paste0(
+      "These are the up to ", max_per_city, " highest-ev_global ",
+      "patents fetched for this city."
+    )
+  }
+
+  paste0(
+    "You are summarising the technological focus of patents associated ",
+    "with one city in the Innovation Strategy Explorer database. ",
+    scope_blurb, " The inventor address resolved to ", city, ".\n\n",
+    "Patents:\n",
+    paste(texts$line, collapse = "\n"),
+    "\n\n",
+    "Write a concise summary (~150-200 words) for ", city, " covering:\n",
+    "  1. The two or three dominant technological themes,\n",
+    "  2. Anything distinctive about the mix (e.g. heavy concentration ",
+    "in one area, or surprising breadth),\n",
+    "  3. Notable patent applicants or institutions if any are inferable ",
+    "from the wording.\n",
+    "Use plain English. Do not list patents one by one. Do not invent ",
+    "facts that aren't supported by the abstracts."
+  )
+}
+
+# Helper: get-or-fetch a single OpenAI completion, keyed by a digest
+# of (city, scope, appln_ids, abstracts). Means changing the scope
+# does NOT invalidate the other scope's cache.
+get_or_fetch_summary <- function(city_label, scope_label, df) {
+  cache_file <- file.path(
+    cache_dir,
+    sprintf("oai_%s_%s_%s.rds",
+            gsub("[^A-Za-z0-9]", "_", city_label),
+            scope_label,
+            substr(digest::digest(list(df$appln_id, df$abstract,
+                                        max_per_city, scope_label),
+                                  algo = "md5"),
+                   1L, 8L))
+  )
+  if (file.exists(cache_file)) return(readRDS(cache_file))
+  out <- tryCatch(
+    chat_completion(build_prompt(city_label, df, scope_label),
+                    openai_key),
+    error = function(e) sprintf("OpenAI call failed: %s",
+                                conditionMessage(e))
+  )
+  saveRDS(out, cache_file)
+  out
+}
+
+city_summaries <- city_abstracts |>
+  dplyr::group_by(city) |>
+  dplyr::group_split() |>
+  purrr::map_dfr(function(df) {
+    city_label  <- df$city[[1L]]
+    has_text    <- !is.na(df$title) | !is.na(df$abstract)
+    n_with_text <- sum(has_text)
+
+    if (n_with_text < 3L) {
+      return(tibble::tibble(
+        city          = city_label,
+        n_used_all    = n_with_text,
+        n_used_top    = 0L,
+        median_ev     = NA_real_,
+        summary_all   = sprintf(
+          "Only %d patent(s) returned usable text from OPS — too few for a meaningful summary.",
+          n_with_text),
+        summary_top   = "Top-innovations summary skipped (insufficient text returned from OPS)."
+      ))
+    }
+
+    df_text <- df[has_text, , drop = FALSE]
+
+    # Median of the fetched set's ev_global — the universe we have
+    # text for. `> median` means strictly above (drops the median
+    # case so the two halves can't both include the same patent).
+    med_ev <- stats::median(df_text$ev_global, na.rm = TRUE)
+    df_top <- df_text |>
+      dplyr::filter(!is.na(ev_global) & ev_global > med_ev)
+
+    summary_all <- get_or_fetch_summary(city_label, "all", df_text)
+    summary_top <- if (nrow(df_top) < 3L) {
+      sprintf(
+        "Only %d patent(s) sit above the median ev_global for this city — too few to summarise separately.",
+        nrow(df_top))
+    } else {
+      get_or_fetch_summary(city_label, "top", df_top)
+    }
+
+    tibble::tibble(
+      city        = city_label,
+      n_used_all  = n_with_text,
+      n_used_top  = nrow(df_top),
+      median_ev   = med_ev,
+      summary_all = summary_all,
+      summary_top = summary_top
+    )
+  })
+
+city_summaries
+```
+
+```{r summary_render, eval = have_ops && have_oai, results='asis'}
+for (i in seq_len(nrow(city_summaries))) {
+  city_label  <- city_summaries$city[i]
+  n_all       <- city_summaries$n_used_all[i]
+  n_top       <- city_summaries$n_used_top[i]
+  med_ev      <- city_summaries$median_ev[i]
+  summary_all <- city_summaries$summary_all[i]
+  summary_top <- city_summaries$summary_top[i]
+
+  cat(sprintf("\n### %s\n\n", city_label))
+  cat(higglo_link_md(city_label), "\n\n", sep = "")
+
+  cat(sprintf("**All fetched patents** &mdash; %d with usable title/abstract text from OPS.\n\n",
+              n_all))
+  cat(summary_all, "\n\n")
+
+  med_str <- if (!is.na(med_ev))
+    sprintf(" (median ev_global = %.3f)", med_ev) else ""
+  cat(sprintf(
+    "**Top innovations only** &mdash; %d patents with `ev_global` above the median%s.\n\n",
+    n_top, med_str))
+  cat(summary_top, "\n\n")
+}
+```
+
+## Firm word cloud per city
+
+These wordclouds use the **harmonised firm data shipped with the
+Innovation Strategy Explorer** (`inst/extdata/patents_x_firm.parquet`)
+rather than EPO OPS applicants. That avoids the need for OPS API
+calls and a GPT harmonisation pass, and the names are already
+canonical. The trade-off: `patents_x_firm.parquet` is restricted to
+the **top-100 firms by patent count globally** (see
+`data-raw-2025/01-build-app-parquets.R`). Patents whose owners are
+not in that top-100 list contribute nothing to a city's wordcloud,
+which leaves smaller LMIC cities sparse or empty. Where that happens,
+the OPS-based wordclouds (in earlier git history) are the more
+inclusive view.
+
+Each wordcloud word is sized by how many patent families in the city
+are mapped to the firm. Colour encodes `firm_sector` from
+`firm_lookup.parquet` when available.
+
+```{r firms_local_query}
+library(ggwordcloud)
+
+# Resolve the bundle paths the same way the data chunk did. The
+# helper was defined inside the `data` chunk above, so it's already
+# in scope here, but redefining the path lookups locally keeps this
+# section readable on its own.
+pxf_path <- find_extdata("patents_x_firm.parquet")
+fl_path  <- find_extdata("firm_lookup.parquet")
+
+# All highlighted cities — same set used by the abstract summaries
+# and the HiGGlo PNG capture.
+cities_for_wc <- cities |>
+  dplyr::filter(is_required) |>
+  dplyr::arrange(dplyr::desc(n_docdbs)) |>
+  dplyr::pull(city)
+
+# One row per (city, firm) with patent-family count. We query
+# DuckDB directly so we don't have to materialise the full
+# patents_x_firm bridge in R memory. Firms are joined to
+# firm_lookup for the sector colour; LEFT JOIN so firms missing
+# from the lookup still render (with `firm_sector = NA`).
+con <- dbConnect(duckdb::duckdb())
+city_firms <- dbGetQuery(con, sprintf("
+  WITH
+    cm  AS (
+      SELECT * FROM read_parquet('%s')
+      WHERE geocode_missing = FALSE
+        AND city IS NOT NULL
+        AND city <> ''
+    ),
+    pxf AS (SELECT * FROM read_parquet('%s')),
+    fl  AS (SELECT * FROM read_parquet('%s'))
+  SELECT
+    cm.city,
+    pxf.firm,
+    fl.firm_sector,
+    COUNT(DISTINCT pxf.docdb_family_id) AS n
+  FROM pxf
+  JOIN cm ON cm.docdb_family_id = pxf.docdb_family_id
+  LEFT JOIN fl ON fl.firm = pxf.firm
+  WHERE cm.city IN (%s)
+  GROUP BY cm.city, pxf.firm, fl.firm_sector
+", cm_path, pxf_path, fl_path,
+   paste0("'", gsub("'", "''", cities_for_wc, fixed = TRUE), "'",
+          collapse = ", ")))
+dbDisconnect(con, shutdown = TRUE)
+
+# Top firms per city for the wordcloud.
+max_firms_per_city <- 30L
+city_firms <- city_firms |>
+  dplyr::group_by(city) |>
+  dplyr::slice_max(n, n = max_firms_per_city, with_ties = FALSE) |>
+  dplyr::ungroup() |>
+  dplyr::mutate(
+    firm_sector = dplyr::if_else(is.na(firm_sector) | firm_sector == "",
+                                 "Unclassified", firm_sector)
+  )
+
+cat(sprintf("city x firm rows kept: %s across %d cities (%d distinct sectors)\n",
+            format(nrow(city_firms), big.mark = ","),
+            dplyr::n_distinct(city_firms$city),
+            dplyr::n_distinct(city_firms$firm_sector)))
+```
+
+```{r firms_wordcloud, fig.width=10, fig.height=4.5}
+# Distinct sector colours. Sectors not in this palette fall back to
+# a neutral grey via the named-vector default.
+sector_palette <- c(
+  "Pharmaceuticals"      = "#377eb8",
+  "Chemicals"            = "#e41a1c",
+  "Electronics"          = "#4daf4a",
+  "Automotive"           = "#984ea3",
+  "Energy"               = "#ff7f00",
+  "Aerospace & Defense"  = "#a65628",
+  "Industrial"           = "#1b9e77",
+  "Consumer Goods"       = "#d95f02",
+  "Telecommunications"   = "#7570b3",
+  "Software"             = "#66a61e",
+  "Materials"            = "#e7298a",
+  "Unclassified"         = "#999999"
+)
+fallback_color <- "#777777"
+
+color_for_sector <- function(s) {
+  out <- sector_palette[s]
+  out[is.na(out)] <- fallback_color
+  unname(out)
+}
+
+# Loop city-by-city. One plot per city so individual labels can use
+# a much larger max_size; empty cities (no top-100 firms in the
+# patent set) get an italic placeholder. Cities are ordered by
+# patent count, biggest first.
+for (target_city in cities_for_wc) {
+  cnt <- city_firms |>
+    dplyr::filter(city == target_city)
+
+  if (nrow(cnt) == 0L) {
+    p <- ggplot() +
+      annotate(
+        "text", x = 0.5, y = 0.5,
+        label = paste0(
+          "No top-100 firms identified for ", target_city, ".\n",
+          "patents_x_firm.parquet only carries the global top 100 ",
+          "firms by patent count;\nLMIC cities often sit below that ",
+          "threshold."
+        ),
+        size = 4, fontface = "italic", colour = "#666"
+      ) +
+      labs(title = target_city) +
+      theme_void() +
+      theme(
+        plot.title  = element_text(size = 16, face = "bold",
+                                   hjust = 0.5,
+                                   margin = margin(b = 4)),
+        plot.margin = margin(2, 2, 2, 2)
+      ) +
+      xlim(0, 1) + ylim(0, 1)
+  } else {
+    cnt$colour <- color_for_sector(cnt$firm_sector)
+    p <- ggplot(cnt,
+                aes(label = firm, size = n, colour = I(colour))) +
+      ggwordcloud::geom_text_wordcloud_area(
+        rm_outside   = TRUE,
+        shape        = "square",
+        eccentricity = 1.4
+      ) +
+      scale_size_area(max_size = 50) +
+      labs(title = target_city) +
+      theme_void() +
+      theme(
+        plot.title  = element_text(size = 16, face = "bold",
+                                   hjust = 0.5,
+                                   margin = margin(b = 4)),
+        plot.margin = margin(2, 2, 2, 2)
+      )
+  }
+  print(p)
+}
+```
+
+```{r firms_wordcloud_legend, fig.width=10, fig.height=0.6}
+# Single colour-by-sector legend at the end of the section, showing
+# only the sectors that actually appear in any of the rendered
+# wordclouds.
+present_sectors <- intersect(names(sector_palette),
+                              unique(city_firms$firm_sector))
+if (length(present_sectors) > 0L) {
+  legend_df <- data.frame(
+    firm_sector = factor(present_sectors, levels = present_sectors),
+    x           = seq_along(present_sectors),
+    y           = 1
+  )
+  ggplot(legend_df,
+         aes(x, y, colour = firm_sector, label = firm_sector)) +
+    geom_point(size = 6) +
+    geom_text(nudge_x = 0.15, hjust = 0, size = 5, colour = "#222") +
+    scale_colour_manual(values = sector_palette[present_sectors],
+                        guide  = "none") +
+    coord_cartesian(xlim = c(0.5, length(present_sectors) + 1.5),
+                    ylim = c(0.5, 1.5)) +
+    theme_void() +
+    theme(plot.margin = margin(2, 2, 2, 2))
+}
+```
+
+```{r firms_table_render, results='asis'}
+# Top-10 firms per city in table form. Mirrors the previous
+# OPS-based table but uses the local firm names directly.
+top_firms_table <- city_firms |>
+  dplyr::group_by(city) |>
+  dplyr::arrange(dplyr::desc(n), firm, .by_group = TRUE) |>
+  dplyr::slice_head(n = 10L) |>
+  dplyr::mutate(rank = dplyr::row_number()) |>
+  dplyr::ungroup() |>
+  dplyr::transmute(
+    City        = city,
+    Rank        = rank,
+    Firm        = firm,
+    Sector      = firm_sector,
+    `# patents` = n
+  )
+
+if (nrow(top_firms_table) > 0L) {
+  knitr::kable(top_firms_table, format = "html",
+               align = c("l", "r", "l", "l", "r")) |>
+    kableExtra::kable_styling(
+      bootstrap_options = c("striped", "hover", "condensed"),
+      full_width = FALSE
+    )
+} else {
+  cat("<p><em>No firms identified for any of the highlighted cities ",
+      "in the top-100 firm subset.</em></p>", sep = "")
+}
+```
+
+```{r firms_legacy_block_dropped, eval = FALSE}
+# The previous OPS-derived wordcloud machinery
+# (assignee_helpers / assignee_pipeline / assignee_wordcloud /
+# assignee_wordcloud_legend / assignee_table_render) lived here and
+# was retired in favour of the local-firm path above. Kept as an
+# `eval = FALSE` placeholder so the chunk-level diff is contained;
+# the body remains in version control.
+library(ggwordcloud)
+
+# Heuristic regexes — same as patent_cluster_compare.Rmd. Pre-classify
+# common organisation patterns before sending the unknowns to GPT;
+# saves tokens and avoids accidental cross-type merges (e.g. a
+# university variant collapsing onto a company).
+org_suffix_regex <- stringr::regex(
+  "\\b(inc|corp|ltd|llc|gmbh|ag|sa|sas|bv|nv|co|plc|pty|ab|oy|as|se|spa|srl|kk)\\b",
+  ignore_case = TRUE
+)
+university_regex <- stringr::regex(
+  paste0("\\b(univ|univers|universit|college|polytechnic|",
+         "institute|institut|academy|academia|school|schule|hochschule|",
+         "ecole|escuela|scuola|faculty)\\b"),
+  ignore_case = TRUE
+)
+research_regex <- stringr::regex(
+  paste0("\\b(cnrs|csic|csiro|csir|fraunhofer|max planck|helmholtz|riken|",
+         "national lab|laboratory|laboratoire|laboratorio|research|forschung|",
+         "instituto|agency|ministry|ministr|commission|consejo|conseil|",
+         "council|foundation|fund|fonds|fundacion|stiftung)\\b"),
+  ignore_case = TRUE
+)
+
+# One row per (city, patent, raw assignee). Strips the EPO-style `[CC]`
+# country suffix and applies the heuristic classification used to
+# split GPT prompts later.
+explode_assignees <- function(df) {
+  df |>
+    dplyr::filter(!is.na(applicant_names)) |>
+    dplyr::select(city, appln_id, applicant_names) |>
+    dplyr::mutate(assignee = stringr::str_split(applicant_names, ";\\s*")) |>
+    tidyr::unnest(assignee) |>
+    dplyr::mutate(
+      assignee = stringr::str_squish(stringr::str_remove(
+        assignee, "\\s*\\[[A-Z]{2,3}\\]\\s*$"))
+    ) |>
+    dplyr::filter(nchar(assignee) > 0L) |>
+    dplyr::mutate(
+      is_university_h = stringr::str_detect(assignee, university_regex),
+      is_research_h   = stringr::str_detect(assignee, research_regex),
+      is_company_h    = stringr::str_detect(assignee, org_suffix_regex),
+      heuristic_type  = dplyr::case_when(
+        is_university_h ~ "university",
+        is_research_h   ~ "research_institute",
+        is_company_h    ~ "company",
+        TRUE            ~ "unknown"
+      )
+    )
+}
+
+# Ask GPT to: (1) drop individual person names; (2) harmonise variants
+# to a short canonical name; (3) return entity_type. Sent in batches
+# split BY heuristic type so a university variant can't accidentally
+# merge with a company. Caches the full mapping in
+# `.bigdata/innocity/oai_assignee_map_*.rds` so re-knits skip the GPT
+# call.
+harmonize_assignees <- function(assignees_df, openai_key,
+                                batch_size = 150,
+                                cache_file = NULL) {
+  if (!is.null(cache_file) && file.exists(cache_file)) {
+    return(readRDS(cache_file))
+  }
+
+  uniq <- assignees_df |>
+    dplyr::group_by(assignee) |>
+    dplyr::summarise(freq           = dplyr::n(),
+                     heuristic_type = dplyr::first(heuristic_type),
+                     .groups        = "drop") |>
+    dplyr::arrange(dplyr::desc(freq))
+  if (nrow(uniq) == 0L) {
+    out <- tibble::tibble(from = character(), to = character(),
+                          entity_type = character())
+    if (!is.null(cache_file)) saveRDS(out, cache_file)
+    return(out)
+  }
+
+  call_gpt_batch <- function(batch, prompt_prefix) {
+    entries <- paste0("- ", batch$assignee, " (n=", batch$freq, ")",
+                      collapse = "\n")
+    prompt <- paste0(prompt_prefix, "\n\n", entries, "\n\n---\n",
+      "Return ONLY a JSON array of objects with keys \"from\" (original name), ",
+      "\"to\" (canonical short name, Title Case, 1-4 words, null for persons), ",
+      "and \"entity_type\" (one of: \"company\", \"university\", ",
+      "\"research_institute\", \"government\", \"other\", \"person\"). ",
+      "EVERY input name MUST appear in the output. No other text."
+    )
+    raw <- chat_completion(prompt, openai_key,
+                           temperature = 0.1, max_tokens = 6000)
+    raw <- stringr::str_remove_all(raw, "```json\\s*|```\\s*")
+    tryCatch(
+      jsonlite::fromJSON(raw) |>
+        tibble::as_tibble() |>
+        dplyr::mutate(
+          from = stringr::str_squish(from),
+          to   = if (is.character(to)) stringr::str_squish(to)
+                 else as.character(to),
+          to   = dplyr::na_if(to, "NA"),
+          to   = dplyr::na_if(to, ""),
+          entity_type = stringr::str_to_lower(
+            stringr::str_squish(entity_type))
+        ),
+      error = function(e) {
+        warning("Failed to parse assignee batch: ", e$message)
+        tibble::tibble(from = character(), to = character(),
+                       entity_type = character())
+      }
+    )
+  }
+
+  run_for_type <- function(df, label, type_hint) {
+    if (nrow(df) == 0L) return(tibble::tibble(
+      from = character(), to = character(), entity_type = character()))
+    batches <- split(df, ceiling(seq_len(nrow(df)) / batch_size))
+    prefix <- if (label == "unknown") {
+      paste0(
+        "Below is a list of raw patent assignee names (with frequencies). ",
+        "These could not be pre-classified. For EACH name:\n",
+        "1. DECIDE if it is a PERSON or an organization.\n",
+        "2. For organizations, HARMONISE variants to a SHORT canonical name.\n",
+        "3. ASSIGN an entity_type."
+      )
+    } else {
+      paste0(
+        "Below is a list of raw patent assignee names (with frequencies) ",
+        "all pre-classified as ", type_hint, ". HARMONISE variants to a ",
+        "SHORT canonical name (Title Case, 1-4 words; drop generic ",
+        "suffixes like Inc/Corp/Ltd/GmbH). Set entity_type = \"",
+        type_hint, "\" unless the name is clearly something else. ",
+        "A name is only a person if clearly an individual human."
+      )
+    }
+    lapply(seq_along(batches), function(bi) {
+      message("    [assignees:", label, "] batch ", bi, "/", length(batches),
+              " (", nrow(batches[[bi]]), " names)")
+      call_gpt_batch(batches[[bi]], prefix)
+    }) |> dplyr::bind_rows()
+  }
+
+  groups <- split(uniq, uniq$heuristic_type)
+  empty  <- uniq[0L, , drop = FALSE]
+  out <- dplyr::bind_rows(
+    run_for_type(groups[["company"]]            %||% empty, "company",            "company"),
+    run_for_type(groups[["university"]]         %||% empty, "university",         "university"),
+    run_for_type(groups[["research_institute"]] %||% empty, "research_institute", "research_institute"),
+    run_for_type(groups[["unknown"]]            %||% empty, "unknown",            NA_character_)
+  )
+  if (!is.null(cache_file)) saveRDS(out, cache_file)
+  out
+}
+
+# Tiny coalesce helper — patent_cluster_compare.Rmd uses %||% from
+# rlang; avoid the dependency by defining one locally.
+`%||%` <- function(a, b) if (is.null(a) || !length(a)) b else a
+```
+
+```{r assignee_pipeline, eval = FALSE}
+# Retired alongside the OPS-derived wordcloud (see
+# firms_legacy_block_dropped above). Kept under `eval = FALSE` so
+# the source remains in version control without being executed.
+# Defensive coercion: OPS cache files written before applicant
+# extraction was wired in (`extract_applicants` was added later in
+# the development of this Rmd) don't carry an `applicant_names`
+# column at all. Without this guard, `explode_assignees` would error
+# on the missing column AND any downstream chunk that touches
+# `city_abstracts$applicant_names` would silently produce zero rows.
+# Guarantee the column exists, even if all-NA, so the rest of the
+# pipeline degrades gracefully (cities with stale caches end up with
+# empty wordclouds rather than disappearing entirely).
+if (!"applicant_names" %in% names(city_abstracts)) {
+  city_abstracts$applicant_names <- NA_character_
+}
+
+# Step 1 — explode raw assignees and apply heuristic classification.
+assignees_long <- explode_assignees(city_abstracts)
+
+n_unique_raw <- dplyr::n_distinct(assignees_long$assignee)
+cat(sprintf("raw assignees: %s rows, %s unique names across %d cities\n",
+            format(nrow(assignees_long), big.mark = ","),
+            format(n_unique_raw,         big.mark = ","),
+            length(unique(assignees_long$city))))
+
+# Step 2 — GPT harmonisation, cached against the unique-name set.
+assignee_cache <- file.path(
+  cache_dir,
+  sprintf("oai_assignee_map_%s.rds",
+          substr(digest::digest(
+            list(sort(unique(assignees_long$assignee)),
+                 max_per_city,
+                 cities_to_summarise),
+            algo = "md5"), 1L, 8L))
+)
+assignee_map <- harmonize_assignees(assignees_long, openai_key,
+                                    cache_file = assignee_cache)
+
+# Step 3 — fold canonical names + entity_type back onto each row.
+assignees_clean <- assignees_long |>
+  dplyr::left_join(assignee_map, by = c("assignee" = "from")) |>
+  dplyr::mutate(
+    canonical   = dplyr::if_else(!is.na(to), to, assignee),
+    entity_type = dplyr::if_else(!is.na(entity_type),
+                                 entity_type, heuristic_type)
+  )
+
+# Step 4 — collapse to one row per (city, canonical, patent) so a
+# patent with two variants of the same firm doesn't double-count.
+assignees_dedup <- assignees_clean |>
+  dplyr::filter(!is.na(canonical),
+                !entity_type %in% c("person", NA_character_)) |>
+  dplyr::distinct(city, appln_id, canonical, entity_type)
+```
+
+```{r assignee_wordcloud, eval = FALSE}
+# Retired (see firms_wordcloud chunk for the active local-firm
+# version).
+entity_type_colors <- c(
+  "company"            = "#377eb8",
+  "university"         = "#e41a1c",
+  "research_institute" = "#4daf4a",
+  "government"         = "#984ea3",
+  "other"              = "#999999"
+)
+
+# Top 30 firms per city. Tied counts get arbitrary order; with at most
+# 75 patents per city the head of the distribution is dominated by
+# 1-2 high-frequency assignees, with everything else tied at small
+# values, so 30 is plenty for visual inspection without crowding the
+# panel.
+max_firms_per_city <- 30L
+
+counts_by_city <- assignees_dedup |>
+  dplyr::group_by(city, canonical) |>
+  dplyr::summarise(
+    n           = dplyr::n(),
+    entity_type = names(sort(table(entity_type), decreasing = TRUE))[1L],
+    .groups     = "drop"
+  ) |>
+  dplyr::filter(entity_type %in% names(entity_type_colors)) |>
+  dplyr::group_by(city) |>
+  dplyr::slice_max(n, n = max_firms_per_city, with_ties = FALSE) |>
+  dplyr::ungroup()
+
+# Loop over EVERY required city, not just the ones with data. That
+# way readers can tell whether a missing wordcloud means "no firms
+# survived the filter" vs "this city wasn't even checked". Each
+# city's plot is its own figure (no faceting) so individual labels
+# can use a much larger max_size without crowding adjacent panels.
+# Empty cities get a small placeholder ggplot rather than silently
+# disappearing.
+cities_for_wc <- cities |>
+  dplyr::filter(is_required) |>
+  dplyr::arrange(dplyr::desc(n_docdbs)) |>
+  dplyr::pull(city)
+
+for (target_city in cities_for_wc) {
+  cnt <- counts_by_city |>
+    dplyr::filter(city == target_city)
+
+  if (nrow(cnt) == 0L) {
+    p <- ggplot() +
+      annotate(
+        "text", x = 0.5, y = 0.5,
+        label = paste0(
+          "No firm assignees identified for ", target_city, ".\n",
+          "If this is unexpected, the OPS cache for this city was ",
+          "likely written before applicant\nextraction was added. ",
+          "Delete .bigdata/innocity/ops_*.rds and re-knit to refetch."
+        ),
+        size = 4, fontface = "italic", colour = "#666"
+      ) +
+      labs(title = target_city) +
+      theme_void() +
+      theme(
+        plot.title  = element_text(size = 16, face = "bold",
+                                   hjust = 0.5,
+                                   margin = margin(b = 4)),
+        plot.margin = margin(2, 2, 2, 2)
+      ) +
+      xlim(0, 1) + ylim(0, 1)
+  } else {
+    p <- ggplot(cnt,
+                aes(label = canonical, size = n, colour = entity_type)) +
+      ggwordcloud::geom_text_wordcloud_area(
+        rm_outside   = TRUE,
+        shape        = "square",
+        eccentricity = 1.4
+      ) +
+      # Per-plot wordcloud has the full figure area to itself. Step
+      # max_size up from the old facet-friendly 22 to 50 so the
+      # smallest labels are still legible and the largest aren't
+      # squashed.
+      scale_size_area(max_size = 50) +
+      scale_colour_manual(values = entity_type_colors,
+                          name   = "Entity type",
+                          guide  = "none") +
+      labs(title = target_city) +
+      theme_void() +
+      theme(
+        plot.title  = element_text(size = 16, face = "bold",
+                                   hjust = 0.5,
+                                   margin = margin(b = 4)),
+        plot.margin = margin(2, 2, 2, 2)
+      )
+  }
+  print(p)
+}
+```
+
+```{r assignee_wordcloud_legend, eval = FALSE}
+# Retired (see firms_wordcloud_legend for the active version).
+# Colour legend rendered separately so it appears once at the end of
+# the section instead of repeated under every per-city wordcloud.
+# Pulled into its own short chunk so the figure-height knob doesn't
+# affect the wordclouds above.
+present_types <- intersect(names(entity_type_colors),
+                            unique(counts_by_city$entity_type))
+if (length(present_types) > 0L) {
+  legend_df <- data.frame(
+    entity_type = factor(present_types, levels = present_types),
+    x           = seq_along(present_types),
+    y           = 1
+  )
+  ggplot(legend_df, aes(x, y, colour = entity_type, label = entity_type)) +
+    geom_point(size = 6) +
+    geom_text(nudge_x = 0.15, hjust = 0, size = 5, colour = "#222") +
+    scale_colour_manual(values = entity_type_colors[present_types],
+                        guide  = "none") +
+    coord_cartesian(xlim = c(0.5, length(present_types) + 1.5),
+                    ylim = c(0.5, 1.5)) +
+    theme_void() +
+    theme(plot.margin = margin(2, 2, 2, 2))
+}
+```
+
+### Top firms per city (table form)
+
+```{r assignee_table_render, eval = FALSE}
+# Retired (see firms_table_render for the active version).
+top_table <- counts_by_city |>
+  dplyr::group_by(city) |>
+  dplyr::arrange(dplyr::desc(n), canonical, .by_group = TRUE) |>
+  dplyr::slice_head(n = 10L) |>
+  dplyr::mutate(rank = dplyr::row_number()) |>
+  dplyr::ungroup() |>
+  dplyr::transmute(
+    City = city, Rank = rank, Firm = canonical,
+    Type = entity_type, `# patents` = n
+  )
+
+knitr::kable(top_table, format = "html",
+             align = c("l", "r", "l", "l", "r")) |>
+  kableExtra::kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  )
+```
+
+## HiGGlo network: per highlighted city
+
+For each of the hand-picked / highlighted cities we capture the
+HiGGlo citation-network view directly from the live app via headless
+Chrome (`chromote`). Same parameters as the URL the user provided
+for Sofia:
+
+* City filter: the hand-picked city
+* `toflow = ev_global`, no firm/tech filter, **All countries**
+* Gen-0 sampling: Random / Number / 100
+* Edge sampling: Random / Percent / 100
+* `add_generations = 2` (one Generate click → gens 1 and 2)
+
+PNGs are cached under `.bigdata/innocity/higglo_<city>.png`. To force
+any one of them to refresh, delete the corresponding file and
+re-knit. The first run captures all of them sequentially in a
+single chromote session (re-using the warm Shiny server between
+navigations); budget ~50-70 s per city for a cold first knit, near
+zero on subsequent knits.
+
+```{r higglo_capture, eval = requireNamespace("chromote", quietly = TRUE)}
+# All cities tagged is_required by the regex earlier in the document.
+# Each gets its own captured screenshot. `build_higglo_url()` and
+# `city_png_path()` come from the `helper_links` chunk above so all
+# three downstream chunks (capture, PNG render, summary render) share
+# the same URL shape.
+cities_for_higglo <- cities |>
+  dplyr::filter(is_required) |>
+  dplyr::pull(city)
+
+# Decide which cities still need fetching.
+todo <- cities_for_higglo[
+  !vapply(cities_for_higglo,
+          function(c) file.exists(city_png_path(c)),
+          logical(1))
+]
+
+if (length(todo) > 0L) {
+  if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
+  message(sprintf("Capturing HiGGlo PNGs for %d cities (cached: %d)...",
+                  length(todo),
+                  length(cities_for_higglo) - length(todo)))
+
+  # Bump chromote's default CDP wait substantially. Posit Connect on
+  # the share.connect.posit.cloud free tier can take well over a minute
+  # to cold-start a Shiny container; if Page.navigate doesn't get a
+  # CDP response in that window the synchronize() in chromote throws
+  # `timed out waiting for response to command Page.navigate`. 600 s
+  # is the chromote ceiling and matches what we use elsewhere
+  # (insights/R/fetch_flow_csv.R bumps to 120 s for the simpler CSV
+  # fetch — screenshots need more headroom).
+  prev_to <- tryCatch(chromote::default_timeout(),
+                      error = function(e) NULL)
+  try(chromote::default_timeout(600), silent = TRUE)
+
+  # One chromote session for the whole batch. Navigating between
+  # URLs is much cheaper than spinning up a new headless Chrome per
+  # city (Shiny container stays warm too, so cities 2..N typically
+  # render in 30-40 s instead of 60 s).
+  b <- chromote::ChromoteSession$new()
+  on.exit({
+    try(b$close(), silent = TRUE)
+    if (!is.null(prev_to))
+      try(chromote::default_timeout(prev_to), silent = TRUE)
+  }, add = TRUE)
+
+  # Higher DPR for sharper PNGs. The leaflet base tiles at the chosen
+  # zoom level (2) are themselves rasters, so deviceScaleFactor only
+  # helps for the markers, arcs, legend, and labels — but those are
+  # the visually important bits, and stepping from 2x to 3x removes
+  # most of the graininess on text and circle outlines without making
+  # the file size unmanageable. Width/height kept at 1280x800 so the
+  # output PNG aspect ratio matches what readers see in the browser
+  # at the canonical map zoom.
+  b$Emulation$setDeviceMetricsOverride(
+    width             = 1280,
+    height            = 800,
+    deviceScaleFactor = 3,
+    mobile            = FALSE
+  )
+
+  # ---------------------------------------------------------------------
+  # PRE-WARM the deployed Shiny app. Hitting the URL once and waiting
+  # before the real loop means the FIRST per-city Page.navigate call
+  # doesn't have to wait for a cold-start container — that's the
+  # navigation that was hitting the Page.navigate timeout. The warm-up
+  # navigates to the app root with no query params so it isn't tied to
+  # the fate of any one city's URL.
+  app_root <- "https://mondpanther-iseapp2.share.connect.posit.cloud/"
+  message("  [warm-up] visiting app root to wake the container...")
+  warmup_ok <- tryCatch({
+    b$Page$navigate(app_root)
+    Sys.sleep(45)
+    TRUE
+  }, error = function(e) {
+    message("    [warm-up failed: ", conditionMessage(e),
+            "] continuing anyway — first city will retry.")
+    FALSE
+  })
+
+  for (i in seq_along(todo)) {
+    city <- todo[i]
+    url  <- build_higglo_url(city)
+    out  <- city_png_path(city)
+    # Generous post-navigate sleep budgets. Cold starts that survive
+    # the warm-up still need ~20 s of init before render_map fires;
+    # gen 0 + 2 follow-on generations then need another ~30 s.
+    sleep_s <- if (i == 1L && !warmup_ok) 90L else 55L
+
+    message(sprintf("  [%d/%d] %s (sleep %ds)",
+                    i, length(todo), city, sleep_s))
+
+    # Wrap each city in tryCatch so a single failure (timeout, network
+    # blip, malformed URL) does NOT kill the rest of the batch. We
+    # log the error and move on; the per-city render fallback will
+    # show a warning box for any cities that didn't produce a PNG.
+    tryCatch({
+      b$Page$navigate(url)
+      Sys.sleep(sleep_s)
+      # Hide the leaflet +/- zoom controls in the captured PNG. The
+      # Shiny app exposes a `body.higglobe-capture-mode` CSS hook
+      # (defined in R/module_hglobe.R) that suppresses
+      # `.leaflet-control-zoom` whenever the body has that class.
+      # Setting it via Runtime.evaluate just before the screenshot
+      # keeps the interactive UI unchanged — the zoom controls are
+      # only hidden for the duration of the snapshot.
+      b$Runtime$evaluate(
+        "document.body.classList.add('higglobe-capture-mode')"
+      )
+      b$screenshot(filename = out, selector = "#hglobe-map")
+      message(sprintf("    -> wrote %s", out))
+    }, error = function(e) {
+      message("    [city failed: ", conditionMessage(e), "] skipping.")
+    })
+  }
+}
+```
+
+```{r higglo_render, results='asis', echo=FALSE}
+cities_for_higglo <- cities |>
+  dplyr::filter(is_required) |>
+  dplyr::arrange(dplyr::desc(n_docdbs)) |>   # biggest first
+  dplyr::pull(city)
+
+for (city in cities_for_higglo) {
+  png_path <- city_png_path(city)
+  cat(sprintf("\n### %s\n\n", city))
+  cat(higglo_link_md(city), "\n\n", sep = "")
+  if (file.exists(png_path)) {
+    # Use raw markdown image syntax so knitr embeds a relative file
+    # reference rather than the absolute one `include_graphics()`
+    # produces inside a loop.
+    cat(sprintf("![](%s){width=100%%}\n\n",
+                normalizePath(png_path, winslash = "/", mustWork = FALSE)))
+  } else {
+    cat(
+      "<div style='padding:12px;border:1px solid #d62728;",
+      "background:#fff3f3;border-radius:6px;color:#600;'>",
+      "<b>HiGGlo screenshot not available.</b> Either ",
+      "<code>chromote</code> isn't installed, the live app URL was ",
+      "unreachable, or the screenshot timed out. ",
+      "Install chromote and re-knit, or pre-populate the file at ",
+      sprintf("<code>%s</code>", png_path),
+      " by hand using the Save PNG button on the live app.",
+      "</div>\n\n",
+      sep = "")
+  }
+}
+```
+
+---
+
+*Notes.*
+
+* `ev_global` is the Watson per-family expected spillover to the whole
+  world; `ev_emdenocn` is the share of that spillover that lands in
+  LMICs excluding China. Both are docdb-level (one value per family),
+  so per-city averages are unweighted means across the families
+  associated with the city through `countrymap`.
+* Capital-fallback rows (`geocode_missing = TRUE`) are dropped before
+  aggregation. Without that, every patent for which no real address
+  survived geocoding would inflate the patent count of the country's
+  capital.
+* A single docdb may be mapped to multiple cities (e.g. multinational
+  inventor teams). Each city it touches gets credit for the family —
+  there is no proportional split.
+* The abstract-fetch + OpenAI summary section caches both OPS responses
+  and OpenAI completions under `.bigdata/innocity/`, keyed on the
+  cities and the per-city patent set. Re-knitting the document is
+  free as long as the inputs don't change. Delete files in that
+  directory to force a refetch / re-summarise.
+* Default scope is the seven hand-picked cities only. To also
+  summarise the 25 biggest cities, edit `cities_to_summarise` in the
+  `summary_helpers` chunk — but expect a very long OPS fetch the
+  first time round, since each big city sends `max_per_city`
+  HTTP calls.
