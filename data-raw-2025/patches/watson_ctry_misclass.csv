@@ -1,0 +1,2 @@
+docdb_family_id,ctry_code,reason,source_url
+49823679,AR,"Watson nationalkey misclassifies Chinese-only family as Argentine; tls206_person has 5 CN inventors + 1 PLA institute, all with NULL person_ctry_code and NULL person_address. ev_natl=0. PATSTAT-person harmonisation correctly produces zero rows.",https://github.com/mondpanther/iseapp/issues/PASTE_ISSUE_NUMBER

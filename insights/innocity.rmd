@@ -230,12 +230,22 @@ cities <- cities |>
 # Posit Connect URL ever moves.
 app_root <- "https://mondpanther-iseapp2.share.connect.posit.cloud/"
 
-# Build the bookmarked HiGGlo URL for a given city. Same shape Shiny
-# native bookmarks emit (each value is JSON, then URL-encoded). The
-# city literal is URL-encoded then wrapped in %22...%22 so accented
-# names like "Belém" survive UTF-8 round-tripping.
-build_higglo_url <- function(city) {
+# Tech filter options the helpers accept. "All innovations" is the
+# unfiltered default; "Green Technology" restricts to the green-tech
+# umbrella. Add new entries here if you ever want a third tech cut.
+higglo_tech_options <- c(
+  all   = "All innovations",
+  green = "Green Technology"
+)
+
+# Build the bookmarked HiGGlo URL for a given city + tech filter.
+# Same shape Shiny native bookmarks emit (each value is JSON, then
+# URL-encoded). The city + tech literals are URL-encoded then
+# wrapped in %22...%22 so accented names like "Belém" survive UTF-8
+# round-tripping.
+build_higglo_url <- function(city, tech = "All innovations") {
   city_enc <- utils::URLencode(city, reserved = TRUE)
+  tech_enc <- utils::URLencode(tech, reserved = TRUE)
   paste0(
     app_root,
     "?_inputs_",
@@ -249,7 +259,7 @@ build_higglo_url <- function(city) {
     "&navbar_page=%22HiGGlobe%22",
     "&hglobe-country=%22All%20countries%22",
     "&hglobe-firm=%22No%20firm%20filter%22",
-    "&hglobe-techs=%22All%20innovations%22",
+    "&hglobe-techs=%22", tech_enc, "%22",
     "&hglobe-city=%22", city_enc, "%22",
     "&hglobe-toflow=%22ev_global%22",
     "&hglobe-granted_only=false",
@@ -263,20 +273,23 @@ build_higglo_url <- function(city) {
   )
 }
 
-# Filesystem-safe slug for the cached PNG.
-city_png_path <- function(city) {
+# Filesystem-safe slug for the cached PNG. The tech key (`all` /
+# `green` / ...) is folded into the filename so different tech cuts
+# don't share a cache.
+city_png_path <- function(city, tech_key = "all") {
   slug <- gsub("[^A-Za-z0-9]+", "_", city)
   slug <- gsub("^_|_$", "", slug)
-  file.path(cache_dir, sprintf("higglo_%s.png", slug))
+  file.path(cache_dir, sprintf("higglo_%s_%s.png", slug, tech_key))
 }
 
 # Markdown anchor pointing to the live HiGGlo view for a city.
 # `target="_blank"` so clicking doesn't navigate the user away from
 # the rendered insight HTML; arrow glyph signals "external link".
-higglo_link_md <- function(city) {
+higglo_link_md <- function(city, tech = "All innovations") {
+  href <- build_higglo_url(city, tech = tech)
   sprintf(
-    "<a href='%s' target='_blank' rel='noopener'>Open %s on HiGGlo &rarr;</a>",
-    build_higglo_url(city), city
+    "<a href='%s' target='_blank' rel='noopener'>Open %s on HiGGlo (%s) &rarr;</a>",
+    href, city, tech
   )
 }
 
@@ -552,6 +565,87 @@ knitr::kable(required_for_table, format = "html",
     bootstrap_options = c("striped", "hover", "condensed"),
     full_width = FALSE
   )
+```
+
+### Green premium across the highlighted cities
+
+For each of the hand-picked cities the bar shows
+`(green_premium - 1) * 100` — the percentage by which a city's
+green-tech innovations beat (or lag) the city's overall mean
+`ev_global`. **Positive bars** = green innovations over-perform the
+city's average; **negative bars** = green innovations underperform.
+The label on each bar carries the percentage, the total patent count,
+and the share of those that are flagged Green Technology, so a small
+denominator is easy to spot. Bars are coloured by sign.
+
+```{r green_premium_bar, fig.width=10, fig.height=5}
+green_bar_df <- cities |>
+  dplyr::filter(is_required) |>
+  dplyr::filter(!is.na(green_premium)) |>
+  dplyr::mutate(
+    pct           = (green_premium - 1) * 100,
+    direction     = dplyr::if_else(pct >= 0, "above", "below"),
+    pct_label     = dplyr::if_else(pct >= 0,
+                                   sprintf("+%.1f%%", pct),
+                                   sprintf("%.1f%%",  pct)),
+    full_label    = sprintf(
+      "%s   (n = %s, %.1f%% green)",
+      pct_label,
+      format(n_docdbs, big.mark = ","),
+      100 * share_green
+    ),
+    city_ord      = factor(city, levels = city[order(pct)])
+  )
+
+# Symmetric x-axis so 0 sits in the visual middle. Pad both ends so
+# the value labels never collide with the panel edge — both positive
+# and negative bars get an outward-aligned text annotation.
+if (nrow(green_bar_df) > 0L) {
+  rng <- range(green_bar_df$pct, na.rm = TRUE)
+  pad <- max(abs(rng)) * 0.45
+  xlims <- c(min(rng[1L], 0) - pad, max(rng[2L], 0) + pad)
+
+  ggplot(green_bar_df, aes(x = pct, y = city_ord,
+                           fill = direction)) +
+    geom_col(width = 0.7) +
+    geom_vline(xintercept = 0, colour = "#444", linewidth = 0.4) +
+    # Labels: positive bars get text on the right of the bar,
+    # negative bars on the left, so the text never overlaps the bar
+    # itself.
+    geom_text(
+      aes(label = full_label,
+          hjust = dplyr::if_else(pct >= 0, -0.05, 1.05)),
+      size = 3.6, colour = "#222"
+    ) +
+    scale_fill_manual(values = c("above" = "#2ca02c",
+                                  "below" = "#d62728"),
+                      guide  = "none") +
+    scale_x_continuous(
+      limits = xlims,
+      labels = function(v) sprintf("%+.0f%%", v),
+      breaks = scales::pretty_breaks()
+    ) +
+    labs(
+      title = "Green premium by hand-picked city",
+      subtitle = paste0(
+        "(green-tech mean ev_global / city overall mean - 1) * 100; ",
+        "label = % difference, total patents, share green"
+      ),
+      x = "Green premium (% above / below city mean)",
+      y = NULL
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(
+      plot.title       = element_text(face = "bold"),
+      plot.subtitle    = element_text(colour = "#555"),
+      panel.grid.minor = element_blank(),
+      panel.grid.major.y = element_blank()
+    )
+} else {
+  cat("None of the highlighted cities have a defined `green_premium` ",
+      "(every city has either zero green docdbs or zero overall ",
+      "mean). Bar chart skipped.\n", sep = "")
+}
 ```
 
 ## Patent abstracts and OpenAI summaries
@@ -1881,18 +1975,30 @@ cities_for_higglo <- cities |>
   dplyr::filter(is_required) |>
   dplyr::pull(city)
 
-# Decide which cities still need fetching.
-todo <- cities_for_higglo[
-  !vapply(cities_for_higglo,
-          function(c) file.exists(city_png_path(c)),
-          logical(1))
-]
+# We capture two PNGs per city: one for the unfiltered universe,
+# one for the Green-Technology subset. The capture loop iterates
+# over the cartesian product (city x tech_key); each cell has its
+# own cache file so partial progress survives across knits.
+all_jobs <- expand.grid(
+  city     = cities_for_higglo,
+  tech_key = names(higglo_tech_options),
+  stringsAsFactors = FALSE,
+  KEEP.OUT.ATTRS   = FALSE
+)
+all_jobs <- split(all_jobs, seq_len(nrow(all_jobs)))
+all_jobs <- lapply(all_jobs, as.list)
+
+# Decide which cells still need fetching.
+todo <- Filter(function(job) {
+  !file.exists(city_png_path(job$city, tech_key = job$tech_key))
+}, all_jobs)
 
 if (length(todo) > 0L) {
   if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
-  message(sprintf("Capturing HiGGlo PNGs for %d cities (cached: %d)...",
-                  length(todo),
-                  length(cities_for_higglo) - length(todo)))
+  message(sprintf(
+    "Capturing HiGGlo PNGs for %d city x tech cells (cached: %d)...",
+    length(todo),
+    length(all_jobs) - length(todo)))
 
   # Bump chromote's default CDP wait substantially. Posit Connect on
   # the share.connect.posit.cloud free tier can take well over a minute
@@ -1952,21 +2058,25 @@ if (length(todo) > 0L) {
   })
 
   for (i in seq_along(todo)) {
-    city <- todo[i]
-    url  <- build_higglo_url(city)
-    out  <- city_png_path(city)
+    job  <- todo[[i]]
+    city <- job$city
+    tech_key   <- job$tech_key
+    tech_label <- higglo_tech_options[[tech_key]]
+    url  <- build_higglo_url(city, tech = tech_label)
+    out  <- city_png_path(city, tech_key = tech_key)
     # Generous post-navigate sleep budgets. Cold starts that survive
     # the warm-up still need ~20 s of init before render_map fires;
     # gen 0 + 2 follow-on generations then need another ~30 s.
     sleep_s <- if (i == 1L && !warmup_ok) 90L else 55L
 
-    message(sprintf("  [%d/%d] %s (sleep %ds)",
-                    i, length(todo), city, sleep_s))
+    message(sprintf("  [%d/%d] %s (%s) — sleep %ds",
+                    i, length(todo), city, tech_label, sleep_s))
 
-    # Wrap each city in tryCatch so a single failure (timeout, network
-    # blip, malformed URL) does NOT kill the rest of the batch. We
-    # log the error and move on; the per-city render fallback will
-    # show a warning box for any cities that didn't produce a PNG.
+    # Wrap each city/tech in tryCatch so a single failure (timeout,
+    # network blip, malformed URL) does NOT kill the rest of the
+    # batch. We log the error and move on; the per-city render
+    # fallback will show a warning box for any cells that didn't
+    # produce a PNG.
     tryCatch({
       b$Page$navigate(url)
       Sys.sleep(sleep_s)
@@ -1983,7 +2093,8 @@ if (length(todo) > 0L) {
       b$screenshot(filename = out, selector = "#hglobe-map")
       message(sprintf("    -> wrote %s", out))
     }, error = function(e) {
-      message("    [city failed: ", conditionMessage(e), "] skipping.")
+      message("    [", city, " / ", tech_label, " failed: ",
+              conditionMessage(e), "] skipping.")
     })
   }
 }
@@ -1995,28 +2106,40 @@ cities_for_higglo <- cities |>
   dplyr::arrange(dplyr::desc(n_docdbs)) |>   # biggest first
   dplyr::pull(city)
 
+# One ### City heading; under it, an All Innovations PNG and a
+# Green Technology PNG, each with its own click-through link. If a
+# PNG is missing we render an inline warning so the layout stays
+# consistent and the reader can see exactly which cell failed.
 for (city in cities_for_higglo) {
-  png_path <- city_png_path(city)
   cat(sprintf("\n### %s\n\n", city))
-  cat(higglo_link_md(city), "\n\n", sep = "")
-  if (file.exists(png_path)) {
-    # Use raw markdown image syntax so knitr embeds a relative file
-    # reference rather than the absolute one `include_graphics()`
-    # produces inside a loop.
-    cat(sprintf("![](%s){width=100%%}\n\n",
-                normalizePath(png_path, winslash = "/", mustWork = FALSE)))
-  } else {
-    cat(
-      "<div style='padding:12px;border:1px solid #d62728;",
-      "background:#fff3f3;border-radius:6px;color:#600;'>",
-      "<b>HiGGlo screenshot not available.</b> Either ",
-      "<code>chromote</code> isn't installed, the live app URL was ",
-      "unreachable, or the screenshot timed out. ",
-      "Install chromote and re-knit, or pre-populate the file at ",
-      sprintf("<code>%s</code>", png_path),
-      " by hand using the Save PNG button on the live app.",
-      "</div>\n\n",
-      sep = "")
+
+  for (tech_key in names(higglo_tech_options)) {
+    tech_label <- higglo_tech_options[[tech_key]]
+    png_path   <- city_png_path(city, tech_key = tech_key)
+
+    cat(sprintf("\n#### %s — %s\n\n", city, tech_label))
+    cat(higglo_link_md(city, tech = tech_label), "\n\n", sep = "")
+
+    if (file.exists(png_path)) {
+      # Use raw markdown image syntax so knitr embeds a relative
+      # file reference rather than the absolute one
+      # `include_graphics()` produces inside a loop.
+      cat(sprintf("![](%s){width=100%%}\n\n",
+                  normalizePath(png_path, winslash = "/",
+                                mustWork = FALSE)))
+    } else {
+      cat(
+        "<div style='padding:12px;border:1px solid #d62728;",
+        "background:#fff3f3;border-radius:6px;color:#600;'>",
+        "<b>HiGGlo screenshot not available for ", tech_label, ".</b>",
+        " Either <code>chromote</code> isn't installed, the live ",
+        "app URL was unreachable, or the screenshot timed out. ",
+        "Install chromote and re-knit, or pre-populate the file at ",
+        sprintf("<code>%s</code>", png_path),
+        " by hand using the Save PNG button on the live app.",
+        "</div>\n\n",
+        sep = "")
+    }
   }
 }
 ```

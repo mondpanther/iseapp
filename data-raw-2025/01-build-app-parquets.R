@@ -454,6 +454,48 @@ cat("  families with cost/alpha available for istrax:",
     format(uniqueN(ev_natl[!is.na(cost)]$docdb_family_id), big.mark = ","), "\n")
 toc()
 
+# ---------------------------------------------------------------------------
+# SHORT-TERM PATCHES — Watson nationalkey misclassifications.
+#
+# Watson's `innos_ev_nationalkey_2013_2022.parquet` occasionally emits
+# (docdb, ctry_code) rows whose country tag has no support in PATSTAT
+# person records (every person_ctry_code / person_address is NULL or
+# points elsewhere). The first documented case is family 49823679
+# (CN103483016A) tagged as AR even though every inventor is Chinese.
+# See data-raw-2025/patches/watson_ctry_misclass.csv for the running
+# list and tracking GitHub issue.
+#
+# We anti-join the patch list against ev_natl HERE so the filter
+# cascades to every downstream artefact: the in-memory `countrymap`
+# variable (line below), the patent_database INNER JOIN further down,
+# and the `pcm` (patents x country measures) bridge in step 11. A
+# blanket `ev_natl[ev > 0]` filter was rejected — legitimate rows can
+# have ev = 0.
+# ---------------------------------------------------------------------------
+patch_path <- "data-raw-2025/patches/watson_ctry_misclass.csv"
+if (file.exists(patch_path)) {
+  ctry_patches <- as.data.table(read.csv(patch_path,
+                                         stringsAsFactors = FALSE,
+                                         strip.white      = TRUE))
+  ctry_patches <- ctry_patches[
+    !is.na(docdb_family_id) & nzchar(ctry_code),
+    .(docdb_family_id = as.integer(docdb_family_id),
+      ctry_code       = as.character(ctry_code))
+  ]
+  if (nrow(ctry_patches) > 0L) {
+    n_before <- nrow(ev_natl)
+    ev_natl  <- ev_natl[!ctry_patches, on = .(docdb_family_id, ctry_code)]
+    cat("  applied", nrow(ctry_patches),
+        "Watson misclassification patches; dropped",
+        format(n_before - nrow(ev_natl), big.mark = ","),
+        "row(s) from ev_natl.\n")
+  } else {
+    cat("  patch file present but empty; nothing to drop from ev_natl.\n")
+  }
+} else {
+  cat("  no patch file at", patch_path, "— skipping.\n")
+}
+
 countrymap <- unique(ev_natl[, .(docdb_family_id, ctry_code)])
 cat("  countrymap (distinct family x ctry from nationalkey):",
     format(nrow(countrymap), big.mark = ","), "rows,",

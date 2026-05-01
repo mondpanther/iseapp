@@ -393,8 +393,8 @@ hglobe_module_ui <- function(id) {
       ),
       shiny::div(
         style = paste0(
-          "margin-top: 14px; color: #555; font-size: 0.9em; ",
-          "line-height: 1.45; max-width: 60em;"),
+          "margin-top: 14px; color: #555; font-size: 1.05em; ",
+          "line-height: 1.5; max-width: 60em;"),
         shiny::tags$strong("Notes:"),
         " The HiGGlo tool allows you to trace the direct and indirect ",
         "knowledge spillovers from a set of initial innovations. To make ",
