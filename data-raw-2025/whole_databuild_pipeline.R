@@ -154,7 +154,7 @@ run_step("Build countrymap + nationalkey",
 #             publn_auth || publn_nr (preferring EP > WO > US).
 # ============================================================================
 run_step("Build app parquet database",
-         "data-raw/01-build-app-parquets.R")
+         "data-raw-2025/01-build-app-parquets.R")
 
 # ============================================================================
 # 4. Build filtered citation network parquet
@@ -175,7 +175,7 @@ run_step("Build filtered citenet parquet",
 # selectizeInput choices, grouped hierarchies, and boundary geometries.
 # ============================================================================
 run_step("Build R/sysdata.rda for the app",
-         "data-raw/02-build-app-sysdata.R")
+         "data-raw-2025/02-build-app-sysdata.R")
 
 # ============================================================================
 # Summary

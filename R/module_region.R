@@ -105,7 +105,9 @@ region_module_sidebar <- function(id) {
             ns("tech_categories_plot1_region"),
             label = NULL,
             choices  = grouped_techs,
-            selected = c("AI", "Green Technology"),
+            selected = c("AI", "Green Technology",
+                         "Any Agriculture & Food technology",
+                         "Defence Technology"),
             multiple = TRUE,
             options  = list(placeholder = 'Choose one or more technology categories...')
           )
@@ -453,11 +455,13 @@ region_module_server <- function(id, parent_session, con) {
               technology == "Hard to Abate Sector Decarbonization"      ~ "hard to abate",
               technology == "AI"                                        ~ "AI",
               technology == "Any Agriculture & Food technology"         ~ "agrifood",
+              technology == "Defence Technology"                        ~ "defence",
               technology %in% colorings$green                          ~ "green",
               technology %in% colorings$battery                        ~ "battery",
               technology %in% colorings$hard_to_abate                  ~ "hard to abate",
               technology %in% colorings$ai                             ~ "AI",
               technology %in% colorings$agrifood                       ~ "agrifood",
+              technology %in% colorings$defence                        ~ "defence",
               technology %in% colorings$cpcsecs                        ~ "cpcsecs",
               TRUE                                                      ~ "other"
             )

@@ -134,8 +134,9 @@ compute_avstrax <- function(data, istrax_var, classes, colorings = NULL) {
                        ifelse(result$technology %in% unlist(colorings["battery"]), "battery",
                        ifelse(result$technology %in% unlist(colorings["hard_to_abate"]), "hard to abate",
                        ifelse(result$technology %in% unlist(colorings["ai"]), "AI",
+                       ifelse(result$technology %in% unlist(colorings["defence"]), "defence",
                        ifelse(result$technology %in% unlist(colorings["cpcsecs"]), "CPC Sections",
-                       ifelse(result$technology %in% unlist(colorings["agrifood"]), "agrifood", "other"))))))
+                       ifelse(result$technology %in% unlist(colorings["agrifood"]), "agrifood", "other")))))))
 
   return(result)
 }

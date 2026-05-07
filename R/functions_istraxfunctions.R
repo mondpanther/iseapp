@@ -160,7 +160,20 @@ custom_colors <- c("green" = "forestgreen",
                    "hard to abate"="blue",
                    "AI"="orange",
                    "cpcsecs"="purple",
-                   "agrifood"="burlywood")
+                   "agrifood"="burlywood",
+                   "defence"="gray35")
+
+# Display labels used in plot legends. Keys must match `custom_colors` keys
+# (and the values that downstream `greenclass` columns take). Surface form
+# only — the underlying data still uses the lowercase tokens.
+custom_color_labels <- c("green"          = "Green",
+                         "battery"        = "Battery",
+                         "other"          = "Other",
+                         "hard to abate"  = "Hard to Abate",
+                         "AI"             = "AI",
+                         "cpcsecs"        = "CPC Section",
+                         "agrifood"       = "Agri & Food",
+                         "defence"        = "Defence")
 
 
 
@@ -270,8 +283,9 @@ compute_avstrax <- function(data, istrax_var, classes, colorings=NULL) {
                        ifelse(result$technology %in% unlist(colorings["battery"]), "battery",
                        ifelse(result$technology %in% unlist(colorings["hard_to_abate"]), "hard to abate",
                        ifelse(result$technology %in% unlist(colorings["ai"]), "AI",
+                       ifelse(result$technology %in% unlist(colorings["defence"]), "defence",
                        ifelse(result$technology %in% unlist(colorings["cpcsecs"]), "CPC Sections",
-                       ifelse(result$technology %in% unlist(colorings["agrifood"]), "agrifood", "other"))))))
+                       ifelse(result$technology %in% unlist(colorings["agrifood"]), "agrifood", "other")))))))
 
   return(result)
 }
@@ -698,8 +712,10 @@ plot_avstrax_by_country <- function(
 
   p <- p +
     ggplot2::scale_x_continuous(breaks = avstrax$x_pos, labels = avstrax$technology) +
-    ggplot2::scale_color_manual(values = custom_colors) +
-    ggplot2::scale_fill_manual(values = custom_colors) +
+    ggplot2::scale_color_manual(values = custom_colors,
+                                labels = custom_color_labels) +
+    ggplot2::scale_fill_manual(values = custom_colors,
+                               labels = custom_color_labels) +
     ggplot2::labs(
       title = plot_title,
       x = "Technology",
@@ -726,7 +742,7 @@ plot_avstrax_by_country <- function(
 
   p <- p + 
     ggplot2::labs(
-      subtitle = paste0(as.character(total_innos), " Innovations"),
+      subtitle = paste0(scales::comma(total_innos), " Innovations"),
       caption = "© 2026 Innovation Strategy Explorer"
     ) +
     ggplot2::theme(
@@ -1274,7 +1290,7 @@ plot_avstrax_by_technology <- function(pdata, classes, #green_classes,
     coord_flip()
 
   # Build subtitle with legend info
-  subtitle_text <- paste0(as.character(innos), " Innovations")
+  subtitle_text <- paste0(scales::comma(innos), " Innovations")
   if (has_comp_data) {
     subtitle_text <- paste0(subtitle_text, "
 Main: ", paste(technologies, collapse = ", "),
@@ -1538,7 +1554,7 @@ plot_avstrax_rta <- function(pdata, classes,
     coord_flip()
 
   # Add subtitle and caption
-  subtitle_text <- paste0(as.character(innos), " Innovations")
+  subtitle_text <- paste0(scales::comma(innos), " Innovations")
 
   p <- p + labs(subtitle = subtitle_text,
                 caption = "© 2025 Innovation Strategy Explorer") +

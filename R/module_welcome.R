@@ -7,25 +7,63 @@
 #' @keywords internal
 welcome_module_ui <- function(id) {
   ns <- shiny::NS(id)
+  shiny::tagList(
+    # Outer dynamic-bg layer covers the whole welcome panel. Background URL
+    # is set reactively in welcome_module_server via output$bg_css — that
+    # output re-rolls on every navbar tab change, so each visit to the
+    # welcome page lands on a different randomly-picked HiGGlobe image
+    # from inst/insights_html/figures/.
+    shiny::uiOutput(ns("bg_css"), inline = TRUE),
+    shiny::tags$style(shiny::HTML("
+      /* Outer bg layer: image fills the welcome panel; visible behind and
+         between the buttons. Solid white fallback while the image loads. */
+      .ise-welcome-bg {
+        background-color: #ffffff;
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        min-height: calc(100vh - 80px);
+        transition: background-image 0.6s ease-in-out;
+      }
+      /* Heading + intro: a soft translucent card so they stay legible on
+         top of a busy citation-globe background, without obscuring the
+         image too much. */
+      .ise-welcome-msg {
+        display: inline-block;
+        max-width: 760px;
+        padding: 22px 30px 14px 30px;
+        margin-bottom: 36px;
+        background: rgba(255, 255, 255, 0.78);
+        backdrop-filter: blur(2px);
+        -webkit-backdrop-filter: blur(2px);
+        border-radius: 14px;
+        box-shadow: 0 2px 14px rgba(0, 0, 0, 0.08);
+      }
+      .ise-welcome-msg h1 {
+        font-size: 2.1rem;
+        font-weight: 600;
+        margin: 0 0 10px 0;
+        line-height: 1.25;
+        color: #1a1a1a;
+      }
+      .ise-welcome-msg p {
+        margin: 0;
+        color: #444;
+      }
+    ")),
   shiny::div(
+    class = "ise-welcome-bg",
+    shiny::div(
     style = "
       max-width: 900px;
       margin: 0 auto;
       padding: 80px 20px 60px 20px;
       text-align: center;
     ",
-    shiny::h1(
-      "Welcome to the Innovation Strategy Explorer",
-      style = "
-        font-size: 2.1rem;
-        font-weight: 600;
-        margin-bottom: 40px;
-        line-height: 1.25;
-      "
-    ),
-    shiny::p(
-      "Choose a metric to start exploring:",
-      style = "color: #555; margin-bottom: 30px;"
+    shiny::div(
+      class = "ise-welcome-msg",
+      shiny::h1("Welcome to the Innovation Strategy Explorer"),
+      shiny::p("Choose a metric to start exploring:")
     ),
     shiny::div(
       style = "
@@ -96,6 +134,8 @@ welcome_module_ui <- function(id) {
         })
       )
     )
+  )
+  )
   )
 }
 
@@ -280,5 +320,47 @@ welcome_module_server <- function(id, parent_session) {
     shiny::observeEvent(input$go_spillovers, go_preset(welcome_presets$spillovers))
     shiny::observeEvent(input$go_returns,    go_preset(welcome_presets$returns))
     shiny::observeEvent(input$go_marginal,   go_preset(welcome_presets$marginal))
+
+    # Random-rotating HiGGlobe background. Re-rolls every time the parent
+    # navbar tab input changes, so each visit to the welcome page lands on
+    # a different image from inst/insights_html/figures/.
+    output$bg_css <- shiny::renderUI({
+      parent_session$input$navbar_page  # take dependency to re-roll on tabs
+      url <- welcome_random_bg_url()
+      if (is.null(url)) return(NULL)
+      shiny::tags$style(shiny::HTML(sprintf(
+        ".ise-welcome-bg { background-image: url('%s'); }", url
+      )))
+    })
   })
+}
+
+#' Master on/off switch for the random rotating welcome background.
+#'
+#' Flip to `TRUE` once a curated set of HiGGlobe pictures is in
+#' `insights/figures/`. While `FALSE`, `welcome_random_bg_url()` short-
+#' circuits to NULL — the welcome page falls back to a plain white
+#' background and the heading-card / button layout are unchanged. Leaving
+#' all the rotation code in place so flipping this back on is a one-line
+#' change.
+#' @keywords internal
+WELCOME_RANDOM_BG_ENABLED <- FALSE
+
+#' List the rotating welcome backgrounds available to this app build, and
+#' pick one URL at random. Returns `NULL` if disabled (see
+#' `WELCOME_RANDOM_BG_ENABLED`) or if no images are bundled.
+#'
+#' Looks under `inst/insights_html/figures/` (mirrored there by
+#' `insights/render_all.R`). Anything `*.png/jpg/jpeg/webp/svg` qualifies.
+#' @keywords internal
+welcome_random_bg_url <- function() {
+  if (!isTRUE(WELCOME_RANDOM_BG_ENABLED)) return(NULL)
+  fig_dir <- system.file("insights_html", "figures",
+                         package = "innovationStrategyExplorer")
+  if (!nzchar(fig_dir) || !dir.exists(fig_dir)) return(NULL)
+  files <- list.files(fig_dir,
+                      pattern = "\\.(png|jpe?g|webp|svg)$",
+                      ignore.case = TRUE)
+  if (!length(files)) return(NULL)
+  paste0("insights/figures/", sample(files, 1))
 }

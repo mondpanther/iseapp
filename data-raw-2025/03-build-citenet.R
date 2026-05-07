@@ -63,7 +63,6 @@ cat("  output: ", out_path,    "\n")
 
 t0 <- Sys.time()
 con <- dbConnect(duckdb::duckdb(), dbdir = ":memory:")
-on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
 dbExecute(con, sprintf("PRAGMA threads = %d",
                        max(1L, parallel::detectCores() - 1L)))
 
@@ -103,3 +102,5 @@ sz_mb <- round(file.info(out_path)$size / 1024 / 1024, 1)
 mins  <- round(as.numeric(difftime(Sys.time(), t0, units = "mins")), 2)
 cat(sprintf("  wrote %s rows (%.1f MB) in %.2f min\n",
             format(n_rows, big.mark = ","), sz_mb, mins))
+
+dbDisconnect(con, shutdown = TRUE)

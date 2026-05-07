@@ -146,7 +146,8 @@ umbrella_labels <- c(
   "All innovations",
   "Green Technology", "Battery Technology",
   "Hard to Abate Sector Decarbonization", "AI",
-  "Any Agriculture & Food technology"
+  "Any Agriculture & Food technology",
+  "Defence Technology"
 )
 
 # Derive class vectors from tech_lookup
@@ -158,6 +159,8 @@ hard_to_abate_classes <- tech_lookup |> filter(tech_group == "Hard to Abate Sect
   pull(technology)
 ai_classes <- tech_lookup |> filter(tech_group == "AI") |> pull(technology)
 agrifood_classes <- tech_lookup |> filter(tech_group == "Any Agriculture & Food technology") |> pull(technology)
+defence_classes <- tech_lookup |> filter(tech_group == "Defence Technology") |>
+  pull(technology)
 cpc_sections <- tech_lookup |>
   dplyr::filter(tech_group == technology) |>
   dplyr::filter(!technology %in% umbrella_labels) |>
@@ -177,6 +180,7 @@ battery_classes_d <- setdiff(battery_classes, "Battery Technology")
 hard_to_abate_classes_d <- setdiff(hard_to_abate_classes, "Hard to Abate Sector Decarbonization")
 ai_classes_d <- setdiff(ai_classes, "AI")
 agrifood_classes_d <- setdiff(agrifood_classes, "Any Agriculture & Food technology")
+defence_classes_d <- setdiff(defence_classes, c("Defence Technology", "Any Defence technology"))
 
 # Broad category = umbrella labels + anything novel from DB + CPC sections
 broad_techs <- unique(c(
@@ -206,6 +210,8 @@ grouped_techs <- list(
     as.list(setNames(hard_to_abate_classes_d, hard_to_abate_classes_d)),
   "Agriculture & Food technology" =
     as.list(setNames(agrifood_classes_d, agrifood_classes_d)),
+  "Detailed Defence technologies" =
+    as.list(setNames(defence_classes_d, defence_classes_d)),
   "CPC Sections & Other Categories" =
     as.list(setNames(cpc_sections, cpc_sections)),
   "\u2500\u2500\u2500 Actions" = list(
@@ -215,12 +221,13 @@ grouped_techs <- list(
 )
 
 colorings <- list(
-  green       = green_classes,
-  battery     = battery_classes,
+  green         = green_classes,
+  battery       = battery_classes,
   hard_to_abate = hard_to_abate_classes,
-  ai          = ai_classes,
-  cpcsecs     = cpc_sections,
-  agrifood    = agrifood_classes
+  ai            = ai_classes,
+  cpcsecs       = cpc_sections,
+  agrifood      = agrifood_classes,
+  defence       = defence_classes
 )
 
 # Reverse map: sub-technology -> umbrella name (used in server aggregation)
@@ -230,6 +237,7 @@ tech_umbrella_map <- c(
   setNames(rep("Hard to Abate Sector Decarbonization",length(hard_to_abate_classes_d)), hard_to_abate_classes_d),
   setNames(rep("AI",                                  length(ai_classes_d)),             ai_classes_d),
   setNames(rep("Any Agriculture & Food technology",   length(agrifood_classes_d)),       agrifood_classes_d),
+  setNames(rep("Defence Technology",                  length(defence_classes_d)),       defence_classes_d),
   setNames(cpc_sections, cpc_sections)
 )
 
@@ -703,6 +711,12 @@ bat_def <- battery_df |>
   dplyr::filter(nchar(cpc_code) > 0) |>
   dplyr::select(technology, cpc_code)
 
+def_def <- defence_df |>
+  tidyr::separate_rows(CPC, sep = ";") |>
+  dplyr::mutate(cpc_code = stringi::stri_replace_all_fixed(trimws(CPC), " ", "")) |>
+  dplyr::filter(nchar(cpc_code) > 0) |>
+  dplyr::select(technology, cpc_code)
+
 hta_def <- readxl::read_excel("classifications/New_Sector_Mapping.xlsx",
                                sheet = "hta_sector") |>
   dplyr::rename(detail = technology, technology = sector) |>
@@ -748,7 +762,7 @@ sec_def <- data.frame(
 )
 
 tech_defining_cpcs <- data.table::rbindlist(list(
-  ifc_def, bat_def, hta_def, ai_def, agri_def, sec_def
+  ifc_def, bat_def, hta_def, ai_def, agri_def, def_def, sec_def
 ), use.names = TRUE)
 data.table::setDT(tech_defining_cpcs)
 tech_defining_cpcs <- unique(tech_defining_cpcs[, .(technology, cpc_code)])
@@ -775,7 +789,7 @@ cat("  ✓", nrow(tech_defining_cpcs),
     "defining CPC code rows across",
     data.table::uniqueN(tech_defining_cpcs$technology), "technologies\n")
 
-rm(ifc_def, bat_def, hta_def, ai_def, agri_def, sec_def,
+rm(ifc_def, bat_def, hta_def, ai_def, agri_def, def_def, sec_def,
    umb_map_dt, umb_roll, subclass_titles); gc()
 cat("  ✓", nrow(tech_subclass_counts),
     "tech × subclass rows across",
@@ -814,8 +828,10 @@ usethis::use_data(
   novel_techs,
   green_classes,        battery_classes,   hard_to_abate_classes,
   ai_classes,           cpc_sections,      agrifood_classes,
+  defence_classes,
   green_classes_d,      battery_classes_d, hard_to_abate_classes_d,
   ai_classes_d,         agrifood_classes_d,
+  defence_classes_d,
   grouped_techs,
   all_broad_techs,
   colorings,

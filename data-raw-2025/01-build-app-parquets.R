@@ -23,6 +23,12 @@ library(DBI)
 library(duckdb)
 library(bigrquery)
 
+# Raise R's per-process vector memory ceiling. The patchar_slim x countrymap
+# cross-join transiently materialises ~230M rows x ~25 doubles, which exceeds
+# the macOS default (64 GB on Apple Silicon). Bumping to 128 GB gives headroom
+# for data.table's working copies during the join.
+if (exists("mem.maxVSize")) mem.maxVSize(128 * 1024)
+
 # ---- Optional build-time family-size filter --------------------------------
 # Default is NO filter (keep every family regardless of docdb_family_size).
 # Override by EDITING this line (hard-coded reset on each source so stale
@@ -304,6 +310,49 @@ ai_classes_map <- unique(ai_classes_map)
 techmap <- rbindlist(list(techmap, ai_classes_map))
 cat("  AI sub-categories:", nrow(ai_classes_map), "rows\n")
 rm(ai_df, ai_expanded, ai_classes_map)
+
+
+# ============================================================================
+# STEP 5b: Add Defence Technology classifications
+# ============================================================================
+# CPC scope follows F41/F42 (weapons + ammunition) plus the cross-cutting
+# subclasses commonly used in the patent-economics literature on defence,
+# see refs in R/functions_extrasectorshelper.R::defence_df.
+cat("Adding Defence Technology classifications...\n")
+
+defence_expanded <- defence_df |>
+  separate_rows(CPC, sep = ";") |>
+  mutate(cpc_class_symbol = stri_replace_all_fixed(trimws(CPC), " ", "")) |>
+  filter(nchar(cpc_class_symbol) > 0) |>
+  select(technology, cpc_class_symbol)
+
+setDT(defence_expanded)
+
+# Defence prefixes are a mix of subclasses (e.g. F41A, F42B) and full
+# main groups (e.g. B64D7/00, G01S7/41) — match by `starts_with` so a
+# subclass like F41A picks up F41A0017/00 etc., and a main-group code
+# like B64D7/00 also picks up its subgroups (B64D7/02, B64D7/04, ...).
+con <- DBI::dbConnect(duckdb::duckdb(), dbdir = ":memory:")
+DBI::dbExecute(con, sprintf("PRAGMA threads = %d",
+                            max(1L, parallel::detectCores() - 1L)))
+DBI::dbWriteTable(con, "cpcs",             as.data.frame(cpcs),             overwrite = TRUE)
+DBI::dbWriteTable(con, "defence_expanded", as.data.frame(defence_expanded), overwrite = TRUE)
+
+defence_classes_map <- as.data.table(DBI::dbGetQuery(con, "
+  SELECT DISTINCT c.docdb_family_id, p.technology
+  FROM cpcs c
+  JOIN defence_expanded p
+    ON starts_with(c.cpc_class_symbol, p.cpc_class_symbol)
+"))
+DBI::dbDisconnect(con, shutdown = TRUE)
+
+defence_umbrella <- defence_classes_map[, .(docdb_family_id = unique(docdb_family_id),
+                                            technology = "Any Defence technology")]
+
+techmap <- rbindlist(list(techmap, defence_classes_map, defence_umbrella))
+cat("  Defence:", nrow(defence_classes_map), "sub-category rows +",
+    nrow(defence_umbrella), "umbrella rows\n")
+rm(defence_expanded, defence_classes_map, defence_umbrella)
 
 
 # ============================================================================
@@ -697,23 +746,13 @@ for (tgt in ev_targets) {
   rm(ev_tgt)
 }
 
-# 10d: Compute istrax/avstrax for each supranational ev_<GROUP>
-cat("  10d: Computing istrax and avstrax for supranational groups...\n")
-ev_cols <- grep("^ev_", names(patchar), value = TRUE)
-ev_cols <- setdiff(ev_cols, "ev_global")
-for (evc in ev_cols) {
-  suffix <- sub("^ev_", "", evc)
-  is_col <- paste0("istrax_",  suffix)
-  av_col <- paste0("avstrax_", suffix)
-  patchar[, (is_col) := ((alpha + 1) / cost) * get(evc) * as.integer(pv <= 2 * cost)]
-  patchar[, (av_col) := (pv + get(evc)) / cost]
-}
-
-# Correct global as sum of HIC + EMDE (matching original pipeline behavior)
+# 10d: Correct ev_global as sum of HIC + EMDE (matching original pipeline
+# behaviour). The runtime view in R/runAppPackage.R derives is_*/av_* from
+# cost/alpha/pv/ev_* on every query, so we no longer materialise istrax_*
+# or avstrax_* here — that work blows up peak RAM during the cross-join
+# with countrymap (~22 GB worth of derived columns we'd just drop again).
 if (all(c("ev_HIC", "ev_EMDE") %in% names(patchar))) {
-  patchar[, ev_global      := ev_HIC + ev_EMDE]
-  patchar[, istrax_global  := istrax_HIC + istrax_EMDE]
-  patchar[, avstrax_global := (pv + ev_global) / cost]
+  patchar[, ev_global := ev_HIC + ev_EMDE]
 }
 
 # 10e: Build innovation x country measures in memory (no intermediate .fst files)
@@ -722,10 +761,11 @@ if (all(c("ev_HIC", "ev_EMDE") %in% names(patchar))) {
 cat("  10e: Building innovation x country measures in memory...\n")
 
 # Per-innovation measures (same for all countries of an innovation).
-# `cost`, `alpha`, `pv` are kept here too — they are the inputs the runtime
-# view in R/runAppPackage.R uses to derive is_*/av_* on the fly, so we no
-# longer need to materialise the 44 derived columns into the parquet.
-measure_cols <- grep("^(istrax_|avstrax_|ev_)", names(patchar), value = TRUE)
+# Only ev_* + cost/alpha/pv go into the parquet — the runtime view in
+# R/runAppPackage.R derives is_*/av_* from those four. Any leftover
+# istrax_*/avstrax_* columns from earlier steps (istrax_global,
+# avstrax_global) are deliberately excluded.
+measure_cols <- grep("^ev_", names(patchar), value = TRUE)
 patchar_slim <- patchar[, c("docdb_family_id", measure_cols,
                              "cost", "alpha", "pv"), with = FALSE]
 
@@ -754,9 +794,10 @@ cat(sprintf("    fam_size>=2 families in patent_data: %s / %s (%.1f%%)\n",
             100 * uniqueN(patent_data[fam_size_min2 == TRUE]$docdb_family_id) /
                   uniqueN(patent_data$docdb_family_id)))
 
-# Merge in national measures (only exist for a subset of innovation x country)
-national_cols <- c("ev_nationalkey_2013_2022", "istrax_nationalkey_2013_2022",
-                   "avstrax_nationalkey_2013_2022")
+# Merge in national ev measure (only exists for a subset of innovation x
+# country). is_/av_ nationalkey are derived from this + cost/alpha/pv at
+# runtime, so we no longer carry their materialised forms.
+national_cols <- c("ev_nationalkey_2013_2022")
 pcm_national <- pcm[, c("docdb_family_id", "ctry_code", national_cols), with = FALSE]
 patent_data <- pcm_national[patent_data, on = c("docdb_family_id", "ctry_code")]
 
@@ -926,17 +967,6 @@ for (nc in num_cols) {
     patent_data[, (nc) := round(get(nc), 4)]
 }
 
-# Drop the precomputed is_*/av_* columns. They were a function of
-# (ev_*, cost, alpha, pv) and are now reconstructed on every query by the
-# DuckDB view in R/runAppPackage.R. Removing 44 derived columns shrinks
-# patent_database.parquet from ~1.9 GB to <1 GB.
-derived_cols <- grep("^(is_|av_)", names(patent_data), value = TRUE)
-if (length(derived_cols)) {
-  cat("  Dropping", length(derived_cols),
-      "derived is_*/av_* columns (recomputed by runtime view)\n")
-  patent_data[, (derived_cols) := NULL]
-}
-
 cat("  patent_data:", nrow(patent_data), "rows,", ncol(patent_data), "columns\n")
 
 # Sort by ctry_code for optimal parquet predicate pushdown
@@ -986,6 +1016,8 @@ hard_to_abate_classes <- c("Any Hard to Abate technology", "Hard to Abate Sector
 ai_classes            <- c("AI", "Machine Learning", "Deep Learning", "Natural Language Processing (NLP)", "Computer Vision", "Speech Recognition & Synthesis", "Robotics & Autonomous Systems", "Knowledge Representation & Reasoning", "Planning & Decision Making", "Generative AI", "Semiconductors", "Cloud & Data Infrastructure", "Data Rettrieval & Processing System", "Platform & Frameworks", "Deployment & Support")
 cpc_sections          <- c("Human Necessities", "Performing Operations; Transporting", "Chemistry; Metallurgy", "Textiles; Paper", "Fixed Constructions", "Mechanical Engineering; Lighting; Heating; Weapons; Blasting", "Physics", "Electricity", "General tagging of new or cross-sectional technology")
 agrifood_classes      <- c("Any Agriculture & Food technology", "Input supply", "Primary food and feed production", "Post-harvest handling & aggregation", "Processing", "Distribution/wholesale", "Retail/consumption", "Crosscutting")
+defence_classes       <- c("Any Defence technology", "Defence Technology",
+                            unique(defence_df$technology))
 ifc_standalone        <- c("Fossil Fuel", "Aerospace", "Biotechnology", "Blockchain", "Healthtech", "Wireless")
 
 tech_group_map <- c(
@@ -994,6 +1026,7 @@ tech_group_map <- c(
   setNames(rep("Hard to Abate Sector Decarbonization", length(hard_to_abate_classes)), hard_to_abate_classes),
   setNames(rep("AI",                                   length(ai_classes)),             ai_classes),
   setNames(rep("Any Agriculture & Food technology",    length(agrifood_classes)),       agrifood_classes),
+  setNames(rep("Defence Technology",                   length(defence_classes)),       defence_classes),
   setNames(cpc_sections,                                                                cpc_sections),
   setNames(ifc_standalone,                                                              ifc_standalone)
 )

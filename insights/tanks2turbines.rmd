@@ -1,0 +1,430 @@
+---
+title: "Tanks to Turbines"
+subtitle: "Green innovation creates broader spillovers than defence — across origin economies"
+author: "Innovation Strategy Explorer — insights"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    self_contained: true
+    toc: true
+    toc_depth: 2
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      fig.width = 13, fig.height = 5.2, dpi = 150)
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(tidyr)
+library(scales)
+library(htmltools)
+suppressPackageStartupMessages({
+  library(arrow); library(DBI); library(duckdb); library(leaflet)
+})
+source("R/local_higglobe.R")
+
+# Resolve `inst/extdata/` whether the rmd is being knitted from the project
+# root or from the insights/ directory.
+data_dir <- {
+  if      (dir.exists("../inst/extdata")) "../inst/extdata"
+  else if (dir.exists("inst/extdata"))    "inst/extdata"
+  else    stop("Cannot find inst/extdata/ — knit from project root.")
+}
+```
+
+## The argument in one sentence
+
+Defence R&D is routinely justified with the spillover argument — "DARPA gave
+us the internet" — but applying the same yardstick to green-technology
+innovation reveals that green tech generates broader and deeper citation
+footprints than defence does, both at the umbrella level (per-innovation
+spillovers, three origin economies) and at the citation-network level
+(the citation graphs of the world's top-1,000 patents in each domain).
+
+```{r autofetch, include=FALSE}
+# ----------------------------------------------------------------------------
+# Everything this note needs is computed LOCALLY from the parquets in
+# inst/extdata/. No chromote, no HTTP, no live-app dependency.
+#
+#  * Bar charts: local_value_flows() aggregates patent_database directly,
+#    matching the live Country-Explorer "Value flows by Technology" CSV
+#    output (technology, mean, sem, innos). `granted_only = FALSE` =
+#    full database, both granted and non-granted families.
+#  * HiGGlobe maps: higglobe_local_sample() builds the citation-network
+#    samples; higglobe_local_leaflet() renders them as interactive
+#    leaflet widgets inline in the HTML output below.
+#
+# Both helpers live in insights/R/local_higglobe.R.
+# ----------------------------------------------------------------------------
+
+# Origin economies we contrast in the bar charts.
+origins <- list(
+  list(label = "LMICs (excl. China)",   local = "LMICs (excl. China)",
+       ctry  = "LMICs (excl. China)",  tag   = "lmic"),
+  list(label = "China",                 local = "CN",
+       ctry  = "CN",                   tag   = "cn"),
+  list(label = "High-Income Countries", local = "High income countries",
+       ctry  = "High income countries", tag  = "hic")
+)
+
+tech_categories_full <- c(
+  "All innovations",
+  "Green Technology", "Green Energy", "Green Transport",
+  "Green Manufacturing", "GHG Capture", "Adaptation",
+  "Green Housing", "Circular Economy", "Green ICT",
+  "Green Agriculture",
+  "AI", "Any Agriculture & Food technology",
+  "Defence Technology", "Any Defence technology",
+  "Small Arms & Ordnance", "Non-firearm Weapons",
+  "Projectile & Missile Launching", "Weapon Sights & Aiming",
+  "Missile Propulsion", "Armour & Armoured Vehicles",
+  "Targets & Training", "Ammunition", "Fuzes & Ammunition Safety",
+  "Blasting & Demolition", "Naval Warfare",
+  "Military Aviation Equipment", "Defence Radar & Sonar"
+)
+
+# Build a list of FOUR per-origin aggregates, one per sample variant:
+#   full     — granted + non-granted, all family sizes (the default story)
+#   granted  — granted families only
+#   multifam — `docdb_family_size >= 2` only (one-off filings stripped out)
+#   both     — granted AND `docdb_family_size >= 2`
+# The same 28 tech categories and the same three origins are aggregated
+# under each filter. About 3-4 s per variant.
+flows_variants <- list(
+  full     = list(label = "Full database",
+                  desc  = "Granted + non-granted, all family sizes",
+                  granted = FALSE, multifam = FALSE),
+  granted  = list(label = "Granted only",
+                  desc  = "Restricted to families flagged granted",
+                  granted = TRUE,  multifam = FALSE),
+  multifam = list(label = "Multi-application families",
+                  desc  = "Restricted to docdb_family_size >= 2",
+                  granted = FALSE, multifam = TRUE),
+  both     = list(label = "Granted & multi-application",
+                  desc  = "Both filters applied",
+                  granted = TRUE,  multifam = TRUE)
+)
+
+flows_list <- lapply(flows_variants, function(v) {
+  do.call(rbind, lapply(origins, function(o) {
+    df <- local_value_flows(
+      country       = o$local,
+      techs         = tech_categories_full,
+      toflow        = "ev_global",
+      granted_only  = v$granted,
+      multifam_only = v$multifam,
+      data_dir      = data_dir
+    )
+    df$origin <- factor(o$label, levels = vapply(origins, `[[`, "", "label"))
+    df
+  }))
+})
+
+# Default `flows` for any code that still references it directly: the
+# full-DB variant. Most charts now consume `flows_list[[variant]]`.
+flows <- flows_list$full
+have_data <- nrow(flows) > 0
+
+# Build TWO large global HiGGlobe samples locally — one for green, one
+# for defence. Both seeded with the top 1,000 patents worldwide by
+# Average Global Spillover (`ev_global`); 1% edge sampling at each
+# generation step keeps the map readable while following 4 generations
+# of forward citations. Mirrors the live HiGGlobe params on
+# https://mondpanther-iseapp2.share.connect.posit.cloud/?navbar_page=...
+# (gen0_select_mode=Top, gen0_unit_mode=Number, gen0_sample_val=1000,
+# edge_sample_val=1, add_generations=4).
+panel_green <- higglobe_local_sample(
+  country          = "All countries",
+  techs            = "Green Technology",
+  toflow           = "ev_global",
+  gen0_n           = 1000L,
+  gen0_mode        = "Top",
+  n_generations    = 4L,
+  edge_sample_pct  = 1,
+  include_fallback = FALSE,
+  seed             = 42,
+  data_dir         = data_dir
+)
+panel_defence <- higglobe_local_sample(
+  country          = "All countries",
+  techs            = "Any Defence technology",
+  toflow           = "ev_global",
+  gen0_n           = 1000L,
+  gen0_mode        = "Top",
+  n_generations    = 4L,
+  edge_sample_pct  = 1,
+  include_fallback = FALSE,
+  seed             = 42,
+  data_dir         = data_dir
+)
+panel_ai <- higglobe_local_sample(
+  country          = "All countries",
+  techs            = "AI",
+  toflow           = "ev_global",
+  gen0_n           = 1000L,
+  gen0_mode        = "Top",
+  n_generations    = 4L,
+  edge_sample_pct  = 1,
+  include_fallback = FALSE,
+  seed             = 42,
+  data_dir         = data_dir
+)
+```
+
+```{r helpers, include=FALSE}
+
+# Build a HiGGlobe deep-link URL on the public app for any (techs, country)
+# pair so each panel caption can link straight to the live, pannable view.
+higglobe_url <- function(country, techs,
+                         base = "https://mondpanther-iseapp2.share.connect.posit.cloud/") {
+  # Scalar quoted-string format matches Shiny's own bookmark serialiser
+  # output for multi-select selectize inputs, and round-trips correctly
+  # through Shiny's bookmark-restore handler. JSON-array form
+  # (`["…"]`) was tried and silently dropped on restore.
+  q <- function(x) utils::URLencode(paste0('"', x, '"'), reserved = TRUE)
+  paste0(
+    base, "?_inputs_",
+    "&navbar_page=", q("HiGGlobe"),
+    "&hglobe-country=", q(country),
+    "&hglobe-firm=",    q("No firm filter"),
+    "&hglobe-techs=",   q(techs),
+    "&hglobe-city=",    q("No city filter"),
+    "&hglobe-toflow=",  q("ev_global"),
+    "&hglobe-granted_only=false&hglobe-multifam_only=false",
+    "&hglobe-include_fallback=false",
+    # Match the local panels: top 1000 by ev_global, 1% edge sampling,
+    # 4 follow-on generations.
+    "&hglobe-gen0_select_mode=", q("Top"),
+    "&hglobe-gen0_unit_mode=",   q("Number"),
+    "&hglobe-gen0_sample_val=1000",
+    "&hglobe-edge_select_mode=", q("Random"),
+    "&hglobe-edge_unit_mode=",   q("Percent"),
+    "&hglobe-edge_sample_val=1",
+    "&hglobe-add_generations=4",
+    "&hglobe-sidebar=true",
+    "&hglobe-show_gen_0=true&hglobe-show_gen_1=true",
+    "&hglobe-show_gen_2=true&hglobe-show_gen_3=true",
+    "&hglobe-show_gen_4=true",
+    # `step=N` flips the URL-driven auto-init switch in module_hglobe.R:
+    # the module clicks Initiate Innovation 1.2 s after its observers
+    # register, then auto-clicks Generate once gen 0 is seeded. Without
+    # this the link only RESTORES the input values; nothing renders, so
+    # the dropdown ends up looking empty even when its value is set.
+    "&step=4"
+  )
+}
+```
+
+## How knowledge travels: green technology
+
+Forward citations radiating out from the **top 1,000 green-tech innovations
+worldwide** (ranked by Average Global Spillover, `ev_global`). `gen 0` (blue)
+are the source patents; `gen 1` (red) is direct citations; `gen 2-4`
+(green / orange / purple) are citations of citations. Edges are a 1%
+random sample at each step so the map stays legible. Knowledge fans out
+across every continent.
+
+```{r green-globe}
+htmltools::tagList(
+  htmltools::tags$div(
+    style = "margin: 6px 0 4px 0; font-size: 0.85rem; text-align: right;",
+    htmltools::tags$a(
+      "Open the live HiGGlobe view →",
+      href   = higglobe_url("All countries", "Green Technology"),
+      target = "_blank", rel = "noopener"
+    )
+  ),
+  higglobe_local_leaflet(panel_green, height = "560px")
+)
+```
+
+## Contrast: defence technology
+
+Same construction, same parameters — top 1,000 defence-tech innovations
+worldwide, four generations of forward citations, 1% edge sample.
+
+```{r defence-globe}
+htmltools::tagList(
+  htmltools::tags$div(
+    style = "margin: 6px 0 4px 0; font-size: 0.85rem; text-align: right;",
+    htmltools::tags$a(
+      "Open the live HiGGlobe view →",
+      href   = higglobe_url("All countries", "Any Defence technology"),
+      target = "_blank", rel = "noopener"
+    )
+  ),
+  higglobe_local_leaflet(panel_defence, height = "560px")
+)
+```
+
+Defence citations stay closer to their home cluster, fade to `gen 1` /
+`gen 2`, and rarely reach the deeper generations — even though the gen 0
+seeds are the top 1,000 defence patents the database knows about.
+
+## For comparison: AI technology
+
+The same construction applied to the **top 1,000 AI patents worldwide** —
+where the spillover-driven justification for public investment is
+arguably even louder than for defence. AI's citation network is denser
+than green's at every generation, but is overwhelmingly concentrated in a
+narrower band of countries (US west coast, China east coast, Korea,
+Western Europe).
+
+```{r ai-globe}
+htmltools::tagList(
+  htmltools::tags$div(
+    style = "margin: 6px 0 4px 0; font-size: 0.85rem; text-align: right;",
+    htmltools::tags$a(
+      "Open the live HiGGlobe view →",
+      href   = higglobe_url("All countries", "AI"),
+      target = "_blank", rel = "noopener"
+    )
+  ),
+  higglobe_local_leaflet(panel_ai, height = "560px")
+)
+```
+
+## Cross-tech comparisons by sample {.tabset .tabset-pills}
+
+The four pills below toggle the **patent sample** behind every chart in
+this section — the headline four-umbrella bars, the subcategory drilldown,
+and the share-by-subcategory donuts all redraw together. Every chart
+re-runs against `patent_database.parquet` locally, so flipping between
+samples is instantaneous after the first render.
+
+* **Full database** — granted *and* non-granted, all family sizes (the
+  default thesis: every patent the database knows about).
+* **Granted only** — restricts to families flagged `granted = TRUE`.
+* **Multi-application families** — `docdb_family_size >= 2`, i.e. only
+  families that the original applicant cared enough to file in more than
+  one office. A common signal of "real" innovation vs. one-off filings.
+* **Granted & multi-application** — both filters at once. Strictest cut.
+
+### Full database
+
+```{r umb-full, fig.height=4.2, fig.width=13}
+t2t_make_umbrella_bar(flows_list$full,
+                      sample_label = flows_variants$full$desc)
+```
+
+[Open this view in the live Country Explorer →](https://mondpanther-iseapp2.share.connect.posit.cloud/?_inputs_&country-sidebar=true&navbar_page=%22Country%20Explorer%22&country-inner_tabs=%22Value%20flows%20by%20Technology%22&country-country=%22LMICs%20(excl.%20China)%22&country-firm=%22No%20firm%20filter%22&country-toflow=%22ev_global%22&country-tech_categories_plot1=%5B%22Green%20Technology%22%2C%22AI%22%2C%22Any%20Agriculture%20%26%20Food%20technology%22%2C%22Defence%20Technology%22%5D&country-widthscale=%22log%22&country-display_mode=%22confidence%22&country-granted_only=false&country-multifam_only=false)
+
+```{r drill-full, fig.height=9, fig.width=13}
+t2t_make_drilldown_bar(flows_list$full,
+                       sample_label = flows_variants$full$desc)
+```
+
+```{r donut-full, fig.height=8.6, fig.width=13}
+t2t_make_donut_grid(flows_list$full, origins)
+```
+
+### Granted only
+
+```{r umb-granted, fig.height=4.2, fig.width=13}
+t2t_make_umbrella_bar(flows_list$granted,
+                      sample_label = flows_variants$granted$desc)
+```
+
+```{r drill-granted, fig.height=9, fig.width=13}
+t2t_make_drilldown_bar(flows_list$granted,
+                       sample_label = flows_variants$granted$desc)
+```
+
+```{r donut-granted, fig.height=8.6, fig.width=13}
+t2t_make_donut_grid(flows_list$granted, origins)
+```
+
+### Multi-application families
+
+```{r umb-multifam, fig.height=4.2, fig.width=13}
+t2t_make_umbrella_bar(flows_list$multifam,
+                      sample_label = flows_variants$multifam$desc)
+```
+
+```{r drill-multifam, fig.height=9, fig.width=13}
+t2t_make_drilldown_bar(flows_list$multifam,
+                       sample_label = flows_variants$multifam$desc)
+```
+
+```{r donut-multifam, fig.height=8.6, fig.width=13}
+t2t_make_donut_grid(flows_list$multifam, origins)
+```
+
+### Granted & multi-application
+
+```{r umb-both, fig.height=4.2, fig.width=13}
+t2t_make_umbrella_bar(flows_list$both,
+                      sample_label = flows_variants$both$desc)
+```
+
+```{r drill-both, fig.height=9, fig.width=13}
+t2t_make_drilldown_bar(flows_list$both,
+                       sample_label = flows_variants$both$desc)
+```
+
+```{r donut-both, fig.height=8.6, fig.width=13}
+t2t_make_donut_grid(flows_list$both, origins)
+```
+
+## {-}
+
+Whichever sample you flip to, the qualitative ranking — green and
+agriculture above defence, on a per-innovation basis — is robust. The
+"Granted & multi-application" pill is the most conservative cut, where
+defence's relative position is highest; the headline gap survives.
+
+## Why this matters
+
+If the spillover argument is what justifies public R&D — DARPA, Horizon
+Europe's defence pillar, the UK clean-tech budget — then the comparison
+above ought to inform how the next budget cycle gets carved up. Two
+findings stand out:
+
+1. **Green-tech innovation travels further than defence** in every origin
+   economy we look at — LMICs, China, and the High-Income countries.
+2. **The per-innovation spillover gap is large** even for the origin
+   economies where defence patenting is dense (HICs); the gap widens for
+   LMICs where defence sample sizes are tiny.
+
+Neither result tells us defence R&D has zero externalities — classified
+filings don't show up in PATSTAT, and dual-use families that are tagged
+civilian-first won't appear in the F41/F42 + cross-cutting CPC scope used
+here. But on the evidence that *is* published, the developing-world
+clean-tech innovator delivers the broader public good.
+
+## Caveats
+
+* **Defence patent coverage is partial.** Some military innovation is
+  classified or filed under cover names. The CPC scope follows the academic
+  patent-economics literature
+  ([Acosta et al. 2013](https://link.springer.com/article/10.1007/s11192-012-0857-8)).
+* **`gen 0` sample sizes differ across the HiGGlobe panels.** All three
+  globes draw the same fixed-N random sample (`gen0_sample_val=100`) but
+  the universe they're drawn from varies — China's defence universe is
+  small; LMIC defence is smaller still.
+* **`ev_global` is a model-derived value**, the shadow value implied by the
+  citation diffusion model that powers the Innovation Strategy Explorer;
+  the original methodology is in [Efficient industrial policy for
+  innovation: standing on the shoulders of hidden
+  giants](https://cep.lse.ac.uk/_NEW/publications/abstract.asp?index=8614).
+
+## How to reproduce
+
+1. The note reads from `inst/extdata/{patent_database, citenet,
+   countrymap, patents_x_tech, tech_lookup, country_lookup}.parquet`. If
+   those exist (you've run `data-raw-2025/whole_databuild_pipeline.R`),
+   step 2 just works.
+2. From the project root:
+   `rmarkdown::render("insights/tanks2turbines.rmd")`.
+   * Both the bar charts and the HiGGlobe samples are now computed
+     locally via DuckDB over those parquets. See
+     [`insights/R/local_higglobe.R`](R/local_higglobe.R) for both
+     `local_value_flows()` (the bar-chart aggregator) and
+     `higglobe_local_sample()` / `higglobe_local_leaflet()` (the
+     citation-network sampler + renderer). No chromote, no live-app
+     dependency, no per-render fetch.
+3. Toggling `granted_only = TRUE / FALSE` in the autofetch chunk is
+   instant — the aggregates rebuild from the parquet in a few seconds.
+4. `source("insights/render_all.R")` to bundle the HTML for deployment.

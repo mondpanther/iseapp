@@ -35,9 +35,9 @@ fetch_flow_csvs <- function(specs,
                               "Green Agriculture",
                               "Any Agriculture & Food technology"
                             ),
-                            cold_start_wait = 30,
-                            reflow_wait     = 20,
-                            fetch_timeout_s = 120,
+                            cold_start_wait = 60,
+                            reflow_wait     = 30,
+                            fetch_timeout_s = 240,
                             overwrite       = FALSE) {
 
   if (!requireNamespace("chromote", quietly = TRUE)) {
@@ -103,7 +103,7 @@ fetch_flow_csvs <- function(specs,
   b$Page$loadEventFired()
   Sys.sleep(cold_start_wait)
 
-  wait_for_download_href <- function(timeout = 30) {
+  wait_for_download_href <- function(timeout = 90) {
     deadline <- Sys.time() + timeout
     repeat {
       v <- b$Runtime$evaluate(

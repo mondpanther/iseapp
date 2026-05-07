@@ -37,26 +37,44 @@ render_insights <- function(
 
   rendered <- 0L
   copied   <- 0L
+  skipped  <- 0L
   written  <- character(0)
   for (rmd in rmd_files) {
-    expected_html <- sub("\\.[Rr]md$", ".html", rmd)
-    have_html <- file.exists(expected_html)
+    sibling_html <- sub("\\.[Rr]md$", ".html", rmd)
+    bundle_html  <- file.path(
+      out_dir, sub("\\.[Rr]md$", ".html", basename(rmd))
+    )
+    have_sibling <- file.exists(sibling_html)
+    have_bundle  <- file.exists(bundle_html)
 
-    if (have_html && !isTRUE(force)) {
-      # Some of our notes (innocity, patent_cluster_compare, ...) take
-      # tens of minutes to (re-)knit because they hit live external
-      # APIs (EPO OPS, OpenAI) and bake screenshots from chromote.
-      # Re-rendering them on every deploy is wasteful when the
-      # author has already produced a fresh HTML alongside the .Rmd.
-      # If a sibling .html exists, just copy it.
-      message("\n=== Reusing existing HTML for ", basename(rmd), " ===")
-      message("  source: ", expected_html)
-      html_out <- expected_html
+    if (have_sibling && !isTRUE(force)) {
+      # Author has an authoritative sibling HTML next to the .Rmd —
+      # copy it into the bundle (overwriting any older copy there).
+      # Some notes (innocity, patent_cluster_compare, ...) take tens
+      # of minutes to re-knit because they hit live APIs and bake
+      # chromote screenshots, so we never re-render when a sibling
+      # HTML is already present.
+      message("\n=== Reusing sibling HTML for ", basename(rmd), " ===")
+      message("  source: ", sibling_html)
+      html_out <- sibling_html
       copied   <- copied + 1L
+      dest <- file.path(out_dir, basename(html_out))
+      file.copy(html_out, dest, overwrite = TRUE)
+      message("  -> copied to ", dest)
+      written <- c(written, dest)
+    } else if (have_bundle && !isTRUE(force)) {
+      # No sibling, but the bundle already has an HTML for this note.
+      # Leave it in place — same "don't re-render slow notes on every
+      # deploy" reasoning.
+      message("\n=== Skipping ", basename(rmd),
+              " (bundle already has HTML) ===")
+      message("  bundle: ", bundle_html)
+      skipped <- skipped + 1L
+      written <- c(written, bundle_html)
     } else {
       message("\n=== Rendering ", rmd, " ===")
-      if (have_html && isTRUE(force)) {
-        message("  (force = TRUE: re-rendering despite sibling HTML)")
+      if ((have_sibling || have_bundle) && isTRUE(force)) {
+        message("  (force = TRUE: re-rendering despite existing HTML)")
       }
       html_out <- rmarkdown::render(
         rmd,
@@ -65,17 +83,35 @@ render_insights <- function(
         envir         = new.env()
       )
       rendered <- rendered + 1L
+      dest <- file.path(out_dir, basename(html_out))
+      file.copy(html_out, dest, overwrite = TRUE)
+      message("  -> copied to ", dest)
+      written <- c(written, dest)
     }
+  }
 
-    dest <- file.path(out_dir, basename(html_out))
-    file.copy(html_out, dest, overwrite = TRUE)
-    message("  -> copied to ", dest)
-    written <- c(written, dest)
+  # ----- Figures -----
+  # Mirror insights/figures/ into inst/insights_html/figures/ so the bundled
+  # app can serve them at /insights/figures/<file>. Used by the welcome
+  # page's randomly-rotating HiGGlobe background and by any rmd that
+  # references images via the `figures/` relative path.
+  fig_src <- file.path(src_dir, "figures")
+  fig_dst <- file.path(out_dir, "figures")
+  if (dir.exists(fig_src)) {
+    dir.create(fig_dst, recursive = TRUE, showWarnings = FALSE)
+    fig_files <- list.files(fig_src, full.names = TRUE,
+                            pattern = "\\.(png|jpg|jpeg|webp|svg)$",
+                            ignore.case = TRUE)
+    if (length(fig_files)) {
+      file.copy(fig_files, fig_dst, overwrite = TRUE)
+      message(sprintf("Copied %d figure(s) -> %s",
+                      length(fig_files), fig_dst))
+    }
   }
 
   message(sprintf(
-    "\nDone: %d rendered, %d copied from existing HTML. Output dir: %s",
-    rendered, copied, out_dir))
+    "\nDone: %d rendered, %d copied from sibling, %d kept from bundle. Output dir: %s",
+    rendered, copied, skipped, out_dir))
   message("Deploy the app (Posit Publisher) to make them reachable at ",
           "/insights/<file>.html")
   invisible(written)
