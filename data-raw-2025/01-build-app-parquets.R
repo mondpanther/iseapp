@@ -98,13 +98,88 @@ find_dropbox_dir <- function() {
 }
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
+# ---------------------------------------------------------------------------
+# BigQuery cache helper
+# ---------------------------------------------------------------------------
+# Wraps the read-or-fetch idiom we use for every BQ pull. A plain
+# `if (file.exists(cache)) ...` gate is fragile: when the source dataset name
+# changes (e.g. fromPATSTAT2021 -> fromPATSTAT2025), the local cache silently
+# wins and the BigQuery refresh never fires. To guard against that, we write
+# a sidecar `<cache>.meta.json` recording the `source_id` (table + filter
+# description) the cache was built from. A subsequent run only reuses the
+# cache when `source_id` matches; otherwise it re-pulls.
+#
+# Manual override:
+#   ISEAPP_REFRESH_BQ=1 Rscript data-raw-2025/01-build-app-parquets.R
+# forces every cache to be refreshed regardless of metadata match.
+#
+# Supported cache extensions: .fst, .parquet.
+bq_cache <- function(cache_path, source_id, fetch_fn) {
+  ext <- tools::file_ext(cache_path)
+  reader <- switch(ext,
+    fst     = function(p) fst::read_fst(p, as.data.table = TRUE),
+    parquet = function(p) as.data.table(arrow::read_parquet(p)),
+    stop("bq_cache: unsupported extension '", ext, "' for ", cache_path))
+  writer <- switch(ext,
+    fst     = function(x, p) fst::write_fst(x, p, compress = 100),
+    parquet = function(x, p) arrow::write_parquet(
+                               x, p,
+                               compression = "zstd", compression_level = 3),
+    stop("bq_cache: unsupported extension '", ext, "' for ", cache_path))
+
+  meta_path <- paste0(cache_path, ".meta.json")
+  force_env <- toupper(Sys.getenv("ISEAPP_REFRESH_BQ", "")) %in%
+                 c("1", "TRUE", "T", "YES", "Y")
+
+  if (force_env) {
+    message("  ISEAPP_REFRESH_BQ set; ignoring any cached copy of ",
+            basename(cache_path), ".")
+  } else if (file.exists(cache_path) && file.exists(meta_path)) {
+    meta <- jsonlite::fromJSON(meta_path)
+    if (identical(meta$source, source_id)) {
+      cat("  Loading cache (", source_id, ") from ", cache_path, "\n",
+          sep = "")
+      return(reader(cache_path))
+    }
+    message("  Cache at ", cache_path, " was built from '", meta$source,
+            "' (expected '", source_id, "'); refreshing.")
+  } else if (file.exists(cache_path) && !file.exists(meta_path)) {
+    message("  Cache at ", cache_path,
+            " has no sidecar metadata; treating as stale and refreshing.")
+  }
+
+  cat("  Pulling from BigQuery: ", source_id, " ...\n", sep = "")
+  x <- fetch_fn()
+  writer(x, cache_path)
+  jsonlite::write_json(
+    list(source = source_id,
+         built  = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"),
+         rows   = nrow(x)),
+    meta_path, auto_unbox = TRUE, pretty = TRUE)
+  cat("  Cached ", nrow(x), " rows -> ", cache_path,
+      " (meta: ", meta_path, ")\n", sep = "")
+  x
+}
+
 dropbox_dir <- find_dropbox_dir()
 # ---- 2025 data locations ----
 # fromWATSON: Watson-built value files (2013-2022 window).
 # patstat_clean: PATSTAT Autumn 2025 tables exported as parquet.
 # iseapp_dir: regionmap / firmmap / inglobe inputs (unchanged from 2021).
+#
+# RUN_VERSION ties this build to a specific patbis2025 experimental run.
+# patbis2025 writes every per-run output into data/fromWATSON_<RUN_VERSION>/
+# (e.g. fromWATSON_basic for the inaugural run with the is_um / UM=0 PV rule
+# applied, and an inventor-based country attribution).  Set RUN_VERSION to ""
+# to read the unversioned data/fromWATSON/ produced by the legacy 2021/2024
+# pipelines.  Override at the shell with PATBIS_RUN_VERSION=v2 Rscript ...
+RUN_VERSION  <- Sys.getenv("PATBIS_RUN_VERSION", "basic")
 patbis_dir   <- file.path(dropbox_dir, "patbis2025", "data")
-fromWATSON   <- file.path(patbis_dir, "fromWATSON")
+fromWATSON   <- if (nzchar(RUN_VERSION)) {
+  file.path(patbis_dir, paste0("fromWATSON_", RUN_VERSION))
+} else {
+  file.path(patbis_dir, "fromWATSON")
+}
 patstat_clean <- file.path(dropbox_dir,
                            "PATSTAT autumn 2025 data",
                            "patstat_clean")
@@ -125,6 +200,7 @@ dir.create(file.path(bigdata_dir, "istraxes"), showWarnings = FALSE)
 dir.create("inst/extdata", recursive = TRUE, showWarnings = FALSE)
 
 cat("=== ISE App Data Build (2025, 2013-2022 window) ===\n")
+cat("RUN_VERSION:  ", if (nzchar(RUN_VERSION)) RUN_VERSION else "(none, reading bare fromWATSON/)", "\n")
 cat("dropbox_dir:  ", dropbox_dir,  "\n")
 cat("fromWATSON:   ", fromWATSON,   "\n")
 cat("patstat_clean:", patstat_clean, "\n")
@@ -137,37 +213,27 @@ cat("iseapp_dir:   ", iseapp_dir,   "\n\n")
 
 cpcs_cache <- file.path(bigdata_dir, "cpcs.fst")
 
-if (file.exists(cpcs_cache)) {
-  cat("Loading cached CPC data from", cpcs_cache, "...\n")
-  cpcs <- read_fst(cpcs_cache, as.data.table = TRUE)
-} else {
-  cat("Downloading CPC base table from BigQuery...\n")
-  tic("CPC base (BigQuery)")
+library(bigrquery)
+library(DBI)
 
-  library(bigrquery)
-  library(DBI)
-
-  project_id <- "patbis"
-  dataset    <- "fromPATSTAT2025"
-  table      <- "tls225_docdb_fam_cpc"
-
-  cpcs <- bq_table_download(
-    bq_table(project_id, dataset, table),
-    page_size = 50000
-  ) |>
-    dplyr::select(docdb_family_id, cpc_class_symbol)
-
-  setDT(cpcs)
-
-  # Strip all spaces from CPC symbols for matching
-  cpcs[, cpc_class_symbol := stri_replace_all_fixed(cpc_class_symbol, " ", "")]
-
-  cat("  Saving cache to", cpcs_cache, "...\n")
-  write_fst(cpcs, cpcs_cache, compress = 100)
-
-  gc()
-  toc()
-}
+cpcs <- bq_cache(
+  cache_path = cpcs_cache,
+  source_id  = "fromPATSTAT2025.tls225_docdb_fam_cpc",
+  fetch_fn   = function() {
+    tic("CPC base (BigQuery)")
+    x <- bq_table_download(
+      bq_table("patbis", "fromPATSTAT2025", "tls225_docdb_fam_cpc"),
+      page_size = 50000
+    ) |>
+      dplyr::select(docdb_family_id, cpc_class_symbol)
+    setDT(x)
+    # Strip all spaces from CPC symbols for matching
+    x[, cpc_class_symbol := stri_replace_all_fixed(cpc_class_symbol, " ", "")]
+    gc()
+    toc()
+    x
+  }
+)
 
 cat("  CPC base:", nrow(cpcs), "rows,",
     uniqueN(cpcs$docdb_family_id), "unique innovations\n\n")
@@ -441,26 +507,36 @@ cat("  Saved to", techmap_cache, "\n\n")
 #   innos_ev_nationalkey_2013_2022.parquet           (~27.2M fams)
 #     — (docdb_family_id, ctry_code, pv, ev, v): the broad per-country
 #        expected-value surface.
-#   innos_istraxfield_nationalkey_2013_2022.parquet  (~5.8M fams)
-#     — same columns plus pre-computed cost / alpha / istrax, but a
-#        restricted subset of families.
-# Using only the istrax file caps the app's universe at ~6M, which is why
-# we'd otherwise drop ~21M nationalkey docdbs. Since cost and alpha are
-# family-level parameters (verified: zero within-family variance across
-# ctry_code rows), we recover the full 27M universe by:
+#   innos_istraxsubclass_nationalkey_2013_2022.parquet  (~32M fams)
+#     — same columns plus pre-computed cost / alpha / istrax at IPC
+#        SUBCLASS level (cost/alpha averaged across the family's
+#        IPC subclasses).
+# Why subclass and not field?  The Hidden Giants field taxonomy
+# (innos_field) only covers ~5M families and is concentrated in 6
+# of 41 catids (Robotics, 3D Printing, AI, Aerospace, Clean Cars,
+# Clean) — the WIPO-Schmoch traditional fields (catid 1-33) have
+# essentially no rows.  See README "Switch to subclass-level istrax
+# (2026-05-10)" and the GitHub issue tracking the Hidden Giants
+# field-coverage gap.  Subclass-level alphacost has 6,345 cells vs
+# 60 cells for field, recovering ~25M+ families.
+# Since cost and alpha are family-level parameters (verified: zero
+# within-family variance across ctry_code rows), we recover the full
+# 27M universe by:
 #   1. Taking per-country (pv, ev) from innos_ev_nationalkey.
-#   2. Joining cost/alpha from innos_istraxfield_global (family-level).
+#   2. Joining cost/alpha from innos_istraxsubclass_global (family-level).
 #   3. Computing istrax/avstrax with the standard formulas.
 
 watson_ev_national_path <- file.path(
   fromWATSON, "innos_ev_nationalkey_2013_2022.parquet"
 )
 watson_global_path <- file.path(
-  fromWATSON, "innos_istraxfield_global_2013_2022.parquet"
+  fromWATSON, "innos_istraxsubclass_global_2013_2022.parquet"
 )
 for (p in c(watson_ev_national_path, watson_global_path)) {
   if (!file.exists(p))
-    stop("Missing ", p, "\nExpected in patbis2025/data/fromWATSON.")
+    stop("Missing ", p,
+         "\nExpected in ", fromWATSON,
+         "\n(RUN_VERSION='", RUN_VERSION, "' — set PATBIS_RUN_VERSION env var to switch)")
 }
 
 cat("Loading Watson 2025 nationalkey (ev + joined global cost/alpha)...\n")
@@ -559,26 +635,24 @@ if (FAMILY_SIZE_MIN > 1L) {
 
   cache <- file.path(bigdata_dir,
                      sprintf("fam_size_min%d.parquet", FAMILY_SIZE_MIN))
-  if (file.exists(cache)) {
-    cat("  Reading cached eligible families from ", cache, "\n", sep = "")
-    eligible <- as.data.table(arrow::read_parquet(cache))
-  } else {
-    cat("  Querying BigQuery patbis.fromPATSTAT2025.tls201_appln ...\n")
-    sql <- sprintf("
-      SELECT DISTINCT docdb_family_id
-      FROM `patbis.fromPATSTAT2025.tls201_appln`
-      WHERE docdb_family_size >= %d
-        AND docdb_family_id IS NOT NULL
-    ", as.integer(FAMILY_SIZE_MIN))
-    eligible <- as.data.table(bq_table_download(
-      bq_project_query("patbis", sql),
-      page_size = 200000, bigint = "integer"
-    ))
-    arrow::write_parquet(eligible, cache,
-                         compression = "zstd", compression_level = 3)
-    cat("  Cached ", nrow(eligible), " eligible families -> ", cache, "\n",
-        sep = "")
-  }
+  eligible <- bq_cache(
+    cache_path = cache,
+    source_id  = sprintf(
+      "fromPATSTAT2025.tls201_appln (docdb_family_size>=%d)",
+      as.integer(FAMILY_SIZE_MIN)),
+    fetch_fn   = function() {
+      sql <- sprintf("
+        SELECT DISTINCT docdb_family_id
+        FROM `patbis.fromPATSTAT2025.tls201_appln`
+        WHERE docdb_family_size >= %d
+          AND docdb_family_id IS NOT NULL
+      ", as.integer(FAMILY_SIZE_MIN))
+      as.data.table(bq_table_download(
+        bq_project_query("patbis", sql),
+        page_size = 200000, bigint = "integer"
+      ))
+    }
+  )
 
   before_fams <- uniqueN(countrymap$docdb_family_id)
   countrymap  <- countrymap[docdb_family_id %in% eligible$docdb_family_id]
@@ -600,25 +674,21 @@ if (FAMILY_SIZE_MIN > 1L) {
 cat("\nFetching granted-family set from BigQuery ...\n")
 tic("granted-family fetch")
 granted_cache <- file.path(bigdata_dir, "fam_granted.parquet")
-if (file.exists(granted_cache)) {
-  cat("  Reading cached granted families from ", granted_cache, "\n", sep = "")
-  granted_fams <- as.data.table(arrow::read_parquet(granted_cache))
-} else {
-  cat("  Querying patbis.fromPATSTAT2025.tls201_appln ...\n")
-  granted_fams <- as.data.table(bq_table_download(
-    bq_project_query("patbis", "
-      SELECT DISTINCT docdb_family_id
-      FROM `patbis.fromPATSTAT2025.tls201_appln`
-      WHERE granted = 'Y'
-        AND docdb_family_id IS NOT NULL
-    "),
-    page_size = 200000, bigint = "integer"
-  ))
-  arrow::write_parquet(granted_fams, granted_cache,
-                       compression = "zstd", compression_level = 3)
-  cat("  Cached ", nrow(granted_fams), " granted families -> ", granted_cache,
-      "\n", sep = "")
-}
+granted_fams <- bq_cache(
+  cache_path = granted_cache,
+  source_id  = "fromPATSTAT2025.tls201_appln (granted='Y')",
+  fetch_fn   = function() {
+    as.data.table(bq_table_download(
+      bq_project_query("patbis", "
+        SELECT DISTINCT docdb_family_id
+        FROM `patbis.fromPATSTAT2025.tls201_appln`
+        WHERE granted = 'Y'
+          AND docdb_family_id IS NOT NULL
+      "),
+      page_size = 200000, bigint = "integer"
+    ))
+  }
+)
 toc()
 
 # ---- Pull multi-application family set from BigQuery -----------------------
@@ -630,25 +700,21 @@ toc()
 cat("\nFetching fam_size>=2 set from BigQuery ...\n")
 tic("multifam-family fetch")
 multifam_cache <- file.path(bigdata_dir, "fam_size_min2.parquet")
-if (file.exists(multifam_cache)) {
-  cat("  Reading cached fam_size>=2 families from ", multifam_cache, "\n", sep = "")
-  multifam_fams <- as.data.table(arrow::read_parquet(multifam_cache))
-} else {
-  cat("  Querying patbis.fromPATSTAT2025.tls201_appln ...\n")
-  multifam_fams <- as.data.table(bq_table_download(
-    bq_project_query("patbis", "
-      SELECT DISTINCT docdb_family_id
-      FROM `patbis.fromPATSTAT2025.tls201_appln`
-      WHERE docdb_family_size >= 2
-        AND docdb_family_id IS NOT NULL
-    "),
-    page_size = 200000, bigint = "integer"
-  ))
-  arrow::write_parquet(multifam_fams, multifam_cache,
-                       compression = "zstd", compression_level = 3)
-  cat("  Cached ", nrow(multifam_fams),
-      " fam_size>=2 families -> ", multifam_cache, "\n", sep = "")
-}
+multifam_fams <- bq_cache(
+  cache_path = multifam_cache,
+  source_id  = "fromPATSTAT2025.tls201_appln (docdb_family_size>=2)",
+  fetch_fn   = function() {
+    as.data.table(bq_table_download(
+      bq_project_query("patbis", "
+        SELECT DISTINCT docdb_family_id
+        FROM `patbis.fromPATSTAT2025.tls201_appln`
+        WHERE docdb_family_size >= 2
+          AND docdb_family_id IS NOT NULL
+      "),
+      page_size = 200000, bigint = "integer"
+    ))
+  }
+)
 toc()
 
 
@@ -680,9 +746,12 @@ read_watson <- function(dsv_path, columns = NULL) {
 }
 
 # 10a: Build patchar (global-level per innovation)
-cat("  10a: Reading global istrax data...\n")
+# Switched 2026-05-10 from innos_istraxfield_* (4.9M fams, 6 catids) to
+# innos_istraxsubclass_* (35M fams, ~648 IPC subclasses). See README and
+# the GitHub issue tracking the Hidden Giants field-coverage gap.
+cat("  10a: Reading global istrax data (subclass-level)...\n")
 patchar <- as.data.table(arrow::read_parquet(
-  file.path(fromWATSON, "innos_istraxfield_global_2013_2022.parquet")
+  file.path(fromWATSON, "innos_istraxsubclass_global_2013_2022.parquet")
 ))[, .(docdb_family_id, pv, ev,
        costpvyear_2013_2022, alphapvyear_2013_2022, istrax)]
 setnames(patchar,
@@ -690,12 +759,33 @@ setnames(patchar,
          c("istrax_global", "cost",           "alpha",                 "ev_global"))
 patchar[, avstrax_global := (ev_global + pv) / cost]
 
+# Attach is_um (utility-model flag) from the patbis2025 per-run lookup so the
+# UI can offer an "Exclude utility model patents" toggle without rebuilding
+# patent_database for each run. Families without a row in innos_um.parquet
+# default to is_um=FALSE (conservative — keep them).
+um_path <- file.path(fromWATSON, "innos_um.parquet")
+if (file.exists(um_path)) {
+  um <- as.data.table(arrow::read_parquet(um_path))[, .(docdb_family_id, is_um)]
+  before <- nrow(patchar)
+  patchar <- um[patchar, on = "docdb_family_id"]   # left join on patchar
+  patchar[is.na(is_um), is_um := FALSE]
+  stopifnot(nrow(patchar) == before)
+  cat(sprintf("    is_um attached: %s of %s patchar fams flagged UM (%.2f%%)\n",
+              format(sum(patchar$is_um), big.mark = ","),
+              format(before,             big.mark = ","),
+              100 * mean(patchar$is_um)))
+} else {
+  patchar[, is_um := FALSE]
+  cat("    WARNING: ", um_path, " not found — is_um defaulting to FALSE for all\n")
+}
+
 cat("    patchar:", nrow(patchar), "innovations\n")
 
 # 10b: Nationalkey: already loaded in Step 9 from Watson 2025's
-# innos_istraxfield_nationalkey_2013_2022.parquet. ev/istrax/avstrax for the
-# nationalkey window were computed there; we now carry pcm forward as
-# (docdb_family_id, ctry_code, ev/istrax/avstrax_nationalkey_2013_2022).
+# innos_istraxsubclass_nationalkey_2013_2022.parquet (was: istraxfield).
+# ev/istrax/avstrax for the nationalkey window were computed there; we now
+# carry pcm forward as (docdb_family_id, ctry_code,
+# ev/istrax/avstrax_nationalkey_2013_2022).
 pcm <- ev_natl[, .(
   docdb_family_id,
   ctry_code,
@@ -767,7 +857,7 @@ cat("  10e: Building innovation x country measures in memory...\n")
 # avstrax_global) are deliberately excluded.
 measure_cols <- grep("^ev_", names(patchar), value = TRUE)
 patchar_slim <- patchar[, c("docdb_family_id", measure_cols,
-                             "cost", "alpha", "pv"), with = FALSE]
+                             "cost", "alpha", "pv", "is_um"), with = FALSE]
 
 # Cross with countrymap to get innovation x country level
 patent_data <- patchar_slim[countrymap, on = "docdb_family_id", nomatch = 0L]
@@ -1218,10 +1308,21 @@ if (!file.exists(cm_src)) {
   dbWriteTable(con_cm, "caps", as.data.frame(caps), overwrite = TRUE)
 
   cm_tmp <- paste0(cm_dst, ".tmp-", Sys.getpid())
+  # `cm` is filtered to docdbs that actually appear in patent_database.
+  # The source patstat_clean/countrymap.parquet covers all PATSTAT
+  # families across every filing year; >95% of the docdbs outside the
+  # 2013-2022 Watson window never get queried by the app anyway because
+  # they're absent from patent_database, so dropping them here shrinks
+  # the published parquet from ~154 MB to ~101 MB without losing a
+  # single joinable (docdb, ctry) pair.
   dbExecute(con_cm, sprintf("
     COPY (
       WITH cm AS (
-        SELECT * FROM read_parquet('%s')
+        SELECT c.*
+        FROM read_parquet('%s') c
+        INNER JOIN (
+          SELECT DISTINCT docdb_family_id FROM read_parquet('%s')
+        ) pdb ON pdb.docdb_family_id = c.docdb_family_id
       ),
       pairs AS (
         SELECT DISTINCT docdb_family_id, ctry_code
@@ -1250,7 +1351,7 @@ if (!file.exists(cm_src)) {
       SELECT docdb_family_id, ctry_code, city, lat, lon, geocode_missing
       FROM missing
     ) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD)
-  ", cm_src, pdb_pq, gsub("'", "''", cm_tmp)))
+  ", cm_src, pdb_pq, pdb_pq, gsub("'", "''", cm_tmp)))
 
   diag_cm <- dbGetQuery(con_cm, sprintf("
     SELECT

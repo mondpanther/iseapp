@@ -84,43 +84,66 @@ build_multifam_clause_v2 <- function(multifam_only = FALSE) {
   if (isTRUE(multifam_only)) "AND p.fam_size_min2 = TRUE" else ""
 }
 
+#' Build a SQL clause excluding utility-model-only families
+#'
+#' When \code{exclude_um} is TRUE, returns the AND clause that drops every
+#' docdb with \code{is_um = TRUE} (the per-family boolean attached at build
+#' time — TRUE iff every application in the family has appln_kind in
+#' UM_KINDS = ('U', 'W'), set in patbis2025 nb1 cell 9). About 30% of all
+#' PATSTAT families are flagged UM and most are post-2013 CN filings; the
+#' rationale is the Kogan PV extrapolation shouldn't propagate listed-firm
+#' market values to weaker / shorter-life utility models.
+#'
+#' @param exclude_um Logical. Default FALSE (no filter, UM families kept).
+#' @return Character. Empty string, or an \code{AND p.is_um = FALSE} clause.
+build_exclude_um_clause_v2 <- function(exclude_um = FALSE) {
+  if (isTRUE(exclude_um)) "AND p.is_um = FALSE" else ""
+}
+
 #' Build a SQL clause restricting to selected cities + capital-fallback toggle
 #'
 #' Used by query builders that join \code{countrymap} (alias \code{c} below).
 #' Mirrors the HiGGlo helper \code{build_city_filter_sql()}: a vector of
-#' city names is whitelisted (AND clause), and unless \code{include_fallback}
-#' is TRUE rows where \code{c.geocode_missing = TRUE} are dropped. The
-#' "No city filter" sentinel from the dropdown disables the city
-#' whitelist exactly the same way "No firm filter" does for firms.
+#' city names is whitelisted (AND clause), and (when a city filter IS
+#' active) unless \code{include_fallback} is TRUE rows where
+#' \code{c.geocode_missing = TRUE} are dropped. The "No city filter"
+#' sentinel from the dropdown disables both the city whitelist and the
+#' geocode-missing filter — i.e. when no city is chosen we don't apply
+#' any geocoding constraint, so the headline counts reflect the full
+#' patent_database universe rather than the geocoded subset (~17% of it).
+#' (HiGGlobe has its own geocode handling and is unaffected.)
 #'
 #' @param selected_cities  Character vector from input$city. Empty / NULL
-#'                          / containing "No city filter" disables the
-#'                          city whitelist.
-#' @param include_fallback Logical. TRUE keeps capital-fallback rows;
+#'                          / containing "No city filter" disables both
+#'                          the city whitelist AND the geocode constraint.
+#' @param include_fallback Logical. Only consulted when a real city is
+#'                          selected. TRUE keeps capital-fallback rows;
 #'                          FALSE (default) drops them.
 #' @param alias            SQL alias of the countrymap row in the
 #'                          surrounding query (default "c").
 #' @return Character. Empty string, or an \code{AND ...} fragment safe
-#'   to append to a WHERE clause.
+#'   to append to a WHERE clause. Empty (no INNER JOIN to countrymap
+#'   needed) when no city is selected.
 build_city_clause_v2 <- function(selected_cities,
                                  include_fallback = FALSE,
                                  alias            = "c") {
-  clauses <- character(0)
-  if (length(selected_cities) > 0L &&
-      !"No city filter" %in% selected_cities) {
-    cs <- setdiff(selected_cities, "No city filter")
-    if (length(cs) > 0L) {
-      quoted <- paste0("'", gsub("'", "''", cs, fixed = TRUE),
-                       "'", collapse = ", ")
-      clauses <- c(clauses, sprintf("%s.city IN (%s)", alias, quoted))
-    }
+  city_filter_active <- length(selected_cities) > 0L &&
+    !all(selected_cities %in% c("No city filter", ""))
+  if (!city_filter_active) {
+    # No city chosen → no geocode filter at all. The country/tech view
+    # uses the full ~3.7M family universe instead of the geocoded ~656K
+    # subset. The geocode-missing constraint only makes sense when the
+    # user has actually scoped to specific cities.
+    return("")
   }
+  cs <- setdiff(selected_cities, "No city filter")
+  quoted <- paste0("'", gsub("'", "''", cs, fixed = TRUE),
+                   "'", collapse = ", ")
+  clauses <- sprintf("%s.city IN (%s)", alias, quoted)
   if (!isTRUE(include_fallback)) {
     clauses <- c(clauses, sprintf("(NOT %s.geocode_missing)", alias))
   }
-  if (length(clauses) == 0L) "" else paste("AND",
-                                            paste(clauses,
-                                                  collapse = " AND "))
+  paste("AND", paste(clauses, collapse = " AND "))
 }
 
 #' Generate SQL combined query for country aggregation (v2)
@@ -135,10 +158,11 @@ build_city_clause_v2 <- function(selected_cities,
 #'
 #' @return Character. SQL query string
 sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause,
-                                      top_n_ids = 10, granted_only = FALSE, multifam_only = FALSE) {
+                                      top_n_ids = 10, granted_only = FALSE, multifam_only = FALSE, exclude_um = FALSE) {
 
   tech_bool      <- build_tech_bool_v2(techs)
   granted_clause <- build_granted_clause_v2(granted_only)
+  exclude_um_clause <- build_exclude_um_clause_v2(exclude_um)
   multifam_clause <- build_multifam_clause_v2(multifam_only)
 
   # Build WHERE clause for tech filtering
@@ -188,6 +212,7 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause,
       WHERE p.ctry_code IN ({country_sql})
         AND p.{toflow} IS NOT NULL
         {granted_clause}
+        {exclude_um_clause}
         {multifam_clause}
     ),
 
@@ -281,7 +306,7 @@ sql_country_combined_v2 <- function(toflow, country_sql, techs, firm_clause,
 #' @param firm_clause Character. AND clause for firm filtering (may be empty)
 #' @return Character. SQL returning ctry_code, allinnos
 sql_ctry_allinnos_v2 <- function(toflow, country_sql, firm_clause,
-                                   granted_only = FALSE, multifam_only = FALSE) {
+                                   granted_only = FALSE, multifam_only = FALSE, exclude_um = FALSE) {
   firm_filter_sql <- if (nchar(trimws(firm_clause)) == 0) {
     ""
   } else {
@@ -289,6 +314,7 @@ sql_ctry_allinnos_v2 <- function(toflow, country_sql, firm_clause,
     paste0("WHERE ", firm_condition)
   }
   granted_clause <- build_granted_clause_v2(granted_only)
+  exclude_um_clause <- build_exclude_um_clause_v2(exclude_um)
   multifam_clause <- build_multifam_clause_v2(multifam_only)
 
   glue::glue("
@@ -307,6 +333,7 @@ sql_ctry_allinnos_v2 <- function(toflow, country_sql, firm_clause,
     WHERE p.ctry_code IN ({country_sql})
       AND p.{toflow} IS NOT NULL
       {granted_clause}
+      {exclude_um_clause}
         {multifam_clause}
     GROUP BY p.ctry_code
   ")
@@ -324,7 +351,7 @@ sql_ctry_allinnos_v2 <- function(toflow, country_sql, firm_clause,
 #'
 #' @return Character. SQL query string
 sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm_clause,
-                                           top_n_ids = 10, granted_only = FALSE, multifam_only = FALSE,
+                                           top_n_ids = 10, granted_only = FALSE, multifam_only = FALSE, exclude_um = FALSE,
                                            selected_cities = character(0),
                                            include_fallback = FALSE) {
 
@@ -346,6 +373,7 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
   }
 
   granted_clause  <- build_granted_clause_v2(granted_only)
+  exclude_um_clause <- build_exclude_um_clause_v2(exclude_um)
   multifam_clause <- build_multifam_clause_v2(multifam_only)
 
   # City filter (Value flows by Technology only, for now). When the
@@ -434,6 +462,7 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
       WHERE p.ctry_code IN ({country_sql})
         AND p.{toflow} IS NOT NULL
         {granted_clause}
+        {exclude_um_clause}
         {multifam_clause}
         {city_clause}
     ),
@@ -461,6 +490,7 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
         WHERE p.ctry_code IN ({country_sql})
           AND p.{toflow} IS NOT NULL
           {granted_clause}
+          {exclude_um_clause}
           {multifam_clause}
           {city_clause}
       ) t
@@ -504,10 +534,11 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
 #' @param firm_clause Character. AND clause from build_firm_clause_v2().
 #' @return Character. SQL query string.
 sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause,
-                                     top_n_ids = 10, granted_only = FALSE, multifam_only = FALSE) {
+                                     top_n_ids = 10, granted_only = FALSE, multifam_only = FALSE, exclude_um = FALSE) {
 
   tech_bool      <- build_tech_bool_v2(techs)
   granted_clause <- build_granted_clause_v2(granted_only)
+  exclude_um_clause <- build_exclude_um_clause_v2(exclude_um)
   multifam_clause <- build_multifam_clause_v2(multifam_only)
 
   # Build WHERE clause for tech filtering
@@ -559,6 +590,7 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause,
         AND p.ctry_code = 'GB'
         AND p.{toflow} IS NOT NULL
         {granted_clause}
+        {exclude_um_clause}
         {multifam_clause}
     ),
 
@@ -649,7 +681,7 @@ sql_region_combined_v2 <- function(toflow, region_sql, techs, firm_clause,
 #' @param firm_clause Character. AND clause for firm filtering (may be empty)
 #' @return Character. SQL returning region_code, allinnos
 sql_region_allinnos_v2 <- function(toflow, region_sql, firm_clause,
-                                     granted_only = FALSE, multifam_only = FALSE) {
+                                     granted_only = FALSE, multifam_only = FALSE, exclude_um = FALSE) {
   firm_filter_sql <- if (nchar(trimws(firm_clause)) == 0) {
     ""
   } else {
@@ -657,6 +689,7 @@ sql_region_allinnos_v2 <- function(toflow, region_sql, firm_clause,
     paste0("WHERE ", firm_condition)
   }
   granted_clause <- build_granted_clause_v2(granted_only)
+  exclude_um_clause <- build_exclude_um_clause_v2(exclude_um)
   multifam_clause <- build_multifam_clause_v2(multifam_only)
 
   glue::glue("
@@ -677,6 +710,7 @@ sql_region_allinnos_v2 <- function(toflow, region_sql, firm_clause,
       AND p.ctry_code = 'GB'
       AND p.{toflow} IS NOT NULL
       {granted_clause}
+      {exclude_um_clause}
         {multifam_clause}
     GROUP BY r.region_code
   ")
@@ -694,7 +728,7 @@ sql_region_allinnos_v2 <- function(toflow, region_sql, firm_clause,
 #' @param firm_clause Character. AND clause from build_firm_clause_v2().
 #' @return Character. SQL query string.
 sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_clause,
-                                         top_n_ids = 10, granted_only = FALSE, multifam_only = FALSE) {
+                                         top_n_ids = 10, granted_only = FALSE, multifam_only = FALSE, exclude_um = FALSE) {
 
   filter_clauses <- unlist(tech_filters)
   filter_clauses <- filter_clauses[nchar(trimws(filter_clauses)) > 0]
@@ -714,6 +748,7 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
   }
 
   granted_clause <- build_granted_clause_v2(granted_only)
+  exclude_um_clause <- build_exclude_um_clause_v2(exclude_um)
   multifam_clause <- build_multifam_clause_v2(multifam_only)
 
   # Build filtered_tech CTE:
@@ -780,6 +815,7 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
         AND p.ctry_code = 'GB'
         AND p.{toflow} IS NOT NULL
         {granted_clause}
+        {exclude_um_clause}
         {multifam_clause}
     ),
 
@@ -807,6 +843,7 @@ sql_region_tech_combined_v2 <- function(toflow, region_sql, tech_filters, firm_c
           AND p.ctry_code = 'GB'
           AND p.{toflow} IS NOT NULL
           {granted_clause}
+          {exclude_um_clause}
         {multifam_clause}
       ) t
     )

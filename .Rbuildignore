@@ -5,3 +5,5 @@
 [.]sass_cache_keys$
 ^.*\.Rproj$
 ^\.Rproj\.user$
+^\.positai$
+^\.claude$

@@ -15,29 +15,27 @@ welcome_module_ui <- function(id) {
     # from inst/insights_html/figures/.
     shiny::uiOutput(ns("bg_css"), inline = TRUE),
     shiny::tags$style(shiny::HTML("
-      /* Outer bg layer: image fills the welcome panel; visible behind and
-         between the buttons. Solid white fallback while the image loads. */
+      /* Outer bg layer: hosts the rotating HiGGlobe background image but
+         is otherwise transparent — no fill, no shadow. */
       .ise-welcome-bg {
-        background-color: #ffffff;
+        background-color: transparent;
         background-size: cover;
         background-position: center;
         background-repeat: no-repeat;
         min-height: calc(100vh - 80px);
         transition: background-image 0.6s ease-in-out;
       }
-      /* Heading + intro: a soft translucent card so they stay legible on
-         top of a busy citation-globe background, without obscuring the
-         image too much. */
+      /* Heading + intro: no card, no shadow, no rounded corners — just
+         text. Kept as a wrapper so the heading + paragraph keep their
+         dedicated typography. */
       .ise-welcome-msg {
         display: inline-block;
         max-width: 760px;
-        padding: 22px 30px 14px 30px;
+        padding: 0;
         margin-bottom: 36px;
-        background: rgba(255, 255, 255, 0.78);
-        backdrop-filter: blur(2px);
-        -webkit-backdrop-filter: blur(2px);
-        border-radius: 14px;
-        box-shadow: 0 2px 14px rgba(0, 0, 0, 0.08);
+        background: transparent;
+        border-radius: 0;
+        box-shadow: none;
       }
       .ise-welcome-msg h1 {
         font-size: 2.1rem;
@@ -49,6 +47,21 @@ welcome_module_ui <- function(id) {
       .ise-welcome-msg p {
         margin: 0;
         color: #444;
+      }
+      /* Strip any surrounding bslib/Bootstrap card chrome (background,
+         shadow, border, rounded corners) from the tab-pane that wraps
+         the welcome content. Scoped via :has() so it only applies to
+         the tab-pane containing our welcome layer; other tabs (Country
+         Explorer, Region Explorer, etc.) keep their card styling. */
+      .tab-pane:has(> .ise-welcome-bg),
+      .tab-pane:has(.ise-welcome-bg),
+      .bslib-card:has(.ise-welcome-bg),
+      .card:has(.ise-welcome-bg) {
+        background: transparent !important;
+        box-shadow: none !important;
+        border: none !important;
+        border-radius: 0 !important;
+        padding: 0 !important;
       }
     ")),
   shiny::div(

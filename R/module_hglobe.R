@@ -85,6 +85,11 @@ hglobe_module_sidebar <- function(id) {
             label   = "Multi-application families only",
             value   = FALSE
           ),
+          shiny::checkboxInput(
+            inputId = ns("exclude_um"),
+            label   = "Exclude utility model patents",
+            value   = FALSE
+          ),
           # When unticked (default), rows whose countrymap.city is the
           # country's capital used as a *fallback* (geocode_missing =
           # TRUE) are dropped from both the seed and any follow-on
@@ -881,7 +886,8 @@ hglobe_module_server <- function(id, con) {
         firm_clause    <- build_firm_clause_v2(selected_firms,
                                                no_filter = no_firm_filter)
         tech_bool      <- build_tech_bool_v2(input$techs)
-        granted_clause  <- build_granted_clause_v2(isTRUE(input$granted_only))
+        granted_clause     <- build_granted_clause_v2(isTRUE(input$granted_only))
+        exclude_um_clause  <- build_exclude_um_clause_v2(isTRUE(input$exclude_um))
         multifam_clause <- build_multifam_clause_v2(isTRUE(input$multifam_only))
 
         has_tech <- tech_bool != "TRUE"
@@ -948,6 +954,7 @@ hglobe_module_server <- function(id, con) {
               AND p.{toflow_col} IS NOT NULL
               AND c.lat IS NOT NULL AND c.lon IS NOT NULL
               {granted_clause}
+              {exclude_um_clause}
               {multifam_clause}
               {city_filter}
             GROUP BY p.docdb_family_id, p.ctry_code

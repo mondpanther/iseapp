@@ -332,11 +332,20 @@ higglobe_local_leaflet <- function(data, title = NULL, height = "420px") {
     }, character(1))
   }
 
+  # Extended tableau-10 palette so the helper can render up to gen 9.
+  # The first five match the colour scheme the deployed app's HiGGlobe
+  # legend uses; the rest are tableau-10 fillers so a 7- or 8-generation
+  # walk doesn't fall back to grey for the deepest layers.
   gen_colours <- c(`0` = "#1f77b4",   # blue
                    `1` = "#d62728",   # red
                    `2` = "#2ca02c",   # green
                    `3` = "#ff7f0e",   # orange
-                   `4` = "#9467bd")   # purple
+                   `4` = "#9467bd",   # purple
+                   `5` = "#8c564b",   # brown
+                   `6` = "#e377c2",   # pink
+                   `7` = "#7f7f7f",   # grey
+                   `8` = "#bcbd22",   # olive
+                   `9` = "#17becf")   # cyan
 
   # Quadratic Bezier between (sx,sy) and (tx,ty) sampled at `n` points,
   # offset perpendicular to the chord by `bend * d`. Direct lift from
@@ -548,6 +557,27 @@ local_value_flows <- function(country, techs,
     if (isTRUE(multifam_only)) "AND p.fam_size_min2 = TRUE"  else ""
   )
 
+  # `is_*` and `av_*` flows are NOT stored in patent_database.parquet —
+  # they're derived at runtime in R/runAppPackage.R from cost/alpha/pv +
+  # ev_*. Replicate the same SQL expression here so callers can use any
+  # of `ev_global`, `is_global`, `av_global`, `is_us`, `av_de`, ...
+  # transparently. See R/runAppPackage.R for the canonical formula.
+  build_toflow_expr <- function(toflow) {
+    if (grepl("^is_", toflow)) {
+      suffix <- sub("^is_", "", toflow)
+      paste0("(CASE WHEN p.cost IS NULL OR p.cost = 0 THEN 0 ",
+             "ELSE ((p.alpha + 1) / p.cost) * p.ev_", suffix,
+             " * CAST(p.pv <= 2 * p.cost AS DOUBLE) END)")
+    } else if (grepl("^av_", toflow)) {
+      suffix <- sub("^av_", "", toflow)
+      paste0("(CASE WHEN p.cost IS NULL OR p.cost = 0 THEN 0 ",
+             "ELSE (p.pv + p.ev_", suffix, ") / p.cost END)")
+    } else {
+      paste0("p.", toflow)
+    }
+  }
+  toflow_expr <- build_toflow_expr(toflow)
+
   # Aggregate one row per (technology). The CSV-side `mean` is the
   # per-(docdb, ctry) average of toflow over rows passing the filter;
   # `innos` is the count of distinct docdbs; `sem` is the standard error
@@ -558,23 +588,23 @@ local_value_flows <- function(country, techs,
     if (identical(t, "All innovations")) {
       sql <- sprintf("
         SELECT '%s' AS technology,
-               AVG(p.%s)                          AS mean,
-               STDDEV_SAMP(p.%s) / SQRT(COUNT(*)) AS sem,
-               COUNT(DISTINCT p.docdb_family_id)  AS innos
+               AVG(%s)                          AS mean,
+               STDDEV_SAMP(%s) / SQRT(COUNT(*)) AS sem,
+               COUNT(DISTINCT p.docdb_family_id) AS innos
         FROM patent_database p
         INNER JOIN ctry_filter cf ON cf.ctry_code = p.ctry_code
-        WHERE p.%s IS NOT NULL %s",
+        WHERE %s IS NOT NULL %s",
         gsub("'", "''", t),
-        toflow, toflow, toflow, filter_clause)
+        toflow_expr, toflow_expr, toflow_expr, filter_clause)
     } else {
       expanded <- .expand_techs(t, data_dir = data_dir)
       tech_list <- paste0("'", paste(gsub("'", "''", expanded),
                                      collapse = "','"), "'")
       sql <- sprintf("
         SELECT '%s' AS technology,
-               AVG(p.%s)                          AS mean,
-               STDDEV_SAMP(p.%s) / SQRT(COUNT(*)) AS sem,
-               COUNT(DISTINCT p.docdb_family_id)  AS innos
+               AVG(%s)                          AS mean,
+               STDDEV_SAMP(%s) / SQRT(COUNT(*)) AS sem,
+               COUNT(DISTINCT p.docdb_family_id) AS innos
         FROM patent_database p
         INNER JOIN ctry_filter cf ON cf.ctry_code = p.ctry_code
         INNER JOIN (
@@ -582,9 +612,9 @@ local_value_flows <- function(country, techs,
           FROM patents_x_tech
           WHERE technology IN (%s)
         ) tt ON tt.docdb_family_id = p.docdb_family_id
-        WHERE p.%s IS NOT NULL %s",
+        WHERE %s IS NOT NULL %s",
         gsub("'", "''", t),
-        toflow, toflow, tech_list, toflow, filter_clause)
+        toflow_expr, toflow_expr, tech_list, toflow_expr, filter_clause)
     }
     rows[[i]] <- DBI::dbGetQuery(con, sql)
   }

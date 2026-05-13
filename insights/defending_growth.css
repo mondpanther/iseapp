@@ -1,0 +1,42 @@
+/* Page styling for defending_growth.rmd — keep the prose narrow and the
+   body type a touch warmer so the note reads like a short blogpost.   */
+
+body.html_document, body {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 32px 24px 60px 24px;
+  font-family: Georgia, "Iowan Old Style", "Source Serif Pro", serif;
+  font-size: 17px;
+  line-height: 1.62;
+  color: #1d1d1d;
+  background: #fdfdfb;
+}
+
+h1.title {
+  font-family: "Source Sans Pro", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 2.2rem;
+  font-weight: 700;
+  margin-top: 0;
+  margin-bottom: 6px;
+  letter-spacing: -0.01em;
+}
+
+h4.author, h4.date {
+  font-family: "Source Sans Pro", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: #666;
+  font-weight: 400;
+  font-size: 1rem;
+  margin: 2px 0;
+}
+
+h4.date { margin-bottom: 28px; }
+
+p { margin: 0 0 14px 0; }
+
+figure { text-align: center; }
+figure svg { max-width: 100%; height: auto; }
+
+a, a:visited { color: #2b5a8c; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+small { color: #666; font-size: 0.85rem; }

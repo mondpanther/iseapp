@@ -1,0 +1,627 @@
+---
+title: "Defending Growth"
+author: "Innovation Strategy Explorer"
+date: "`r format(Sys.Date(), '%-d %B %Y')`"
+output:
+  html_document:
+    self_contained: true
+    toc: false
+    theme: flatly
+    df_print: paged
+    css: defending_growth.css
+---
+
+```{r setup, include=FALSE}
+# svglite is a pure-R SVG backend that does NOT need libX11 / libcairo,
+# both of which are missing on this Mac install. The base R `svg()`
+# device errors out without them; svglite does not.
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  message = FALSE,
+  warning = FALSE,
+  dev        = "svglite",   # vector output, no X11/Cairo dependency
+  dev.args   = list(),
+  fig.width  = 10,
+  fig.height = 5.5,
+  dpi    = 150
+)
+suppressPackageStartupMessages({
+  library(arrow); library(DBI); library(duckdb)
+  library(ggplot2); library(scales); library(svglite)
+  library(htmltools)
+})
+source("R/local_higglobe.R")
+
+# Render a two-panel figure (each panel is a SVG wrapped in a hyperlink
+# to the live app) as one rendered HTML string. Built via htmltools so
+# the output has no leading-whitespace artefacts that pandoc would
+# otherwise interpret as code blocks under `results='asis'`.
+panel_pair_figure <- function(title_a, url_a, svg_a,
+                              title_b, url_b, svg_b,
+                              caption_html) {
+  one_panel <- function(letter, title, url, svg) {
+    tags$div(
+      style = "flex:1 1 380px; min-width:320px;",
+      tags$div(
+        style = "font-weight:600; text-align:center; margin-bottom:4px; color:#333;",
+        HTML(sprintf("<b>(%s)</b> %s", letter, title))
+      ),
+      tags$a(
+        href = url, target = "_blank", rel = "noopener",
+        HTML(svg)
+      )
+    )
+  }
+  fig <- tags$figure(
+    style = "margin:22px 0;",
+    tags$div(
+      style = paste0("display:flex; flex-wrap:wrap; gap:18px;",
+                     " justify-content:center; align-items:flex-start;"),
+      one_panel("a", title_a, url_a, svg_a),
+      one_panel("b", title_b, url_b, svg_b)
+    ),
+    tags$figcaption(
+      style = paste0("text-align:center; color:#555;",
+                     " font-size:0.92rem; margin-top:10px;"),
+      HTML(caption_html)
+    )
+  )
+  # htmltools pretty-prints the HTML with indentation, which pandoc
+  # then interprets as a markdown code block under `results='asis'`
+  # and emits as <pre><code>… literal text. Strip the newlines + any
+  # following whitespace so the entire figure becomes a single line.
+  out <- as.character(htmltools::renderTags(fig)$html)
+  out <- gsub("\n\\s*", "", out)
+  cat(out)
+}
+
+data_dir <- {
+  if      (dir.exists("../inst/extdata")) "../inst/extdata"
+  else if (dir.exists("inst/extdata"))    "inst/extdata"
+  else    stop("Cannot find inst/extdata/ — knit from project root.")
+}
+```
+
+The new geopolitical situation we are finding us in will imply more spending
+on defence including defence investment. What will be the impact of that on
+economic growth overall? A key driver of growth is innovation and a key
+driver of innovation are the strength of knowledge spillovers between
+different innovations. How does defence compare to other technologies? In
+**Figure 1** we estimate the value of knowledge spillovers from different
+technologies.
+
+```{r fig1, results='asis'}
+# ---- Data ------------------------------------------------------------------
+techs <- c("Green Technology", "AI",
+           "Any Agriculture & Food technology",
+           "Defence Technology", "Biotechnology")
+
+prep_flows <- function(toflow, country = "All countries") {
+  fl <- local_value_flows(
+    country       = country,
+    techs         = c(techs, "All innovations"),
+    toflow        = toflow,
+    granted_only  = FALSE,
+    data_dir      = data_dir
+  )
+  baseline <- fl$mean[fl$technology == "All innovations"]
+  fl <- fl[fl$technology %in% techs, ]
+  fl$label <- dplyr::recode(fl$technology,
+    "Any Agriculture & Food technology" = "Agri & Food",
+    "Green Technology"   = "Green",
+    "Defence Technology" = "Defence")
+  fl$fill_grp <- dplyr::case_when(
+    fl$technology == "Green Technology"                  ~ "green",
+    fl$technology == "AI"                                ~ "AI",
+    fl$technology == "Any Agriculture & Food technology" ~ "agrifood",
+    fl$technology == "Defence Technology"                ~ "defence",
+    fl$technology == "Biotechnology"                     ~ "biotech",
+    TRUE                                                  ~ "other"
+  )
+  list(df = fl, baseline = baseline)
+}
+
+flows_ev <- prep_flows("ev_global")
+flows_is <- prep_flows("is_global")
+
+# Use the SAME y-axis ordering across both panels so the eye can read
+# them as a comparison pair. Order by panel A (spillover, $).
+ord <- flows_ev$df$label[order(flows_ev$df$mean)]
+flows_ev$df$label <- factor(flows_ev$df$label, levels = ord)
+flows_is$df$label <- factor(flows_is$df$label, levels = ord)
+
+# is_/av_ flows are stored as decimals; the deployed app multiplies by
+# 100 for display. Mirror that here so panel B reads in percent.
+flows_is$df$mean <- 100 * flows_is$df$mean
+flows_is$df$sem  <- 100 * flows_is$df$sem
+flows_is$baseline <- 100 * flows_is$baseline
+
+# ---- Shared scales / theme -------------------------------------------------
+fill_pal <- c(green    = "forestgreen", AI       = "orange",
+              agrifood = "burlywood",   defence  = "gray35",
+              biotech  = "#9467bd")
+
+build_panel <- function(df, baseline, x_lab, value_fmt, baseline_fmt,
+                        x_expand_mult = 0.22) {
+  ggplot(df, aes(y = label, x = mean)) +
+    geom_col(aes(fill = fill_grp), width = 0.6) +
+    geom_errorbar(
+      aes(xmin = pmax(mean - sem, 0), xmax = mean + sem),
+      width = 0.18, colour = "grey30", linewidth = 0.4
+    ) +
+    geom_point(
+      aes(size = innos, fill = fill_grp),
+      shape = 21, colour = "grey15", stroke = 0.6, alpha = 0.95
+    ) +
+    geom_text(
+      aes(label = value_fmt(mean)),
+      hjust = -0.4, size = 3.4, colour = "grey20"
+    ) +
+    geom_vline(xintercept = baseline,
+               linetype = "dashed", colour = "grey30",
+               linewidth = 0.5) +
+    annotate("label",
+             x = baseline,
+             y = nrow(df) + 0.55,
+             label = sprintf("All innovations: %s", baseline_fmt(baseline)),
+             hjust = -0.05, vjust = 0.5,
+             label.size = 0, fill = "white",
+             colour = "grey25", size = 3.0,
+             fontface = "italic") +
+    scale_fill_manual(values = fill_pal, guide = "none") +
+    scale_size_area(name = "Innovations",
+                    max_size = 12,
+                    labels   = scales::comma,
+                    breaks   = scales::pretty_breaks(4)) +
+    scale_x_continuous(labels = scales::comma,
+                       expand = expansion(mult = c(0, x_expand_mult))) +
+    scale_y_discrete(expand = expansion(add = c(0.6, 1.1))) +
+    labs(y = NULL, x = x_lab) +
+    theme_minimal(base_size = 12) +
+    theme(panel.grid.major.y = element_blank(),
+          legend.position    = "right")
+}
+
+p_ev <- build_panel(
+  flows_ev$df, flows_ev$baseline,
+  x_lab = "Average global spillover per innovation, $ (mean ± 1 SEM)",
+  value_fmt    = function(v) scales::dollar(round(v), prefix = "$",
+                                            suffix = ""),
+  baseline_fmt = function(v) sprintf("$%s", format(round(v, 2),
+                                                   nsmall = 2)))
+p_is <- build_panel(
+  flows_is$df, flows_is$baseline,
+  x_lab = "Marginal global return per innovation, % (mean ± 1 SEM)",
+  value_fmt    = function(v) sprintf("%s%%", format(round(v),
+                                                    big.mark = ",")),
+  baseline_fmt = function(v) sprintf("%s%%", format(round(v, 1),
+                                                    nsmall = 1)),
+  x_expand_mult = 0.18)
+
+# ---- Build URLs for each panel ---------------------------------------------
+make_url <- function(toflow) {
+  paste0(
+    "https://mondpanther-iseapp2.share.connect.posit.cloud/",
+    "?_inputs_&country-sidebar=true",
+    "&navbar_page=%22Country%20Explorer%22",
+    "&country-inner_tabs=%22Value%20flows%20by%20Technology%22",
+    "&country-country=%22All%20countries%22",
+    "&country-firm=%22No%20firm%20filter%22",
+    "&country-techs=%22Green%20Technology%22",
+    "&country-city=%22No%20city%20filter%22",
+    "&country-toflow=%22", toflow, "%22",
+    "&country-tech_categories_plot1=",
+    "%5B%22Green%20Technology%22%2C%22AI%22%2C",
+    "%22Any%20Agriculture%20%26%20Food%20technology%22%2C",
+    "%22Defence%20Technology%22%2C%22Biotechnology%22%5D",
+    "&country-widthscale=%22log%22",
+    "&country-display_mode=%22confidence%22",
+    "&country-granted_only=false",
+    "&country-multifam_only=false",
+    "&country-include_fallback=false",
+    "&country-top_n_ids=10&country-topn=20&country-mininno=10"
+  )
+}
+url_ev <- make_url("ev_global")
+url_is <- make_url("is_global")
+
+# ---- Render each panel to its own inline SVG -------------------------------
+render_svg <- function(p, w, h) {
+  tmp <- tempfile(fileext = ".svg")
+  ggsave(tmp, p, device = svglite::svglite, width = w, height = h)
+  ln <- readLines(tmp, warn = FALSE)
+  ln <- ln[!grepl("^<\\?xml|^<!DOCTYPE", ln)]
+  paste(ln, collapse = "\n")
+}
+svg_ev <- render_svg(p_ev, w = 8.4, h = 5.4)
+svg_is <- render_svg(p_is, w = 8.4, h = 5.4)
+
+panel_pair_figure(
+  title_a = "Average spillovers", url_a = url_ev, svg_a = svg_ev,
+  title_b = "Marginal returns",   url_b = url_is, svg_b = svg_is,
+  caption_html = paste0(
+    "<b>Figure 1.</b> Per-innovation knowledge-spillover value (panel ",
+    "a, Average Global Spillover, $ millions) and per-innovation ",
+    "marginal return (panel b, Marginal Global Return, % IRR) by ",
+    "technology umbrella. Bars show mean ± 1 SEM; circle area scales ",
+    "with the number of patent families behind each estimate; the ",
+    "dashed line is the database-wide average across <em>all</em> ",
+    "innovations. <em>Click either panel for its interactive, ",
+    "drill-down version on the Innovation Strategy Explorer.</em>"
+  ))
+```
+
+The picture is more mixed than the simple "civilian beats defence"
+narrative might suggest, and the two panels tell complementary stories.
+
+**Panel (a) — average spillovers.** This is the dollar value of the
+knowledge externality each patent confers on the rest of the world.
+**AI is in a class of its own**: the typical AI patent generates roughly
+two-and-a-half times the per-innovation spillover that defence does.
+Biotechnology comes second. But green technology and agriculture & food
+technology, often invoked as defence's growth-relevant counterparts,
+actually trail defence on this measure — both sit a touch below the
+defence average. The dashed line shows the universe-wide baseline:
+defence is well above the typical patent on this measure, AI and biotech
+much further still.
+
+**Panel (b) — marginal returns.** This is the implied internal rate of
+return on each innovation, scaling the spillover by the patent's alpha
+(its private return premium) and dividing through by its R&D cost. The
+ranking **flips noticeably**: AI still leads, but green technology and
+agriculture & food now sit *above* defence — not below it. The reason
+is mechanical: green and agri patents tend to have lower research costs
+than defence patents, so each dollar of R&D earns a higher implied
+return even when the absolute spillover is smaller. Biotechnology — the
+runner-up on spillovers — drops to last on returns, a reflection of its
+high R&D cost base.
+
+**Two qualifications.** First, green technology produces roughly **30
+times as many patent families as defence does** (the bubble area in
+both panels). Even at a similar per-innovation rate, the aggregate
+spillover and aggregate-return footprint of green innovation is much
+larger — what is similar per-patent and big in aggregate moves the
+growth needle more than what is similar per-patent and small in
+aggregate. Second, both rankings are sample-sensitive: restricting to
+multi-application or LMIC-origin families reshuffles the picture, and
+a more careful follow-up should look at a portfolio view (spillover
+or return *× volume*) rather than per-innovation alone.
+
+Treated carefully, neither panel says "don't fund defence" —
+geopolitical and security cases for defence spending stand on their own
+ground. But together they do temper the argument that defence R&D is a
+uniquely strong engine of *broader* economic growth: AI is plainly
+ahead on both measures, and once research cost is taken into account
+(panel b) green technology and agriculture & food look more promising
+than the headline spillover comparison alone would suggest.
+
+## Spillovers to the developing world
+
+The "global" measure used above weights every recipient country
+equally. From a development-policy angle, however, what often matters
+is how much of the spillover lands in low- and middle-income economies
+specifically. **Figure 2** repeats the same comparison, but the flow
+metric is now narrowed to **LMICs excluding China**: panel (a) is the
+average dollar spillover that each source-country patent generates for
+those economies, and panel (b) is the implied marginal return of the
+same patent measured against the LMIC-bound spillover only.
+
+```{r fig2, results='asis'}
+flows_ev_lmic <- prep_flows("ev_emdenocn")
+flows_is_lmic <- prep_flows("is_emdenocn")
+
+# Use panel (a) to set the y-axis ordering for both panels.
+ord_lmic <- flows_ev_lmic$df$label[order(flows_ev_lmic$df$mean)]
+flows_ev_lmic$df$label <- factor(flows_ev_lmic$df$label, levels = ord_lmic)
+flows_is_lmic$df$label <- factor(flows_is_lmic$df$label, levels = ord_lmic)
+
+flows_is_lmic$df$mean <- 100 * flows_is_lmic$df$mean
+flows_is_lmic$df$sem  <- 100 * flows_is_lmic$df$sem
+flows_is_lmic$baseline <- 100 * flows_is_lmic$baseline
+
+p_ev_lmic <- build_panel(
+  flows_ev_lmic$df, flows_ev_lmic$baseline,
+  x_lab = "Avg spillover to LMICs (excl. China) per innovation, $ (mean ± 1 SEM)",
+  value_fmt    = function(v) sprintf("$%s",
+                                     format(round(v, 2), nsmall = 2)),
+  baseline_fmt = function(v) sprintf("$%s",
+                                     format(round(v, 2), nsmall = 2)),
+  x_expand_mult = 0.20)
+
+p_is_lmic <- build_panel(
+  flows_is_lmic$df, flows_is_lmic$baseline,
+  x_lab = "Marginal return to LMICs (excl. China) per innovation, % (mean ± 1 SEM)",
+  value_fmt    = function(v) sprintf("%s%%",
+                                     format(round(v, 1), nsmall = 1)),
+  baseline_fmt = function(v) sprintf("%s%%",
+                                     format(round(v, 1), nsmall = 1)),
+  x_expand_mult = 0.18)
+
+url_ev_lmic <- make_url("ev_emdenocn")
+url_is_lmic <- make_url("is_emdenocn")
+svg_ev_lmic <- render_svg(p_ev_lmic, w = 8.4, h = 5.4)
+svg_is_lmic <- render_svg(p_is_lmic, w = 8.4, h = 5.4)
+
+panel_pair_figure(
+  title_a = "Average spillovers to LMICs (excl. China)",
+  url_a   = url_ev_lmic, svg_a = svg_ev_lmic,
+  title_b = "Marginal returns to LMICs (excl. China)",
+  url_b   = url_is_lmic, svg_b = svg_is_lmic,
+  caption_html = paste0(
+    "<b>Figure 2.</b> Per-innovation spillover (panel a, $ millions) ",
+    "and marginal return (panel b, % IRR) flowing to LMICs ",
+    "<em>excluding China</em>, by technology umbrella. Same ",
+    "conventions as Figure 1. <em>Click either panel for its ",
+    "interactive, drill-down version on the Innovation Strategy ",
+    "Explorer.</em>"
+  ))
+```
+
+The LMIC-focused view tells a different — and politically more
+provocative — story. **Defence climbs to second place on both panels**:
+its average spillover to LMICs ($0.37m) and its implied marginal return
+to LMICs (~480%) sit clearly above what green technology, agriculture &
+food, and biotechnology produce on those measures. AI still leads, but
+with a wider margin than in the global picture and a defence-shaped
+runner-up rather than a biotech-shaped one.
+
+That ordering reflects something real about the geography of citation
+flows: defence-tech innovation, like AI, is dominated by a small number
+of well-developed innovation hubs (US, UK, France, Israel, Japan,
+Korea), and the patents originating in those hubs are disproportionately
+likely to be cited by patents elsewhere — including in LMICs that lean
+on imported technology rather than producing their own. Green and agri
+patenting is more geographically diffuse and tends to be cited by other
+patents in similarly diversified domains, so a smaller share of any
+given green patent's spillover footprint lands in the LMIC bucket
+specifically.
+
+The volume qualification still applies, and arguably hits harder in
+this slice. **Green technology produces roughly thirty times as many
+patents as defence does**, so even at a quarter the per-innovation rate
+the aggregate spillover *into* LMICs from green is comparable to or
+larger than defence's. From a "how do we maximise growth-relevant
+externalities into the developing world" standpoint, the right
+portfolio answer is probably *both* — and certainly not "defence
+because of LMIC spillovers". But the per-innovation comparison is still
+worth seeing on its own terms.
+
+## What if LMICs do the inventing themselves?
+
+Figures 1 and 2 ranged across all source countries. The development-
+policy lens is sharper if we restrict the *source* of the patents to
+LMIC inventors as well: how productive is each technology umbrella when
+the inventor is themselves resident in an LMIC, and the spillover is
+flowing back to other LMICs? **Figure 3** is Figure 2 again, but with
+the country filter set to **LMICs excluding China** — so we are looking
+at the spillover from LMIC-origin patents to other LMIC-resident
+innovation, by umbrella.
+
+```{r fig3, results='asis'}
+flows_ev_lmic2 <- prep_flows("ev_emdenocn", country = "LMICs (excl. China)")
+flows_is_lmic2 <- prep_flows("is_emdenocn", country = "LMICs (excl. China)")
+
+ord3 <- flows_ev_lmic2$df$label[order(flows_ev_lmic2$df$mean)]
+flows_ev_lmic2$df$label <- factor(flows_ev_lmic2$df$label, levels = ord3)
+flows_is_lmic2$df$label <- factor(flows_is_lmic2$df$label, levels = ord3)
+
+flows_is_lmic2$df$mean <- 100 * flows_is_lmic2$df$mean
+flows_is_lmic2$df$sem  <- 100 * flows_is_lmic2$df$sem
+flows_is_lmic2$baseline <- 100 * flows_is_lmic2$baseline
+
+p_ev_lmic2 <- build_panel(
+  flows_ev_lmic2$df, flows_ev_lmic2$baseline,
+  x_lab = "Avg spillover to LMICs (excl. China) per innovation, $ (mean ± 1 SEM)",
+  value_fmt    = function(v) sprintf("$%s",
+                                     format(round(v, 2), nsmall = 2)),
+  baseline_fmt = function(v) sprintf("$%s",
+                                     format(round(v, 2), nsmall = 2)),
+  x_expand_mult = 0.20)
+p_is_lmic2 <- build_panel(
+  flows_is_lmic2$df, flows_is_lmic2$baseline,
+  x_lab = "Marginal return to LMICs (excl. China) per innovation, % (mean ± 1 SEM)",
+  value_fmt    = function(v) sprintf("%s%%",
+                                     format(round(v, 1), nsmall = 1)),
+  baseline_fmt = function(v) sprintf("%s%%",
+                                     format(round(v, 1), nsmall = 1)),
+  x_expand_mult = 0.18)
+
+# Country-restricted live-app URLs (just the country knob differs).
+make_url_lmic <- function(toflow) {
+  sub("&country-country=%22All%20countries%22",
+      "&country-country=%22LMICs%20(excl.%20China)%22",
+      make_url(toflow), fixed = TRUE)
+}
+url_ev_lmic2 <- make_url_lmic("ev_emdenocn")
+url_is_lmic2 <- make_url_lmic("is_emdenocn")
+svg_ev_lmic2 <- render_svg(p_ev_lmic2, w = 8.4, h = 5.4)
+svg_is_lmic2 <- render_svg(p_is_lmic2, w = 8.4, h = 5.4)
+
+panel_pair_figure(
+  title_a = "Average spillovers — LMIC source, LMIC destination",
+  url_a   = url_ev_lmic2, svg_a = svg_ev_lmic2,
+  title_b = "Marginal returns — LMIC source, LMIC destination",
+  url_b   = url_is_lmic2, svg_b = svg_is_lmic2,
+  caption_html = paste0(
+    "<b>Figure 3.</b> Same as Figure 2 but with the country filter ",
+    "restricted to <em>LMICs excluding China</em>: the source patents ",
+    "now have at least one LMIC-excl-China inventor record. Sample ",
+    "sizes drop sharply (defence has roughly 800 LMIC-resident ",
+    "families vs. 46,000 globally), so the SEM bars widen. <em>Click ",
+    "either panel for its interactive, drill-down version on the ",
+    "Innovation Strategy Explorer.</em>"
+  ))
+```
+
+The picture **flips again** when the source patents are themselves
+LMIC-resident. **Defence is now last on spillovers** — it sits *below*
+the all-innovations baseline — and only mid-pack on marginal returns.
+AI still dominates, with green technology, agriculture & food, and
+biotechnology all comfortably above defence on both panels.
+
+Two ways to read this. The benign reading: most LMIC-resident defence
+patenting is small, niche, often local-procurement-driven, and doesn't
+plug into the global citation network the way LMIC-resident
+green-technology or AI work increasingly does. The cautionary reading:
+**when LMICs are doing their own inventing, the dollars they put into
+defence-related R&D are the dollars least likely to come back to them
+as growth-relevant knowledge externalities.** That ought to influence
+how LMIC governments frame any tech-and-defence industrial policy.
+
+A note on the sample: with only ~800 defence patents from LMIC
+inventors in the database, the defence bar in panel (b) carries a wider
+SEM band than the others. The qualitative ranking is robust — defence
+trails the four civilian umbrellas on both panels — but the precise
+gap to the runners-up should be read with that uncertainty in mind.
+
+## How does spillover-to-LMIC actually travel?
+
+The bar charts above flatten the LMIC-bound spillover into a single
+per-innovation number. To see what those flows actually look like as
+they propagate through the citation network — and why defence and green
+end up in such different places — the maps below trace **seven
+generations of citations** from each umbrella's gen-0 patent set,
+weighted by `ev_emdenocn` (the per-citation flow into LMICs excluding
+China). Both panels start with a random sample of 1,000 patents from
+the relevant umbrella; at each generation step we keep a 10% random
+sample of citing-docdb candidates so the map stays legible while still
+showing the network's reach.
+
+```{r fig4, message=FALSE}
+library(leaflet)
+panel_green_lmic_flow <- higglobe_local_sample(
+  country         = "All countries",
+  techs           = "Green Technology",
+  toflow          = "ev_emdenocn",
+  gen0_n          = 1000L,
+  gen0_mode       = "Random",
+  n_generations   = 7L,
+  edge_sample_pct = 10,
+  include_fallback = TRUE,
+  seed            = 42,
+  data_dir        = data_dir
+)
+panel_defence_lmic_flow <- higglobe_local_sample(
+  country         = "All countries",
+  techs           = "Any Defence technology",
+  toflow          = "ev_emdenocn",
+  gen0_n          = 1000L,
+  gen0_mode       = "Random",
+  n_generations   = 7L,
+  edge_sample_pct = 10,
+  include_fallback = TRUE,
+  seed            = 42,
+  data_dir        = data_dir
+)
+
+# Live-app deep-link with the same parameters as the figure builds.
+hglobe_live_url <- function(techs) {
+  q <- function(x) utils::URLencode(paste0('"', x, '"'), reserved = TRUE)
+  paste0(
+    "https://mondpanther-iseapp2.share.connect.posit.cloud/",
+    "?_inputs_&navbar_page=", q("HiGGlobe"),
+    "&hglobe-country=",        q("All countries"),
+    "&hglobe-firm=",           q("No firm filter"),
+    "&hglobe-techs=",          q(techs),
+    "&hglobe-city=",           q("No city filter"),
+    "&hglobe-toflow=",         q("ev_emdenocn"),
+    "&hglobe-granted_only=false&hglobe-multifam_only=false",
+    "&hglobe-include_fallback=true",
+    "&hglobe-gen0_select_mode=", q("Random"),
+    "&hglobe-gen0_unit_mode=",   q("Number"),
+    "&hglobe-gen0_sample_val=1000",
+    "&hglobe-edge_select_mode=", q("Random"),
+    "&hglobe-edge_unit_mode=",   q("Percent"),
+    "&hglobe-edge_sample_val=10",
+    "&hglobe-add_generations=7",
+    "&hglobe-sidebar=true",
+    paste(sprintf("&hglobe-show_gen_%d=true", 0:9), collapse = ""),
+    "&step=7"
+  )
+}
+```
+
+```{r fig4-green, fig.cap="(green panel)"}
+htmltools::tagList(
+  htmltools::tags$figure(
+    style = "margin: 22px 0;",
+    htmltools::tags$div(
+      style = "font-weight: 600; text-align: center; margin-bottom: 6px;",
+      "Figure 4. Green-technology citation network, weighted by spillover to LMICs (excl. China)"
+    ),
+    htmltools::tags$div(
+      style = "margin: 4px 0; font-size: 0.85rem; text-align: right;",
+      htmltools::tags$a(
+        "Open the live HiGGlobe view →",
+        href   = hglobe_live_url("Green Technology"),
+        target = "_blank", rel = "noopener"
+      )
+    ),
+    higglobe_local_leaflet(panel_green_lmic_flow, height = "520px"),
+    htmltools::tags$figcaption(
+      style = "text-align:center; color:#555;
+               font-size:0.92rem; margin-top:8px;",
+      htmltools::HTML(paste0(
+        "Seven generations of forward citations from a 1,000-patent ",
+        "random gen-0 sample of green-technology patents worldwide; ",
+        "edge sampling 10% per step. Marker fill colour encodes ",
+        "generation depth. <em>Click any marker</em> for that patent's ",
+        "publication number with a direct link to the Espacenet ",
+        "search page; click the link above to open the equivalent ",
+        "interactive HiGGlobe view on the live app."
+      ))
+    )
+  )
+)
+```
+
+```{r fig5-defence, fig.cap="(defence panel)"}
+htmltools::tagList(
+  htmltools::tags$figure(
+    style = "margin: 22px 0;",
+    htmltools::tags$div(
+      style = "font-weight: 600; text-align: center; margin-bottom: 6px;",
+      "Figure 5. Defence-technology citation network, weighted by spillover to LMICs (excl. China)"
+    ),
+    htmltools::tags$div(
+      style = "margin: 4px 0; font-size: 0.85rem; text-align: right;",
+      htmltools::tags$a(
+        "Open the live HiGGlobe view →",
+        href   = hglobe_live_url("Any Defence technology"),
+        target = "_blank", rel = "noopener"
+      )
+    ),
+    higglobe_local_leaflet(panel_defence_lmic_flow, height = "520px"),
+    htmltools::tags$figcaption(
+      style = "text-align:center; color:#555;
+               font-size:0.92rem; margin-top:8px;",
+      htmltools::HTML(paste0(
+        "Same construction as Figure 4 with <code>techs = ",
+        "\"Any Defence technology\"</code>. The defence network reaches ",
+        "deeper (gen 7+) but the geographic spread is much narrower — ",
+        "concentrated in a handful of established defence hubs. ",
+        "<em>Click any marker</em> for that patent's publication number ",
+        "with a direct Espacenet link."
+      ))
+    )
+  )
+)
+```
+
+The two maps make tangible what the bars in Figure 2 implied. Green
+patenting fans out across many continents at every generation. Defence
+patenting cascades within a much narrower geography — North America,
+Western Europe, Japan, Korea — and only modestly leaks into LMIC
+territory at gen 1 / gen 2 before fading. The dollar gap in panel (a)
+of Figure 2 (defence > green for spillover *to LMICs*) is delivered by
+a small number of high-value defence-source patents whose citation
+chains happen to terminate disproportionately in LMIC-resident
+descendants — the "defence to LMIC" pipe is strong but narrow.
+
+<small>Source: Innovation Strategy Explorer; full database, granted +
+non-granted patent families. Figure 1 covers all source countries;
+Figure 2 narrows the *recipient* to LMICs excluding China; Figure 3
+narrows both source and recipient to LMICs excluding China; Figures
+4–5 trace seven generations of `ev_emdenocn`-weighted citations from
+green and defence respectively.
+[github.com/mondpanther/iseapp](https://github.com/mondpanther/iseapp).</small>

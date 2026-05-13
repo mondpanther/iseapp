@@ -32,3 +32,4 @@ nul
 !.posit/
 !.posit/publish/
 !.posit/publish/**/*.toml
+.positai
