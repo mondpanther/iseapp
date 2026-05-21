@@ -1184,6 +1184,54 @@ cat("    ", nrow(region_lookup), "rows (restricted to regions with final docdbs)
 cat("  Writing patents_x_firm.parquet...\n")
 firmmap_full <- arrow::read_parquet(file.path(iseapp_dir, "firmmap.parquet"))
 
+# -- Extra firms not in the upstream firmmap/firmsectormap --
+# Firmmap upstream only covers ICB-listed multinationals. We graft additional
+# firms here by looking up their patent holdings via the persons + holders
+# bridge in <iseapp>/inglobe/. Each entry specifies the canonical firm name
+# used in the selector, an ICB-style sector, and a regex matched against
+# `psn_name` in persons.parquet (the harmonised PATSTAT person name).
+extra_firms <- list(
+  list(firm    = "TATA CHEMICALS",
+       sector  = "Chemicals",
+       pattern = "^TATA CHEMICALS( |$)"),
+  list(firm    = "TATA POWER SOLAR SYSTEMS",
+       sector  = "Alternative Energy",
+       pattern = "^TATA POWER SOLAR SYSTEMS( |$)")
+)
+
+cat("  Augmenting firmmap with", length(extra_firms), "extra firm(s)...\n")
+extra_persons_path <- file.path(iseapp_dir, "inglobe", "persons.parquet")
+extra_holders_path <- file.path(iseapp_dir, "inglobe", "data", "holders.parquet")
+
+if (file.exists(extra_persons_path) && file.exists(extra_holders_path)) {
+  extra_con <- duckdb::dbConnect(duckdb::duckdb())
+  extra_rows <- lapply(extra_firms, function(ef) {
+    q <- sprintf("
+      SELECT DISTINCT h.docdb_family_id
+      FROM read_parquet('%s') p
+      JOIN read_parquet('%s') h ON h.person_id = p.person_id
+      WHERE regexp_matches(upper(p.psn_name), '%s')
+    ", extra_persons_path, extra_holders_path, ef$pattern)
+    fams <- DBI::dbGetQuery(extra_con, q)
+    cat("    ", ef$firm, ": ", nrow(fams), " distinct docdb_family_ids\n",
+        sep = "")
+    if (!nrow(fams)) return(NULL)
+    data.frame(company_raw     = ef$firm,
+               docdb_family_id = fams$docdb_family_id,
+               stringsAsFactors = FALSE)
+  })
+  DBI::dbDisconnect(extra_con, shutdown = TRUE)
+  extra_firmmap_rows <- do.call(rbind, Filter(Negate(is.null), extra_rows))
+  if (!is.null(extra_firmmap_rows) && nrow(extra_firmmap_rows) > 0) {
+    firmmap_full <- dplyr::bind_rows(firmmap_full, extra_firmmap_rows)
+    cat("    Bound", nrow(extra_firmmap_rows),
+        "extra firmmap rows.\n")
+  }
+} else {
+  warning("Skipping extra-firm augmentation: ",
+          extra_persons_path, " or ", extra_holders_path, " missing.")
+}
+
 patents_x_firm <- firmmap_full |>
   dplyr::filter(docdb_family_id %in% final_docdbs) |>
   dplyr::rename(firm = company_raw) |>
@@ -1204,6 +1252,18 @@ cat("  Writing firm_lookup.parquet...\n")
 final_firms <- unique(patents_x_firm$firm)
 firmsectormap <- arrow::read_parquet(file.path(iseapp_dir, "firmsectormap.parquet")) |>
   dplyr::select(firm = company_raw, firm_sector = sector)
+
+# Attach sectors for the augmented firms defined above so they survive the
+# `firm %in% final_firms` filter and appear in selectors grouped by sector.
+# Skip any that are already present in the upstream firmsectormap so the
+# block stays idempotent if those firms are added there later.
+extra_firm_sectors <- do.call(rbind, lapply(extra_firms, function(ef)
+  data.frame(firm = ef$firm, firm_sector = ef$sector,
+             stringsAsFactors = FALSE)))
+extra_firm_sectors <- extra_firm_sectors |>
+  dplyr::anti_join(firmsectormap, by = "firm")
+firmsectormap <- dplyr::bind_rows(firmsectormap, extra_firm_sectors)
+
 firm_lookup <- firmsectormap |> dplyr::filter(firm %in% final_firms)
 write_parquet_atomic(firm_lookup, "inst/extdata/firm_lookup.parquet",
                      compression = "zstd", compression_level = 3)

@@ -50,7 +50,17 @@ server <- function(input, output, session, con) {
          any(startsWith(x, keep_prefixes)))
     }, logical(1))
 
-    session$setBookmarkExclude(all_inputs[!keep_flag])
+    # Force-exclude high-volume widget state that bloats the URL beyond
+    # any usefulness. shinyTree's input value is the FULL nested-list
+    # representation of the tree (every firm node, with checked/opened
+    # attributes) — bookmarking it dumps thousands of firm names into the
+    # querystring even when the user has barely interacted with it. The
+    # checked-leaf state we care about is reconstructable from the user's
+    # selections in the aggregate-sector selectize anyway, so dropping
+    # the tree from bookmarks is the right tradeoff.
+    force_exclude <- grepl("(^|-)firm_categories_tree$", all_inputs)
+
+    session$setBookmarkExclude(all_inputs[!keep_flag | force_exclude])
   })
 
   observe({

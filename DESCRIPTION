@@ -29,6 +29,7 @@ Imports:
     sf,
     shiny,
     shinyjs,
+    shinyTree,
     shinyWidgets,
     usethis,
     waiter,

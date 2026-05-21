@@ -47,6 +47,34 @@ expand_firm_selection <- function(selected) {
   unique(expanded)
 }
 
+#' Map firm or sector-group labels to their ICB sector name
+#'
+#' Used by the "Value flow by firm" tab to colour bars by sector. When the
+#' label is already a sector group (matches a name in
+#' \code{firm_sector_groups}), it is its own sector. Individual firms are
+#' looked up in the inverted mapping built from \code{firm_sector_groups}.
+#' Unmatched / unsectored firms (sysdata occasionally has NA \code{firm_sector})
+#' get \code{"Other"}.
+#'
+#' @param labels Character vector of bar labels (firm or sector names).
+#' @return Character vector of the same length, holding sector names.
+#' @export
+firm_to_sector <- function(labels) {
+  if (!exists("firm_sector_groups", inherits = TRUE))
+    return(rep("Other", length(labels)))
+  # Invert sector -> firm-list into firm -> sector. firm_sector_groups is
+  # a list whose elements are themselves named lists (firm = firm).
+  firm_to_sec <- unlist(lapply(names(firm_sector_groups), function(s) {
+    setNames(rep(s, length(firm_sector_groups[[s]])),
+             unlist(firm_sector_groups[[s]], use.names = FALSE))
+  }))
+  vapply(labels, function(x) {
+    if (x %in% names(firm_sector_groups)) x
+    else if (x %in% names(firm_to_sec))   unname(firm_to_sec[[x]])
+    else                                  "Other"
+  }, character(1), USE.NAMES = FALSE)
+}
+
 #' Get display name for a NUTS1 region code
 #'
 #' @param code A NUTS1 region code (e.g. "UKI").

@@ -10,8 +10,8 @@ id = "019cdc4e-02b5-144d-71fe-74477e6abf2a"
 dashboard_url = "https://connect.posit.cloud/mondpanther/content/019cdc4e-02b5-144d-71fe-74477e6abf2a"
 direct_url = "https://019cdc4e-02b5-144d-71fe-74477e6abf2a.share.connect.posit.cloud"
 logs_url = "https://connect.posit.cloud/mondpanther/content/019cdc4e-02b5-144d-71fe-74477e6abf2a/history"
-deployed_at = "2026-05-13T01:43:50.044Z"
-bundle_id = "019e1efd-4608-cd17-6e6b-4c7976d7df31"
+deployed_at = "2026-05-21T11:34:20.205Z"
+bundle_id = "019e4a4e-5d92-e910-ea1c-0a0d266cd4d2"
 files = [
     ".posit/publish/deployments/deployment-CPP4.toml",
     ".posit/publish/iseapp2-9GQ2.toml",
@@ -9449,6 +9449,40 @@ encoding = "UTF-8"
 needs_compilation = "no"
 author = "Eric Bailey [aut], Federico Marini [cre, ctb] (ORCID: <https://orcid.org/0000-0003-3252-7758>), Jesse Koops [ctb]"
 maintainer = "Federico Marini <marinif@uni-mainz.de>"
+repository = "CRAN"
+
+[renv.packages.shinyTree]
+package = "shinyTree"
+version = "0.3.1"
+source = "Repository"
+type = "Package"
+title = "jsTree Bindings for Shiny"
+date = "2023-7-21"
+"authors@r" = "c( person(family=\"Trestle Technology, LLC\", role=\"aut\", email=\"cran@trestletechnology.net\"), person(\"Jeff\", \"Allen\", role=\"aut\", email=\"cran@trestletechnology.net\"), person(family=\"Institut de Radioprotection et de Sûreté Nucléaire\", role=c(\"cph\"), email = \"yann.richet@irsn.fr\"), person(\"Ivan\", \"Bozhanov\", role=c(\"ctb\", \"cph\"), comment = \"jsTree\"), person(family=\"The Dojo Foundation\", role=c(\"ctb\", \"cph\"), comment=\"require.js\"), person(family=\"jQuery Foundation, Inc.\", role=c(\"ctb\", \"cph\")), person(\"Mike\", \"Schaffer\", role=c(\"ctb\"), email=\"mschaff@gmail.com\"), person(\"Timm\", \"Danker\", role=c(\"ctb\"), email=\"tidafr@carina.uberspace.de\"), person(\"Michael\", \"Bell\", role=c(\"cre\"), email=\"bell_michael_a@lilly.com\"), person(\"Sebastian\", \"Gatscha\", role=c(\"ctb\"), email=\"kona1@gmx.at\"), person(\"Thorn\", \"Thaler\", role = c(\"ctb\"), email = \"thorn.thaler@thothal.at\"))"
+maintainer = "Michael Bell <bell_michael_a@lilly.com>"
+description = "Exposes bindings to jsTree -- a JavaScript library that supports interactive trees -- to enable a rich, editable trees in Shiny."
+license = "MIT + file LICENSE"
+depends = [
+    "R (>= 2.15.1)",
+    "methods",
+]
+imports = [
+    "shiny (>= 0.9.0)",
+    "htmlwidgets",
+    "jsonlite",
+    "stringr",
+    "promises",
+]
+suggests = [
+    "testthat",
+    "shinytest",
+    "data.tree",
+]
+bug_reports = "https://github.com/shinyTree/shinyTree/issues"
+roxygen_note = "7.2.3"
+encoding = "UTF-8"
+needs_compilation = "no"
+author = "Trestle Technology, LLC [aut], Jeff Allen [aut], Institut de Radioprotection et de Sûreté Nucléaire [cph], Ivan Bozhanov [ctb, cph] (jsTree), The Dojo Foundation [ctb, cph] (require.js), jQuery Foundation, Inc. [ctb, cph], Mike Schaffer [ctb], Timm Danker [ctb], Michael Bell [cre], Sebastian Gatscha [ctb], Thorn Thaler [ctb]"
 repository = "CRAN"
 
 [renv.packages.shinyWidgets]

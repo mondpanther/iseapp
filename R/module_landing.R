@@ -41,7 +41,7 @@ landing_module_server <- function(id, waiter, con) {
 
       shiny::observe({
         # Hardcoded defaults matching country module sidebar
-        toflow             <- "is_global"
+        toflow             <- "ev_global"
         firm               <- "All"
         selected_countries <- expand_country_selection("All countries")
         country_sql        <- paste0("'", selected_countries, "'", collapse = ", ")

@@ -768,6 +768,200 @@ plot_avstrax_by_country <- function(
   return(list(girafe = g, ggplot = p, plot_data = avstrax))
 }
 
+#' Bar chart of value flows by firm / sector category
+#'
+#' Sibling of \code{plot_avstrax_by_country()} for the "Value flow by firm"
+#' Country Explorer tab. One horizontal bar per row in \code{pdata}; bars
+#' are coloured by the row's \code{sector} (legend title: "Sector") with a
+#' dynamic hue palette sized to the distinct sectors present in the data.
+#' The dashed vertical "Average" line is drawn at \code{allmean}.
+#'
+#' @param pdata Data frame returned by \code{sql_country_firm_combined_v2()}
+#'   plus an R-side \code{sector} column. Must carry the same per-bar stats
+#'   columns as \code{plot_avstrax_by_country()} (mean, sem, innos,
+#'   top25_bin_mean, top50_bin_mean, top3_ids, top3_ids_url, allmean,
+#'   allinnos) and a \code{technology} column whose value is the firm or
+#'   sector-group label that should appear on the y-axis.
+#' @param toflow Character. Flow column name (e.g. "is_global"); used to
+#'   pick the y-axis label and detect percent / dollar formatting.
+#' @param widthscale "log" or "proportional" — controls per-bar width.
+#' @param display_mode "confidence" (1.96·SEM bars) or "quartiles".
+#' @param top_n_ids Integer. Click-through patent count per bar.
+#' @param plot_title Character. Chart title.
+#' @param width_svg,height_svg Numeric. Output SVG dimensions for girafe.
+#' @return List with \code{$girafe}, \code{$ggplot}, \code{$plot_data}.
+#' @export
+plot_avstrax_by_firm <- function(pdata,
+                                  toflow,
+                                  widthscale   = "log",
+                                  display_mode = "confidence",
+                                  top_n_ids    = 10,
+                                  width_svg    = 10,
+                                  height_svg   = 6,
+                                  plot_title   = "Value flow by firm") {
+
+  if (is.null(pdata) || nrow(pdata) == 0) return(NULL)
+
+  avstrax <- pdata
+  ylab    <- ifelse(grepl("^(is_|av_)", toflow), "Return in %", "Millions of $")
+
+  allmean     <- avstrax$allmean[1]
+  total_innos <- avstrax$allinnos[1]
+
+  if ("sector" %in% names(avstrax)) {
+    avstrax$sector[is.na(avstrax$sector) | !nzchar(avstrax$sector)] <- "Other"
+  } else {
+    avstrax$sector <- "Other"
+  }
+
+  avstrax <- avstrax |>
+    dplyr::arrange(technology) |>
+    dplyr::mutate(
+      linnos1    = innos,
+      linnos2    = log(1 + innos),
+      widthscale = widthscale
+    ) |>
+    dplyr::filter(innos > 1) |>
+    dplyr::mutate(
+      linnos = ifelse(widthscale == "log", linnos2, linnos1),
+      width  = linnos / max(linnos),
+      x_pos  = as.numeric(factor(technology)),
+      xmin   = x_pos - width / 2,
+      xmax   = x_pos + width / 2,
+      ymin   = 0,
+      ymax   = mean
+    )
+
+  if (nrow(avstrax) == 0) return(NULL)
+
+  is_return <- grepl("^(is_|av_)", toflow)
+  avstrax$value_label <- if (is_return) {
+    paste0(round(avstrax$mean, 1), "%")
+  } else {
+    paste0("$", round(avstrax$mean, 1), " million")
+  }
+
+  # Hue-rotation palette sized to the distinct sectors actually present, so
+  # adding/removing sectors via the input recolours the chart predictably.
+  sector_levels <- sort(unique(avstrax$sector))
+  sector_palette <- setNames(scales::hue_pal()(length(sector_levels)),
+                              sector_levels)
+
+  if (top_n_ids > 0) {
+    p <- ggplot2::ggplot(avstrax) +
+      ggiraph::geom_rect_interactive(
+        ggplot2::aes(
+          xmin    = xmin,
+          xmax    = xmax,
+          ymin    = ymin,
+          ymax    = ymax,
+          fill    = sector,
+          data_id = technology,
+          tooltip = paste0(technology, " (", sector, "): ", value_label,
+                           "\nInnovations: ", scales::comma(innos),
+                           "\nTop IDs: ", top3_ids),
+          onclick = top3_ids_url
+        )
+      )
+  } else {
+    p <- ggplot2::ggplot(avstrax) +
+      ggplot2::geom_rect(
+        ggplot2::aes(
+          xmin = xmin, xmax = xmax,
+          ymin = ymin, ymax = ymax,
+          fill = sector
+        )
+      )
+  }
+
+  if (display_mode == "confidence") {
+    p <- p +
+      ggplot2::geom_errorbar(
+        ggplot2::aes(
+          x    = x_pos,
+          ymin = ifelse(mean - 1.96 * sem > 0, mean - 1.96 * sem, 0),
+          ymax = mean + 1.96 * sem
+        ),
+        width = 0.2, color = "black", linewidth = 0.4, alpha = 0.4
+      )
+  } else if (display_mode == "quartiles") {
+    p <- p +
+      ggplot2::geom_errorbar(
+        ggplot2::aes(
+          color = sector,
+          x     = x_pos,
+          ymin  = top50_bin_mean,
+          ymax  = top25_bin_mean,
+          width = width * 1.05
+        ),
+        linewidth = 1, alpha = 0.5
+      )
+  }
+
+  # Extra top expansion + clip="off" so the rotated "Average" label can
+  # render past the topmost bar without being chopped — at small bar counts
+  # the default 5% expansion fits it; once enough categories are added the
+  # rotated text overruns the panel and the beginning of the word clips.
+  p <- p +
+    ggplot2::scale_x_continuous(
+      breaks = avstrax$x_pos,
+      labels = avstrax$technology,
+      expand = ggplot2::expansion(mult = c(0.05, 0.12))
+    ) +
+    ggplot2::scale_color_manual(values = sector_palette) +
+    ggplot2::scale_fill_manual(values  = sector_palette) +
+    ggplot2::labs(
+      title = plot_title,
+      x     = "Firms and sectors",
+      y     = ylab,
+      fill  = "Sector"
+    ) +
+    ggplot2::guides(color = "none") +
+    ggplot2::theme_minimal(base_family = "Arial") +
+    theme_istrax_titles() +
+    ggplot2::theme(
+      axis.title.x = ggplot2::element_text(size = 14),
+      axis.title.y = ggplot2::element_text(size = 14),
+      axis.text.x  = ggplot2::element_text(size = 12),
+      axis.text.y  = ggplot2::element_text(size = 12),
+      text         = ggplot2::element_text(family = "Arial"),
+      axis.text    = ggplot2::element_text(family = "Arial"),
+      axis.title   = ggplot2::element_text(family = "Arial"),
+      plot.margin  = ggplot2::margin(t = 30, r = 15, b = 10, l = 10,
+                                     unit = "pt")
+    ) +
+    ggplot2::geom_hline(yintercept = allmean, linetype = "dashed",
+                        color = "black", linewidth = 1) +
+    ggplot2::annotate("text", y = allmean, x = max(avstrax$x_pos) + 0.4,
+                      label = "Average", angle = -90, vjust = 1.5,
+                      size = 4, family = "Arial", color = "black") +
+    ggplot2::coord_flip(clip = "off")
+
+  p <- p +
+    ggplot2::labs(
+      subtitle = paste0(scales::comma(total_innos), " Innovations"),
+      caption  = "© 2026 Innovation Strategy Explorer"
+    ) +
+    ggplot2::theme(
+      plot.caption = ggplot2::element_text(hjust = 1, size = 10,
+                                           color = "gray")
+    )
+
+  g <- ggiraph::girafe(
+    ggobj      = p,
+    width_svg  = width_svg,
+    height_svg = height_svg,
+    options = list(
+      opts_sizing(rescale = TRUE),
+      opts_hover(css = "cursor:pointer;fill:yellow;"),
+      opts_selection(type = "none"),
+      opts_tooltip(css = "background-color:white;padding:5px;border-radius:3px;border:1px solid #ccc;")
+    )
+  )
+
+  list(girafe = g, ggplot = p, plot_data = avstrax)
+}
+
 compute_avstrax_for_techs <- function(data, istrax_var, classes#, green_classes
                                       ) {
   #data=patchar_countrymap;istrax_var="istrax_global"; classes=filtered; green_classes=green_classes;classes=data.frame()

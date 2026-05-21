@@ -50,8 +50,22 @@ firm_grouped_choices <- c(
   firm_sector_groups
 )
 
+# Top-10 sectors by distinct docdb count — used as the default selection
+# in the Country Explorer's "Value flow by firm" tab so the chart opens
+# with the sectors that have the most patent coverage. Computed once at
+# build time so the module doesn't need a runtime query.
+firm_sector_top10 <- patents_x_firm |>
+  dplyr::left_join(firm_lookup, by = "firm") |>
+  dplyr::filter(!is.na(firm_sector)) |>
+  dplyr::distinct(docdb_family_id, firm_sector) |>
+  dplyr::count(firm_sector, name = "n_docdbs", sort = TRUE) |>
+  dplyr::slice_head(n = 10) |>
+  dplyr::pull(firm_sector)
+
 cat("  ✓", length(firm_values), "firms\n")
 cat("  ✓", length(firm_sector_values), "firm sectors\n")
+cat("  ✓ top-10 sectors by docdb count:",
+    paste(firm_sector_top10, collapse = ", "), "\n")
 
 # ============================================================
 # 2. COUNTRIES
@@ -809,6 +823,7 @@ usethis::use_data(
   # Firms
   firm_grouped_choices,
   firm_sector_groups,
+  firm_sector_top10,
   # Countries
   country_choices,
   group_definitions,
