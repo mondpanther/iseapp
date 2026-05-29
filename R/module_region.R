@@ -50,7 +50,7 @@ region_module_sidebar <- function(id) {
             ns("techs_region"),
             "Technologies included",
             choices  = grouped_techs,
-            selected = "Green Technology",
+            selected = "All innovations",
             multiple = TRUE,
             options  = list(placeholder = 'Choose one or more technology categories...')
           )
@@ -63,7 +63,7 @@ region_module_sidebar <- function(id) {
           shiny::checkboxInput(
             inputId = ns("granted_only"),
             label   = "Granted families only",
-            value   = TRUE
+            value   = FALSE
           ),
           shiny::checkboxInput(
             inputId = ns("multifam_only"),
@@ -91,7 +91,7 @@ region_module_sidebar <- function(id) {
             ns("toflow_region"),
             label = NULL,
             choices  = toflow_choices,
-            selected = "is_global",
+            selected = "ev_global",
             multiple = FALSE,
             options  = list(placeholder = 'Choose a value flow...')
           )

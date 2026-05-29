@@ -45,7 +45,7 @@ hglobe_module_sidebar <- function(id) {
           inputId = ns("techs"),
           label   = "Technologies included",
           choices = grouped_techs,
-          selected = "Green Technology",
+          selected = "All innovations",
           multiple = TRUE,
           options = list(placeholder = 'Choose technologies...')
         )
@@ -78,7 +78,7 @@ hglobe_module_sidebar <- function(id) {
           shiny::checkboxInput(
             inputId = ns("granted_only"),
             label   = "Granted families only",
-            value   = TRUE
+            value   = FALSE
           ),
           shiny::checkboxInput(
             inputId = ns("multifam_only"),
@@ -283,6 +283,39 @@ hglobe_module_sidebar <- function(id) {
               `aria-hidden` = "true"
             )
           )
+        )
+      ),
+      # Pre-flight safety cap. Before each generation's heavy candidate
+      # join runs, a cheap COUNT over `citenet` projects how many citing
+      # docdbs the frontier would expand to. If it exceeds this limit
+      # the iteration is aborted with a clear status message — saves
+      # the user from a 100K-node browser freeze. Raise it if your
+      # machine is comfortable; lower for conservative exploration.
+      shiny::div(
+        style = "margin-top: 8px;",
+        shiny::numericInput(
+          inputId = ns("max_iter_nodes"),
+          label   = "Max citing nodes per iteration",
+          value   = 50000,
+          min     = 100,
+          step    = 1000,
+          width   = "100%"
+        )
+      ),
+      # Emergency stop — only visible while a batch is in flight (i.e.
+      # pending_gens > 0). Aborts the deferred-iteration chain so the
+      # user regains control after the *currently* drawing iteration
+      # finishes; the chain built so far is preserved (Render Map is the
+      # button that resets everything).
+      shiny::tags$div(
+        id    = ns("stop_generation_wrapper"),
+        style = "display:none; margin-top: 8px;",
+        shiny::actionButton(
+          inputId = ns("stop_generation"),
+          label   = "Stop generating",
+          class   = "btn-danger btn-sm",
+          width   = "100%",
+          icon    = shiny::icon("stop")
         )
       )
     )
@@ -1177,12 +1210,44 @@ hglobe_module_server <- function(id, con) {
       # here so both the immediate first-iteration path and the deferred
       # later::later() path can reuse it.
       do_one_generation <- function(edge_select, edge_unit, edge_val,
-                                    toflow_col) {
+                                    toflow_col, max_nodes = Inf) {
         g        <- gen_next()
         prev_tbl <- frontier_tbl(g - 1)
         new_tbl  <- frontier_tbl(g)
         tmp_tbl  <- sprintf("hglobe_edges_tmp_%s", tok)
         cand_tbl <- sprintf("hglobe_cand_tmp_%s",  tok)
+
+        # Pre-flight cap: before the heavy candidate join runs, cheaply
+        # project how many citing docdbs the previous frontier would
+        # expand to (citenet-only query, no countrymap join — uses the
+        # cited-side index, sub-second even for million-row frontiers).
+        # If it blows past the user's limit, abort *before* doing any
+        # expensive work; otherwise the user is stuck waiting for the
+        # candidate table to materialise just to see a giant chart.
+        if (is.finite(max_nodes) && max_nodes > 0) {
+          projected <- tryCatch(
+            DBI::dbGetQuery(con, sprintf("
+              SELECT COUNT(DISTINCT c.docdb_family_id) AS n
+              FROM citenet c
+              WHERE c.cited_docdb_family_id IN (
+                SELECT docdb_family_id FROM %s
+              )
+            ", prev_tbl))$n,
+            error = function(e) NA_real_
+          )
+          if (isTRUE(projected > max_nodes)) {
+            status_msg(sprintf(
+              paste0("Generation %d aborted: would expand to %s citing ",
+                     "patents (limit %s). Lower the sampling rate, ",
+                     "tighten the seed, or raise 'Max citing nodes per ",
+                     "iteration'."),
+              g,
+              format(projected, big.mark = ","),
+              format(max_nodes, big.mark = ",")
+            ))
+            return(FALSE)
+          }
+        }
 
         # Step A: candidate (next-docdb x chosen ctry) targets — one row
         # per citing docdb_family_id, with the geocoded ctry that
@@ -1455,10 +1520,11 @@ hglobe_module_server <- function(id, con) {
       # Inputs needed by each iteration are captured when "Generate" is
       # pressed, so changes to the toggles mid-batch don't surprise the
       # user. The Render Map seed already locks the toflow.
-      pending_select <- shiny::reactiveVal(NA_character_)
-      pending_unit   <- shiny::reactiveVal(NA_character_)
-      pending_val    <- shiny::reactiveVal(NA_real_)
-      pending_flow   <- shiny::reactiveVal(NA_character_)
+      pending_select    <- shiny::reactiveVal(NA_character_)
+      pending_unit      <- shiny::reactiveVal(NA_character_)
+      pending_val       <- shiny::reactiveVal(NA_real_)
+      pending_flow      <- shiny::reactiveVal(NA_character_)
+      pending_max_nodes <- shiny::reactiveVal(Inf)
 
       shiny::observeEvent(input$next_step, ignoreInit = TRUE, {
         if (is.null(gen_next())) {
@@ -1482,10 +1548,16 @@ hglobe_module_server <- function(id, con) {
         n_steps <- suppressWarnings(as.integer(input$add_generations))
         if (is.na(n_steps) || n_steps < 1) n_steps <- 1L
 
+        # Snapshot the safety cap once; later edits don't disturb the
+        # in-flight batch. NA / non-positive disables the check.
+        mn_raw <- suppressWarnings(as.numeric(input$max_iter_nodes))
+        mn     <- if (is.finite(mn_raw) && mn_raw > 0) mn_raw else Inf
+
         pending_select(edge_select)
         pending_unit(edge_unit)
         pending_val(edge_val)
         pending_flow(input$toflow)
+        pending_max_nodes(mn)
         pending_gens(n_steps)
       })
 
@@ -1497,7 +1569,8 @@ hglobe_module_server <- function(id, con) {
         # see the mismatch and exit.
         my_epoch <- shiny::isolate(gen_epoch())
         ok <- do_one_generation(pending_select(), pending_unit(),
-                                pending_val(),    pending_flow())
+                                pending_val(),    pending_flow(),
+                                max_nodes = pending_max_nodes())
         if (!ok) {
           pending_gens(0L)
           return()
@@ -1595,17 +1668,37 @@ hglobe_module_server <- function(id, con) {
         auto_click("next_step", delay_ms = 400L, label = "Generate")
       })
 
-      # Spinner: visible whenever a multi-generation batch is mid-flight,
-      # i.e. pending_gens > 0. Toggling this with shinyjs::show / hide is
-      # cheap and works regardless of the bslib task-button's per-iteration
-      # busy reset.
+      # Spinner + Stop button: both follow pending_gens > 0. While a batch
+      # is in flight, show the spinner overlay AND surface the emergency
+      # stop button. Toggling with shinyjs::show / hide is cheap and works
+      # regardless of the bslib task-button's per-iteration busy reset.
       shiny::observe({
         rem <- pending_gens()
         if (is.null(rem) || rem <= 0) {
           shinyjs::hide(id = "next_step_spinner")
+          shinyjs::hide(id = "stop_generation_wrapper")
         } else {
           shinyjs::show(id = "next_step_spinner")
+          shinyjs::show(id = "stop_generation_wrapper")
         }
+      })
+
+      # Emergency stop: zero pending_gens so no further iterations get
+      # scheduled, and bump gen_epoch so any later() callback already
+      # queued bails out at the epoch check. The *currently executing*
+      # do_one_generation cannot be aborted mid-call (R is single-threaded
+      # and the leaflet draws happen after the R-side call returns), so
+      # the iteration drawing right now will finish — but the chain stops
+      # there and the user can change inputs without another wave landing.
+      shiny::observeEvent(input$stop_generation, ignoreInit = TRUE, {
+        if (shiny::isolate(pending_gens()) <= 0) return()
+        rem_now <- shiny::isolate(pending_gens())
+        gen_epoch(shiny::isolate(gen_epoch()) + 1L)
+        pending_gens(0L)
+        status_msg(sprintf(
+          "Generation stopped (%d iteration%s skipped). Existing chain preserved — adjust inputs and Generate again to continue.",
+          rem_now, if (rem_now == 1L) "" else "s"
+        ))
       })
 
       # Reflect the current generation count in the URL as `step=N`. We
