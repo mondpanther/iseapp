@@ -2,7 +2,7 @@
 "$schema" = "https://cdn.posit.co/publisher/schemas/posit-publishing-record-schema-v3.json"
 server_type = "connect_cloud"
 server_url = "https://connect.posit.cloud"
-client_version = "2.4.0"
+client_version = "2.6.0"
 created_at = "2026-05-05T19:23:08.179Z"
 type = "r-shiny"
 configuration_name = "iseapp2-9GQ2"
@@ -10,8 +10,8 @@ id = "019cdc4e-02b5-144d-71fe-74477e6abf2a"
 dashboard_url = "https://connect.posit.cloud/mondpanther/content/019cdc4e-02b5-144d-71fe-74477e6abf2a"
 direct_url = "https://019cdc4e-02b5-144d-71fe-74477e6abf2a.share.connect.posit.cloud"
 logs_url = "https://connect.posit.cloud/mondpanther/content/019cdc4e-02b5-144d-71fe-74477e6abf2a/history"
-deployed_at = "2026-05-21T11:34:20.205Z"
-bundle_id = "019e4a4e-5d92-e910-ea1c-0a0d266cd4d2"
+deployed_at = "2026-05-27T09:45:27.196Z"
+bundle_id = "019e68d1-df40-e912-c5d8-3a6f69c28ef5"
 files = [
     ".posit/publish/deployments/deployment-CPP4.toml",
     ".posit/publish/iseapp2-9GQ2.toml",

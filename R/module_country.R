@@ -215,11 +215,16 @@ country_module_sidebar <- function(id) {
             # as `firm_sector_top10`. Falls back to the first 10 sectors
             # if the object isn't available (e.g. before the next
             # data-raw-2025/02-build-app-sysdata.R run).
-            selected = tryCatch(
-              get("firm_sector_top10", envir = asNamespace(
-                    "innovationStrategyExplorer"), inherits = FALSE),
-              error = function(e) utils::head(names(firm_sector_groups),
-                                              10L)
+            # Banks are excluded from the default selection (still
+            # available in the dropdown for users to add manually).
+            selected = setdiff(
+              tryCatch(
+                get("firm_sector_top10", envir = asNamespace(
+                      "innovationStrategyExplorer"), inherits = FALSE),
+                error = function(e) utils::head(names(firm_sector_groups),
+                                                10L)
+              ),
+              "Banks"
             ),
             multiple = TRUE,
             width    = "100%",
