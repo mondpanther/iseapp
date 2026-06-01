@@ -422,34 +422,106 @@ rm(defence_expanded, defence_classes_map, defence_umbrella)
 
 
 # ============================================================================
-# STEP 6: Add Agriculture & Food classifications
+# STEP 6: Add Agriculture & Food classifications (newagrie value-chain leaves)
 # ============================================================================
+# Source: classifications/newagrie_value_chain_leaf_codes.xlsx
+# One row per CPC leaf code, with `YES_count` (1-3) recording how many of 3
+# LLM review iterations voted the code AgriFood-relevant, plus 12 per-segment
+# value-chain agreement scores (0-3) in columns I..T (`1_AgriInputs` ...
+# `12_DigitalAg`).
+#
+# Umbrella ("Any Agriculture & Food technology") = every family with any CPC
+#   that has YES_count > 1 (>= 2 of 3 iterations voting AgriFood).
+# Sub-categories (12) = for each value-chain segment, families with any CPC
+#   whose segment score is >= 2. A score of 1 is treated as insufficient
+#   evidence and does NOT confer sub-category membership (per project spec).
+#
+# This replaces the prior STEP 6 (which built from the older
+# Agriculture_Food_CPC_Patents_2026-01-22.xlsx with a different 8-class
+# scheme: "Input supply", "Primary food and feed production", ...). The
+# display labels below flow through `agrifood_classes` (line ~1108) into
+# `tech_lookup` and ultimately the `grouped_techs` menu in sysdata.rda.
 
-cat("Adding Agriculture & Food classifications...\n")
+cat("Adding Agriculture & Food classifications (newagrie value-chain leaves)...\n")
+tic("newagrie agri")
 
-agri_df <- read_excel("classifications/Agriculture_Food_CPC_Patents_2026-01-22.xlsx",
-                       sheet = 1) |>
-  rename(CPC = `CPC Group/Subgroup`, technology = `Value Chain`) |>
-  filter(!is.na(technology), !is.na(CPC))
+agri_raw <- read_excel("classifications/newagrie_value_chain_leaf_codes.xlsx",
+                        sheet = 1, .name_repair = "minimal")
+setDT(agri_raw)
+agri_raw[, cpc_class_symbol := stri_replace_all_fixed(cpc_code, " ", "")]
+agri_raw[, YES_count := as.integer(YES_count)]
 
-agri_expanded <- agri_df |>
-  separate_rows(CPC, sep = ";") |>
-  mutate(cpc_class_symbol = stri_replace_all_fixed(trimws(CPC), " ", "")) |>
-  filter(nchar(cpc_class_symbol) > 0) |>
-  select(technology, cpc_class_symbol)
+# Map xlsx column I..T -> app-facing display label. Stable ordering so the
+# menu and any downstream colourings group naturally along the value chain.
+agri_sub_cols   <- c("1_AgriInputs", "2_SoilLand",      "3_PrimaryProduction",
+                     "4_PostHarvest", "5_FoodBevProcessing", "6_PackagingColdChain",
+                     "7_Distribution", "8_FoodSafetyQuality", "9_FoodServicesRetail",
+                     "10_WasteCircular", "11_WaterEnergy",  "12_DigitalAg")
+agri_sub_labels <- c("AgriFood Inputs",
+                     "Soil & Land Management",
+                     "Primary Production",
+                     "Post-Harvest Handling",
+                     "Food & Beverage Processing",
+                     "Packaging & Cold Chain",
+                     "Distribution & Wholesale",
+                     "Food Safety & Quality",
+                     "Food Services & Retail",
+                     "Waste & Circular Economy",
+                     "Water & Energy",
+                     "Digital Agriculture")
+names(agri_sub_labels) <- agri_sub_cols
 
-setDT(agri_expanded)
-agri_classes_map <- cpcs[agri_expanded, on = "cpc_class_symbol",
-                         nomatch = 0L][, .(docdb_family_id, technology)]
+# Sub-category map: per segment, CPC symbols with score >= 2 joined to cpcs.
+agri_classes_map <- rbindlist(lapply(agri_sub_cols, function(col) {
+  expanded <- agri_raw[as.integer(get(col)) >= 2L,
+                       .(cpc_class_symbol,
+                         technology = agri_sub_labels[[col]])]
+  if (!nrow(expanded)) return(data.table())
+  cpcs[expanded, on = "cpc_class_symbol", nomatch = 0L][
+       , .(docdb_family_id, technology)]
+}))
 agri_classes_map <- unique(agri_classes_map)
 
-agri_umbrella <- agri_classes_map[, .(docdb_family_id = unique(docdb_family_id),
-                                      technology = "Any Agriculture & Food technology")]
+# Umbrella: a CPC enters the umbrella if EITHER YES_count > 1 (>= 2 of 3
+# iterations voting AgriFood-relevant overall) OR any value-chain segment
+# scores >= 2. The union criterion captures both broadly-AgriFood codes
+# without specific value-chain placement (e.g. 4 YES_count=3 CPCs with
+# no segment >= 2) and segment-strong codes that happened to get only one
+# YES vote on the overall label (e.g. ~1,433 combine-harvester-style CPCs
+# like A01D 41/* tagged Primary Production = 3 but YES_count = 1). The
+# union therefore covers essentially the entire xlsx (10,013 CPCs).
+#
+# Note: the umbrella is now a (very small) superset of the sub-category
+# union — the few broadly-agri YES_count>1 codes without any segment >= 2
+# end up in the umbrella but in no sub-category. In the app this means
+# "select Any AgriFood" returns at most a few hundred more families than
+# the union of all 12 sub-category selections — a reasonable behaviour
+# for a catch-all umbrella.
+um_expanded <- agri_raw[
+  YES_count > 1L |
+    (as.integer(`1_AgriInputs`)        >= 2L) |
+    (as.integer(`2_SoilLand`)          >= 2L) |
+    (as.integer(`3_PrimaryProduction`) >= 2L) |
+    (as.integer(`4_PostHarvest`)       >= 2L) |
+    (as.integer(`5_FoodBevProcessing`) >= 2L) |
+    (as.integer(`6_PackagingColdChain`) >= 2L) |
+    (as.integer(`7_Distribution`)      >= 2L) |
+    (as.integer(`8_FoodSafetyQuality`) >= 2L) |
+    (as.integer(`9_FoodServicesRetail`) >= 2L) |
+    (as.integer(`10_WasteCircular`)    >= 2L) |
+    (as.integer(`11_WaterEnergy`)      >= 2L) |
+    (as.integer(`12_DigitalAg`)        >= 2L),
+  .(cpc_class_symbol,
+    technology = "Any Agriculture & Food technology")]
+agri_umbrella <- unique(cpcs[um_expanded, on = "cpc_class_symbol",
+                              nomatch = 0L][, .(docdb_family_id, technology)])
 
 techmap <- rbindlist(list(techmap, agri_classes_map, agri_umbrella))
-cat("  Agri-food:", nrow(agri_classes_map), "sub-category rows +",
-    nrow(agri_umbrella), "umbrella rows\n")
-rm(agri_df, agri_expanded, agri_classes_map, agri_umbrella)
+cat("  Agri-food (newagrie):", nrow(agri_classes_map),
+    "sub-category rows (", uniqueN(agri_classes_map$technology),
+    "sub-categories ) +", nrow(agri_umbrella), "umbrella rows\n")
+rm(agri_raw, agri_classes_map, agri_umbrella, um_expanded)
+toc()
 
 
 # ============================================================================
@@ -1105,7 +1177,17 @@ battery_classes       <- c("Any battery technology", "Battery Technology", "Lith
 hard_to_abate_classes <- c("Any Hard to Abate technology", "Hard to Abate Sector Decarbonization", "Aviation Decarbonisation", "Cement & Concrete Decarbonisation", "Chemicals & Plastics Decarbonisation", "Shipping Decarbonisation", "Steel & Iron Decarbonisation")
 ai_classes            <- c("AI", "Machine Learning", "Deep Learning", "Natural Language Processing (NLP)", "Computer Vision", "Speech Recognition & Synthesis", "Robotics & Autonomous Systems", "Knowledge Representation & Reasoning", "Planning & Decision Making", "Generative AI", "Semiconductors", "Cloud & Data Infrastructure", "Data Rettrieval & Processing System", "Platform & Frameworks", "Deployment & Support")
 cpc_sections          <- c("Human Necessities", "Performing Operations; Transporting", "Chemistry; Metallurgy", "Textiles; Paper", "Fixed Constructions", "Mechanical Engineering; Lighting; Heating; Weapons; Blasting", "Physics", "Electricity", "General tagging of new or cross-sectional technology")
-agrifood_classes      <- c("Any Agriculture & Food technology", "Input supply", "Primary food and feed production", "Post-harvest handling & aggregation", "Processing", "Distribution/wholesale", "Retail/consumption", "Crosscutting")
+agrifood_classes      <- c("Any Agriculture & Food technology",
+                           # 12 value-chain sub-categories (newagrie xlsx
+                           # columns I..T, score >= 2 threshold). Order
+                           # mirrors the xlsx column order so the menu
+                           # groups them naturally along the value chain.
+                           "AgriFood Inputs", "Soil & Land Management",
+                           "Primary Production", "Post-Harvest Handling",
+                           "Food & Beverage Processing", "Packaging & Cold Chain",
+                           "Distribution & Wholesale", "Food Safety & Quality",
+                           "Food Services & Retail", "Waste & Circular Economy",
+                           "Water & Energy", "Digital Agriculture")
 defence_classes       <- c("Any Defence technology", "Defence Technology",
                             unique(defence_df$technology))
 ifc_standalone        <- c("Fossil Fuel", "Aerospace", "Biotechnology", "Blockchain", "Healthtech", "Wireless")
