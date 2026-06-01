@@ -47,6 +47,15 @@ if (!exists("STOP_ON_ERROR"))      STOP_ON_ERROR      <- TRUE
 # inferred country codes, built from tls20* PATSTAT tables) rather than the
 # legacy local DuckDB version that consumes the inglobe bridges.
 if (!exists("USE_BQ_HARMONIZATION")) USE_BQ_HARMONIZATION <- TRUE
+# The BigQuery countrymap builder now lives in the patbis2025 repo (single
+# source of truth — it is Source 1 of the patbis innos_country build). iseapp
+# sources it from there. Override PATBIS_COUNTRYMAP_SCRIPT if your patbis
+# checkout is elsewhere. (.bigdata/ intermediates still land in the iseapp
+# cwd, as before, because source() runs the file in the current directory.)
+if (!exists("PATBIS_COUNTRYMAP_SCRIPT"))
+  PATBIS_COUNTRYMAP_SCRIPT <- Sys.getenv(
+    "PATBIS_COUNTRYMAP_SCRIPT",
+    path.expand("~/GitHub/patbis/patbis2025/code/build_inventor_countries_harm_bq.R"))
 
 # -------- Sanity --------
 if (!file.exists("DESCRIPTION"))
@@ -112,8 +121,11 @@ if (RUN_WATSON_CONVERT) {
 #   .bigdata/holder_countries_harm.parquet
 # ============================================================================
 if (USE_BQ_HARMONIZATION) {
-  run_step("Harmonize inventor/holder country codes (BigQuery)",
-           "data-raw/build_inventor_countries_harm_bq.R")
+  if (!file.exists(PATBIS_COUNTRYMAP_SCRIPT))
+    stop("Countrymap builder not found at ", PATBIS_COUNTRYMAP_SCRIPT,
+         "\nIt now lives in the patbis2025 repo. Set PATBIS_COUNTRYMAP_SCRIPT to its path.")
+  run_step("Harmonize inventor/holder country codes (BigQuery, from patbis2025)",
+           PATBIS_COUNTRYMAP_SCRIPT)
 } else {
   run_step("Harmonize inventor/holder country codes (local DuckDB)",
            "data-raw/build_inventor_countries_harm.R")
