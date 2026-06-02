@@ -15,39 +15,123 @@ hglobe_module_sidebar <- function(id) {
   shiny::div(
     style = "display: flex; flex-direction: column; gap: 20px;",
 
-    shiny::div(
-      shiny::h5("GLOBAL FILTERS", style = "font-weight: 600; margin-bottom: 10px;"),
-      shiny::div(
-        class = "side_input",
-        shiny::selectizeInput(
-          inputId = ns("country"),
-          label   = "Country or Group",
-          choices = grouped_choices,
-          selected = "All countries",
-          multiple = TRUE,
-          options = list(placeholder = 'Choose one or more countries or groups...')
+    shiny::tags$details(
+      open = NA,
+      shiny::tags$summary(
+        "GLOBAL FILTERS",
+        style = paste0(
+          "font-weight: 600; margin-bottom: 10px; cursor: pointer; ",
+          "user-select: none;"
         )
       ),
-      shiny::div(
-        class = "side_input",
-        shiny::selectizeInput(
-          inputId = ns("firm"),
-          label   = "Firm or Sector Group",
-          choices = firm_grouped_choices,
-          selected = "No firm filter",
-          multiple = TRUE,
-          options = list(placeholder = 'Choose firms or sector groups...')
+      # Foldable, collapsed by default (no `open` attribute).
+      shiny::tags$details(
+        shiny::tags$summary(
+          "Country or Group",
+          style = paste0(
+            "font-weight: 500; font-size: 0.8rem; color: #555; ",
+            "margin-bottom: 8px; cursor: pointer; user-select: none;"
+          )
+        ),
+        shiny::div(
+          class = "side_input",
+          # Hidden value-holder read by the map query / deep-links; the
+          # visible tree writes the chosen countries/groups into it.
+          shiny::div(
+            style = "display:none;",
+            shiny::selectizeInput(
+              inputId = ns("country"),
+              label   = NULL,
+              choices = grouped_choices,
+              selected = "All countries",
+              multiple = TRUE
+            )
+          ),
+          shiny::div(
+            class = "firm-categories-tree",
+            style = "max-height: 360px; overflow-y: auto;",
+            shinyTree::shinyTree(
+              outputId    = ns("country_tree"),
+              checkbox    = TRUE,
+              themeIcons  = FALSE,
+              themeDots   = FALSE,
+              search      = TRUE,
+              contextmenu = FALSE
+            )
+          )
         )
       ),
-      shiny::div(
-        class = "side_input",
-        shiny::selectizeInput(
-          inputId = ns("techs"),
-          label   = "Technologies included",
-          choices = grouped_techs,
-          selected = "All innovations",
-          multiple = TRUE,
-          options = list(placeholder = 'Choose technologies...')
+      # Foldable, collapsed by default (no `open` attribute).
+      shiny::tags$details(
+        shiny::tags$summary(
+          "Firm or Sector Group",
+          title = paste0(
+            "Tick firms to restrict the map to them; ticking a sector ",
+            "folder selects every firm in it. Leave empty for no firm ",
+            "filter."
+          ),
+          style = paste0(
+            "font-weight: 500; font-size: 0.8rem; color: #555; ",
+            "margin-bottom: 8px; cursor: pointer; user-select: none;"
+          )
+        ),
+        shiny::div(
+          class = "side_input",
+          shiny::div(
+            class = "firm-categories-tree",
+            style = "max-height: 320px; overflow-y: auto;",
+            shinyTree::shinyTree(
+              outputId    = ns("firm_tree"),
+              checkbox    = TRUE,
+              themeIcons  = FALSE,
+              themeDots   = FALSE,
+              search      = TRUE,
+              contextmenu = FALSE
+            )
+          ),
+          # Compact bookmarkable mirror of the checked firm leaves (the raw
+          # tree input is force-excluded from bookmarks in server.R).
+          shiny::tags$div(
+            style = "display: none;",
+            shiny::textInput(ns("firm_tree_persist"), label = NULL, value = "")
+          )
+        )
+      ),
+      # Foldable, collapsed by default (no `open` attribute).
+      shiny::tags$details(
+        shiny::tags$summary(
+          "Technologies Included",
+          style = paste0(
+            "font-weight: 500; font-size: 0.8rem; color: #555; ",
+            "margin-bottom: 8px; cursor: pointer; user-select: none;"
+          )
+        ),
+        shiny::div(
+          class = "side_input",
+          # Hidden value-holder read by the map query; the visible tree
+          # writes the chosen filter technologies into it.
+          shiny::div(
+            style = "display:none;",
+            shiny::selectizeInput(
+              inputId = ns("techs"),
+              label   = NULL,
+              choices = grouped_techs,
+              selected = "All innovations",
+              multiple = TRUE
+            )
+          ),
+          shiny::div(
+            class = "firm-categories-tree",
+            style = "max-height: 360px; overflow-y: auto;",
+            shinyTree::shinyTree(
+              outputId    = ns("tech_filter_tree"),
+              checkbox    = TRUE,
+              themeIcons  = FALSE,
+              themeDots   = FALSE,
+              search      = TRUE,
+              contextmenu = FALSE
+            )
+          )
         )
       ),
       # City filter — restricts the patent universe to docdbs whose
@@ -71,51 +155,72 @@ hglobe_module_sidebar <- function(id) {
           options  = list(placeholder = 'Choose cities...')
         )
       ),
-      shiny::div(
-        class = "side_input",
-        shiny::div(
-          style = "display:flex; gap:18px; flex-wrap:wrap;",
-          shiny::checkboxInput(
-            inputId = ns("granted_only"),
-            label   = "Granted families only",
-            value   = FALSE
-          ),
-          shiny::checkboxInput(
-            inputId = ns("multifam_only"),
-            label   = "Multi-application families only",
-            value   = FALSE
-          ),
-          shiny::checkboxInput(
-            inputId = ns("exclude_um"),
-            label   = "Exclude utility model patents",
-            value   = FALSE
-          ),
-          # When unticked (default), rows whose countrymap.city is the
-          # country's capital used as a *fallback* (geocode_missing =
-          # TRUE) are dropped from both the seed and any follow-on
-          # generation. Tick to include them back — useful when you
-          # want the "country-level" view rather than the
-          # geographically-precise one.
-          shiny::checkboxInput(
-            inputId = ns("include_fallback"),
-            label   = "Include capital city fallback",
-            value   = FALSE
+      # Innovation types — foldable, collapsed by default.
+      shiny::tags$details(
+        shiny::tags$summary(
+          "Innovation Types",
+          style = paste0(
+            "font-weight: 500; font-size: 0.8rem; color: #555; ",
+            "margin-bottom: 8px; cursor: pointer; user-select: none;"
           )
+        ),
+        shiny::div(
+          class = "side_input innovation-types",
+          shiny::checkboxInput(
+            ns("granted_only"), "Granted families only", FALSE),
+          shiny::checkboxInput(
+            ns("multifam_only"), "Multi-application families only", FALSE),
+          shiny::checkboxInput(
+            ns("exclude_um"), "Exclude utility model patents", FALSE)
         )
+      ),
+      # When unticked (default), rows whose countrymap.city is the
+      # country's capital used as a *fallback* (geocode_missing = TRUE) are
+      # dropped from both the seed and any follow-on generation. Tick to
+      # include them back — useful when you want the "country-level" view
+      # rather than the geographically-precise one.
+      shiny::div(
+        class = "side_input innovation-types",
+        shiny::checkboxInput(
+          ns("include_fallback"), "Include capital city fallback", FALSE)
       )
     ),
 
-    shiny::div(
-      shiny::h5("VALUE FLOW", style = "font-weight: 600; margin-bottom: 10px;"),
+    shiny::tags$details(
+      open = NA,
+      shiny::tags$summary(
+        "VALUE FLOW",
+        style = paste0(
+          "font-weight: 600; margin-bottom: 10px; cursor: pointer; ",
+          "user-select: none;"
+        )
+      ),
       shiny::div(
         class = "side_input",
-        shiny::selectizeInput(
-          inputId = ns("toflow"),
-          label    = NULL,
-          choices  = toflow_choices,
-          selected = "ev_global",
-          multiple = FALSE,
-          width    = "400px"
+        # Hidden value-holder read by the map query / deep-links; the
+        # visible tree below writes the chosen flow into it.
+        shiny::div(
+          style = "display:none;",
+          shiny::selectizeInput(
+            inputId = ns("toflow"),
+            label    = NULL,
+            choices  = toflow_choices,
+            selected = "ev_global",
+            multiple = FALSE
+          )
+        ),
+        shiny::div(
+          class = "firm-categories-tree",
+          style = "max-height: 360px; overflow-y: auto;",
+          shinyTree::shinyTree(
+            outputId    = ns("toflow_tree"),
+            checkbox    = FALSE,
+            multiple    = FALSE,
+            themeIcons  = FALSE,
+            themeDots   = FALSE,
+            search      = TRUE,
+            contextmenu = FALSE
+          )
         )
       )
     ),
@@ -521,14 +626,72 @@ hglobe_module_server <- function(id, con) {
         }
       })
 
-      # "No firm filter" vs. specific firms — mirrors country-tab behaviour.
-      shiny::observeEvent(input$firm, {
-        sel <- input$firm
-        if ("No firm filter" %in% sel && length(sel) > 1) {
-          shiny::updateSelectizeInput(session, "firm",
-                                      selected = setdiff(sel, "No firm filter"))
-        }
+      # ── Firm FILTER tree (replaces the old `firm` selectize) ──────────
+      # Individual-firms branch only: ticking firms (or a sector folder)
+      # restricts the map; nothing ticked = no firm filter. Collapsed by
+      # default; selection mirrored to a compact bookmarkable hidden input
+      # and restored from the URL on load.
+      firm_filter_tree_data <- local({
+        url_q <- shiny::parseQueryString(session$clientData$url_search %||% "")
+        raw   <- url_q[[session$ns("firm_tree_persist")]]
+        picks <- if (!is.null(raw) && nzchar(raw)) {
+          val <- tryCatch(jsonlite::fromJSON(raw),
+                          error = function(e) gsub('^"|"$', "", raw))
+          if (is.null(val) || !length(val) || identical(val, "")) character(0)
+          else strsplit(as.character(val), "||", fixed = TRUE)[[1]]
+        } else character(0)
+        build_firm_filter_tree(picks)
       })
+      output$firm_tree <- shinyTree::renderTree(firm_filter_tree_data)
+
+      firm_filter_firms <- shiny::reactive({
+        firm_tree_selected_firms(input$firm_tree)
+      })
+
+      shiny::observe({
+        shiny::updateTextInput(session, "firm_tree_persist",
+                                value = paste(firm_filter_firms(),
+                                              collapse = "||"))
+      })
+
+      # ── Value Flow tree (single-select; drives the hidden `toflow`) ────
+      output$toflow_tree <- shinyTree::renderTree(
+        build_toflow_tree_data(
+          toflow_init_value(session$clientData$url_search,
+                            session$ns("toflow"))))
+      shiny::observeEvent(input$toflow_tree, {
+        v <- toflow_tree_value(input$toflow_tree)
+        if (!is.null(v) && !identical(v, input$toflow))
+          shiny::updateSelectizeInput(session, "toflow", selected = v)
+      }, ignoreInit = TRUE)
+
+      # ── Technologies-included filter tree (drives hidden `techs`) ──────
+      output$tech_filter_tree <- shinyTree::renderTree({
+        iv <- tech_url_selected(session$clientData$url_search,
+                                session$ns("techs"), deep_link_param = "tech")
+        build_tech_category_tree(if (is.null(iv)) character(0) else iv)
+      })
+      shiny::observeEvent(input$tech_filter_tree, {
+        v   <- tech_category_tree_selected(input$tech_filter_tree)
+        if (length(v) == 0) v <- "All innovations"   # canonical no-filter
+        cur <- input$techs; if (is.null(cur)) cur <- character(0)
+        if (!identical(sort(v), sort(cur)))
+          shiny::updateSelectizeInput(session, "techs", selected = v)
+      }, ignoreInit = TRUE)
+
+      # ── Country/Group tree (drives the hidden `country` selectize) ────
+      output$country_tree <- shinyTree::renderTree({
+        iv <- tech_url_selected(session$clientData$url_search,
+                                session$ns("country"), deep_link_param = "ctry")
+        build_country_tree(if (is.null(iv)) "All countries" else iv)
+      })
+      shiny::observeEvent(input$country_tree, {
+        v   <- country_tree_selected(input$country_tree)
+        if (length(v) == 0) v <- "All countries"   # canonical "everything"
+        cur <- input$country; if (is.null(cur)) cur <- character(0)
+        if (!identical(sort(v), sort(cur)))
+          shiny::updateSelectizeInput(session, "country", selected = v)
+      }, ignoreInit = TRUE)
 
       # Save PNG / Copy to clipboard — both invoke the same client-side
       # html2canvas capture; the JS branch decides how to dispatch the canvas
@@ -911,13 +1074,12 @@ hglobe_module_server <- function(id, con) {
         }
 
         selected_countries <- expand_country_selection(input$country)
-        no_firm_filter     <- "No firm filter" %in% input$firm || length(input$firm) == 0
-        selected_firms     <- expand_firm_selection(setdiff(input$firm, "No firm filter"))
+        selected_firms     <- firm_filter_firms()
 
         country_sql    <- paste0("'", gsub("'", "''", selected_countries),
                                  "'", collapse = ", ")
         firm_clause    <- build_firm_clause_v2(selected_firms,
-                                               no_filter = no_firm_filter)
+                                               no_filter = length(selected_firms) == 0)
         tech_bool      <- build_tech_bool_v2(input$techs)
         granted_clause     <- build_granted_clause_v2(isTRUE(input$granted_only))
         exclude_um_clause  <- build_exclude_um_clause_v2(isTRUE(input$exclude_um))

@@ -55,10 +55,15 @@ server <- function(input, output, session, con) {
     # representation of the tree (every firm node, with checked/opened
     # attributes) — bookmarking it dumps thousands of firm names into the
     # querystring even when the user has barely interacted with it. The
-    # checked-leaf state we care about is reconstructable from the user's
-    # selections in the aggregate-sector selectize anyway, so dropping
-    # the tree from bookmarks is the right tradeoff.
-    force_exclude <- grepl("(^|-)firm_categories_tree$", all_inputs)
+    # selection we care about (aggregate sectors + individual firms) is
+    # mirrored compactly into the `firm_categories_picked_persist` input,
+    # which IS bookmarked, so dropping the tree itself is the right
+    # tradeoff.
+    force_exclude <- grepl(
+      paste0("(^|-)firm_categories_tree$|(^|-)firm_tree$|(^|-)toflow_tree$",
+             "|(^|-)tech_categories_tree$|(^|-)tech_filter_tree$",
+             "|(^|-)country_tree$|(^|-)country_categories_tree$"),
+      all_inputs)
 
     session$setBookmarkExclude(all_inputs[!keep_flag | force_exclude])
   })
@@ -135,8 +140,8 @@ server <- function(input, output, session, con) {
       shiny::updateSelectizeInput(session, "country-techs",
                                   selected = csv(q$tech))
     if (!is.null(q$firm))
-      shiny::updateSelectizeInput(session, "country-firm",
-                                  selected = csv(q$firm))
+      shinyTree::updateTree(session, "country-firm_tree",
+                            data = build_firm_filter_tree(csv(q$firm)))
     if (!is.null(q$flow))
       shiny::updateSelectizeInput(session, "country-toflow", selected = q$flow)
     if (!is.null(q$granted))
@@ -183,8 +188,8 @@ server <- function(input, output, session, con) {
       shiny::updateSelectizeInput(session, "hglobe-techs",
                                   selected = csv(q$tech))
     if (!is.null(q$firm))
-      shiny::updateSelectizeInput(session, "hglobe-firm",
-                                  selected = csv(q$firm))
+      shinyTree::updateTree(session, "hglobe-firm_tree",
+                            data = build_firm_filter_tree(csv(q$firm)))
     if (!is.null(q$flow))
       shiny::updateSelectizeInput(session, "hglobe-toflow", selected = q$flow)
     if (!is.null(q$granted))

@@ -315,5 +315,50 @@ html {
       }
     }
   }
+
+  // Firm/sector selection tree (shinyTree / jsTree): neutral grey ticks
+  // and grey row shading instead of the default coloured (green/blue)
+  // highlights. grayscale() neutralises whatever hue the theme sprite
+  // uses for the checkmark, so this is robust to the underlying jsTree
+  // theme; !important guards the row shading against jsTree's own rules
+  // regardless of stylesheet load order.
+  .firm-categories-tree {
+    // Slightly smaller text across every selection tree (firm, tech,
+    // value-flow, country). jsTree node text inherits from the container.
+    font-size: 0.82rem;
+
+    .jstree-anchor {
+      font-size: 0.82rem;
+    }
+
+    .jstree-checkbox {
+      filter: grayscale(100%) brightness(0.9);
+    }
+
+    .jstree-checked > .jstree-anchor {
+      background: rgba(0, 0, 0, 0.06) !important;
+      border-radius: 4px;
+    }
+
+    .jstree-anchor.jstree-clicked,
+    .jstree-anchor.jstree-hovered {
+      background: rgba(0, 0, 0, 0.10) !important;
+      box-shadow: none !important;
+      color: inherit !important;
+    }
+  }
+
+  // "Innovation types" checkboxes: tighten the vertical rhythm so the
+  // toggles sit close together instead of spread out.
+  .innovation-types {
+    .form-group,
+    .shiny-input-container {
+      margin-bottom: 0;
+    }
+    .checkbox {
+      margin-top: 0;
+      margin-bottom: 2px;
+    }
+  }
 }
 

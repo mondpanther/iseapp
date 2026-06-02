@@ -563,6 +563,9 @@ plot_avstrax_by_country <- function(
   widthscale="log",
   display_mode="confidence",
   top_n_ids=10,
+  sort_bars=FALSE,
+  limit_n=NULL,
+  min_innos=2,
   width_svg=10,
   height_svg=6,
   plot_title="Spillover returns",
@@ -624,20 +627,42 @@ plot_avstrax_by_country <- function(
 
   is_return <- grepl("^(is_|av_)", toflow)
 
-  # Data transformations
-  # transform_start <- Sys.time()
+  # A cleared numeric field arrives as NA — fall back to a sane minimum so
+  # we don't filter every bar out and blank the chart.
+  if (is.null(min_innos) || is.na(min_innos) || min_innos < 0) min_innos <- 2
+
+  # Data transformations.  `allmean`/`total_innos` (the dashed average line
+  # and the subtitle) are taken above from the precomputed SQL columns, so
+  # dropping low-innovation bars here only affects what is *displayed* —
+  # they remain in the average calculation.
   avstrax <- avstrax |>
-    dplyr::arrange(technology) |>
     dplyr::mutate(
       linnos1 = innos,
       linnos2 = log(1+innos),
       widthscale = widthscale
     ) |>
-    dplyr::filter(innos>1) |>
+    dplyr::filter(innos >= min_innos) |>
+    dplyr::mutate(linnos = ifelse(widthscale=="log", linnos2, linnos1))
+
+  if (nrow(avstrax) == 0) return(NULL)
+
+  # Rank by bar height (the plotted value `mean`) so "Limit to top N" keeps
+  # the tallest bars, then choose display order. With coord_flip() the
+  # highest x_pos sits at the top, so the sorted view assigns descending
+  # x_pos (tallest on top); unsorted keeps the original alphabetical order.
+  avstrax <- avstrax |> dplyr::arrange(dplyr::desc(mean))
+  if (!is.null(limit_n) && !is.na(limit_n) && limit_n > 0) {
+    avstrax <- utils::head(avstrax, limit_n)
+  }
+  if (isTRUE(sort_bars)) {
+    avstrax$x_pos <- rev(seq_len(nrow(avstrax)))
+  } else {
+    avstrax <- avstrax |> dplyr::arrange(technology)
+    avstrax$x_pos <- seq_len(nrow(avstrax))
+  }
+  avstrax <- avstrax |>
     dplyr::mutate(
-      linnos=ifelse(widthscale=="log",linnos2,linnos1),
       width = linnos / max(linnos),
-      x_pos = as.numeric(factor(technology)),
       xmin = x_pos - width / 2,
       xmax = x_pos + width / 2,
       ymin = 0,
@@ -796,11 +821,18 @@ plot_avstrax_by_firm <- function(pdata,
                                   widthscale   = "log",
                                   display_mode = "confidence",
                                   top_n_ids    = 10,
+                                  sort_bars    = TRUE,
+                                  limit_firms  = 20,
+                                  min_innos    = 10,
                                   width_svg    = 10,
                                   height_svg   = 6,
                                   plot_title   = "Value flow by firm") {
 
   if (is.null(pdata) || nrow(pdata) == 0) return(NULL)
+
+  # A cleared numeric field arrives as NA — fall back to the default rather
+  # than filtering every bar out and blanking the chart.
+  if (is.null(min_innos) || is.na(min_innos) || min_innos < 0) min_innos <- 10
 
   avstrax <- pdata
   ylab    <- ifelse(grepl("^(is_|av_)", toflow), "Return in %", "Millions of $")
@@ -815,24 +847,42 @@ plot_avstrax_by_firm <- function(pdata,
   }
 
   avstrax <- avstrax |>
-    dplyr::arrange(technology) |>
     dplyr::mutate(
       linnos1    = innos,
       linnos2    = log(1 + innos),
       widthscale = widthscale
     ) |>
-    dplyr::filter(innos > 1) |>
+    dplyr::filter(innos >= min_innos) |>
     dplyr::mutate(
-      linnos = ifelse(widthscale == "log", linnos2, linnos1),
-      width  = linnos / max(linnos),
-      x_pos  = as.numeric(factor(technology)),
-      xmin   = x_pos - width / 2,
-      xmax   = x_pos + width / 2,
-      ymin   = 0,
-      ymax   = mean
+      linnos = ifelse(widthscale == "log", linnos2, linnos1)
     )
 
   if (nrow(avstrax) == 0) return(NULL)
+
+  # Rank by bar height (the plotted value `mean`) so the "Limit to top N"
+  # control always keeps the tallest bars, then choose the display order.
+  # With coord_flip() the highest x_pos sits at the top, so for the sorted
+  # view we assign descending x_pos (tallest bar on top); unsorted keeps
+  # the original alphabetical order (A at the bottom).
+  avstrax <- avstrax |> dplyr::arrange(dplyr::desc(mean))
+  if (!is.null(limit_firms) && !is.na(limit_firms) && limit_firms > 0) {
+    avstrax <- utils::head(avstrax, limit_firms)
+  }
+  if (isTRUE(sort_bars)) {
+    avstrax$x_pos <- rev(seq_len(nrow(avstrax)))
+  } else {
+    avstrax <- avstrax |> dplyr::arrange(technology)
+    avstrax$x_pos <- seq_len(nrow(avstrax))
+  }
+
+  avstrax <- avstrax |>
+    dplyr::mutate(
+      width = linnos / max(linnos),
+      xmin  = x_pos - width / 2,
+      xmax  = x_pos + width / 2,
+      ymin  = 0,
+      ymax  = mean
+    )
 
   is_return <- grepl("^(is_|av_)", toflow)
   avstrax$value_label <- if (is_return) {
@@ -1554,7 +1604,8 @@ plot_avstrax_rta <- function(pdata, classes,
                              height_svg = 6,
                              plot_title = "Revealed Technological Advantage (RTA)",
                              x_label = "Country",
-                             precomputed_avstrax = NULL) {
+                             precomputed_avstrax = NULL,
+                             denom = NULL) {
 
   library(dplyr)
 
@@ -1596,7 +1647,13 @@ plot_avstrax_rta <- function(pdata, classes,
     filter(ctry_code == "All") %>%
     pull(innos)
 
-  if (length(innos) == 0) innos <- 0
+  if (length(innos) == 0) {
+    # No "All" row (e.g. the country-category path): use the precomputed
+    # overall numerator total — distinct families matching the technology
+    # filter across the universe after all other filters.
+    innos <- if ("allinnos" %in% names(avstrax)) avstrax$allinnos[1] else 0
+  }
+  if (length(innos) == 0 || is.na(innos)) innos <- 0
 
   # UK NUTS1 region names mapping (for UK region explorer)
   uk_regions_names <- c(
@@ -1747,15 +1804,31 @@ plot_avstrax_rta <- function(pdata, classes,
              family = "Arial", color = "black") +
     coord_flip()
 
-  # Add subtitle and caption
+  # Add subtitle and caption. `innos` is the numerator total (distinct
+  # families matching the tech filter). When a denominator (the full
+  # post-filter dataset, no tech filter) is supplied, the subtitle becomes
+  # hoverable and reports it as a tooltip.
   subtitle_text <- paste0(scales::comma(innos), " Innovations")
 
-  p <- p + labs(subtitle = subtitle_text,
-                caption = "© 2025 Innovation Strategy Explorer") +
-    theme(
-      # plot.subtitle = element_text(size = 11, hjust = 0.5),
-      plot.caption = element_text(hjust = 1, size = 9, color = "gray")
-    )
+  if (!is.null(denom) && length(denom) == 1 && !is.na(denom)) {
+    subtitle_lab <- ggiraph::label_interactive(
+      subtitle_text,
+      tooltip = paste0("Denominator: ", scales::comma(denom),
+                       " distinct families in the full dataset after filters"),
+      data_id = "rta_innos")
+    p <- p + labs(subtitle = subtitle_lab,
+                  caption = "© 2025 Innovation Strategy Explorer") +
+      theme(
+        plot.subtitle = ggiraph::element_text_interactive(),
+        plot.caption  = element_text(hjust = 1, size = 9, color = "gray")
+      )
+  } else {
+    p <- p + labs(subtitle = subtitle_text,
+                  caption = "© 2025 Innovation Strategy Explorer") +
+      theme(
+        plot.caption = element_text(hjust = 1, size = 9, color = "gray")
+      )
+  }
 
   # Return girafe object
   g <- girafe(ggobj = p,

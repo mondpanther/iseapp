@@ -548,6 +548,265 @@ build_firm_categories_filter_v2 <- function(selected) {
   })
 }
 
+#' Build per-bar country-category filters (v2)
+#'
+#' Country analogue of \code{build_firm_categories_filter_v2()}: turns the
+#' "Country Categories" tree selection (a mix of group names and ISO2
+#' codes) into a named list of \code{ctry_code} conditions, one per bar.
+#' A group becomes an aggregate bar over its member codes; an individual
+#' country becomes a single-code bar labelled by country name.
+#' @param selected Character vector from \code{country_tree_selected()}.
+#' @return Named list label -> SQL condition on \code{p.ctry_code}.
+#' @keywords internal
+build_country_categories_filter_v2 <- function(selected) {
+  selected  <- setdiff(selected, c("", "All categories"))
+  if (length(selected) == 0) return(list())
+  grp_names <- names(group_definitions)
+  c2n       <- country_code_to_name()
+  out <- list()
+  for (s in selected) {
+    if (s %in% grp_names) {
+      codes     <- group_definitions[[s]]
+      codes_sql <- paste0("'", gsub("'", "''", codes, fixed = TRUE),
+                          "'", collapse = ", ")
+      out[[s]]  <- as.character(glue::glue("p.ctry_code IN ({codes_sql})"))
+    } else {
+      label <- if (s %in% names(c2n)) unname(c2n[[s]]) else s
+      out[[label]] <- as.character(
+        glue::glue("p.ctry_code = '{gsub(\"'\", \"''\", s, fixed = TRUE)}'"))
+    }
+  }
+  out
+}
+
+#' Combined per-country-category query (v2)
+#'
+#' Country analogue of \code{sql_country_firm_combined_v2()}. Each selected
+#' category (group or individual country) becomes one bar. Membership is
+#' assigned in \code{filtered_country_cats} (a family belongs to a bar when
+#' it has a patent in one of the bar's member countries *and* in the
+#' universe \code{country_sql}); the per-bar
+#' \code{DISTINCT ON (country_category, docdb_family_id)} then guarantees a
+#' family in several member countries is counted ONCE for the group bar.
+#' @keywords internal
+sql_country_countrycat_combined_v2 <- function(toflow, country_sql, cat_filters,
+                                               firm_clause = "", techs = "All",
+                                               top_n_ids = 10,
+                                               granted_only = FALSE,
+                                               multifam_only = FALSE,
+                                               exclude_um = FALSE) {
+  if (length(cat_filters) == 0) return(NULL)
+
+  granted_clause    <- build_granted_clause_v2(granted_only)
+  exclude_um_clause <- build_exclude_um_clause_v2(exclude_um)
+  multifam_clause   <- build_multifam_clause_v2(multifam_only)
+
+  tech_bool <- build_tech_bool_v2(techs)
+  tech_join <- if (tech_bool == "TRUE") "" else
+    "INNER JOIN filtered_tech ft ON p.docdb_family_id = ft.docdb_family_id"
+  tech_cte_sql <- if (tech_bool == "TRUE") "" else glue::glue("
+    , filtered_tech AS (
+      SELECT DISTINCT t.docdb_family_id
+      FROM patents_x_tech t
+      JOIN tech_lookup tl ON t.technology = tl.technology
+      WHERE {tech_bool}
+    )")
+
+  global_firm_active <- nchar(trimws(firm_clause)) > 0
+  global_firm_filter_sql <- if (!global_firm_active) "" else
+    paste0("WHERE ", gsub("^\\s*AND\\s+f\\.firm", "firm", firm_clause))
+  global_firm_join <- if (global_firm_active)
+    "INNER JOIN filtered_firm_global ffg ON p.docdb_family_id = ffg.docdb_family_id" else ""
+
+  # Per-bar membership: family -> country_category if it has a patent in one
+  # of the bar's member countries that is also inside the universe.
+  parts <- vapply(names(cat_filters), function(label) {
+    safe_label <- gsub("'", "''", label, fixed = TRUE)
+    glue::glue("
+      SELECT DISTINCT p.docdb_family_id, '{safe_label}' AS country_category
+      FROM full_patent_database p
+      WHERE ({cat_filters[[label]]})
+        AND p.ctry_code IN ({country_sql})
+    ")
+  }, character(1))
+  filtered_country_cats_sql <- paste(parts, collapse = "\nUNION ALL\n")
+
+  glue::glue("
+    WITH filtered_country_cats AS (
+      {filtered_country_cats_sql}
+    )
+    {tech_cte_sql}
+    {if (global_firm_active) ',
+    filtered_firm_global AS (
+      SELECT DISTINCT docdb_family_id
+      FROM patents_x_firm f
+      ' else ''}
+    {if (global_firm_active) global_firm_filter_sql else ''}
+    {if (global_firm_active) ')' else ''}
+    ,
+    deduped AS (
+      SELECT DISTINCT ON (cc.country_category, p.docdb_family_id)
+        cc.country_category,
+        p.docdb_family_id,
+        p.appln_id,
+        p.{toflow}
+      FROM full_patent_database p
+      INNER JOIN filtered_country_cats cc ON p.docdb_family_id = cc.docdb_family_id
+      {tech_join}
+      {global_firm_join}
+      WHERE p.ctry_code IN ({country_sql})
+        AND p.{toflow} IS NOT NULL
+        {granted_clause}
+        {exclude_um_clause}
+        {multifam_clause}
+    ),
+    ranked AS (
+      SELECT
+        country_category,
+        docdb_family_id,
+        appln_id,
+        {toflow},
+        ROW_NUMBER() OVER (PARTITION BY country_category ORDER BY {toflow} DESC) AS rnk,
+        COUNT(*)     OVER (PARTITION BY country_category)                        AS cnt
+      FROM deduped
+    ),
+    overall_stats AS (
+      SELECT
+        AVG({toflow}) AS allmean,
+        COUNT(*)      AS allinnos
+      FROM (
+        SELECT DISTINCT ON (p.docdb_family_id) p.docdb_family_id, p.{toflow}
+        FROM full_patent_database p
+        {tech_join}
+        {global_firm_join}
+        WHERE p.ctry_code IN ({country_sql})
+          AND p.{toflow} IS NOT NULL
+          {granted_clause}
+          {exclude_um_clause}
+          {multifam_clause}
+      ) t
+    )
+    SELECT
+      country_category AS technology,
+      AVG({toflow})                                                          AS mean,
+      COUNT(*)                                                               AS innos,
+      CASE WHEN COUNT(*) > 1 THEN STDDEV({toflow}) / SQRT(COUNT(*)) END     AS sem,
+      QUANTILE_CONT({toflow}, 0.25)                                          AS q1,
+      QUANTILE_CONT({toflow}, 0.50)                                          AS q2,
+      QUANTILE_CONT({toflow}, 0.75)                                          AS q3,
+      AVG(CASE WHEN rnk <= CEIL(cnt * 0.25) THEN {toflow} END)              AS top25_bin_mean,
+      AVG(CASE WHEN rnk <= CEIL(cnt * 0.50) THEN {toflow} END)              AS top50_bin_mean,
+      STRING_AGG(
+        CASE WHEN rnk <= {top_n_ids} THEN appln_id END,
+        ', ' ORDER BY {toflow} DESC
+      )                                                                      AS top3_ids,
+      os.allmean,
+      os.allinnos
+    FROM ranked
+    CROSS JOIN overall_stats os
+    GROUP BY country_category, os.allmean, os.allinnos
+  ")
+}
+
+#' Universe-wide total-innovations denominator (v2)
+#'
+#' A single COUNT(DISTINCT family) across the whole universe after the
+#' country / firm / granted / multifam / um filters but WITHOUT the
+#' technology filter — the RTA denominator reported in the by-country /
+#' RTA innovation-count tooltip.
+#' @keywords internal
+sql_universe_allinnos_v2 <- function(toflow, country_sql, firm_clause = "",
+                                     granted_only = FALSE,
+                                     multifam_only = FALSE,
+                                     exclude_um = FALSE) {
+  granted_clause    <- build_granted_clause_v2(granted_only)
+  exclude_um_clause <- build_exclude_um_clause_v2(exclude_um)
+  multifam_clause   <- build_multifam_clause_v2(multifam_only)
+
+  global_firm_active <- nchar(trimws(firm_clause)) > 0
+  global_firm_filter_sql <- if (!global_firm_active) "" else
+    paste0("WHERE ", gsub("^\\s*AND\\s+f\\.firm", "firm", firm_clause))
+  global_firm_join <- if (global_firm_active)
+    "INNER JOIN filtered_firm_global ffg ON p.docdb_family_id = ffg.docdb_family_id" else ""
+
+  glue::glue("
+    {if (global_firm_active) 'WITH filtered_firm_global AS (
+      SELECT DISTINCT docdb_family_id
+      FROM patents_x_firm f
+    ' else ''}
+    {if (global_firm_active) global_firm_filter_sql else ''}
+    {if (global_firm_active) ')' else ''}
+    SELECT COUNT(DISTINCT p.docdb_family_id) AS allinnos
+    FROM full_patent_database p
+    {global_firm_join}
+    WHERE p.ctry_code IN ({country_sql})
+      AND p.{toflow} IS NOT NULL
+      {granted_clause}
+      {exclude_um_clause}
+      {multifam_clause}
+  ")
+}
+
+#' Per-country-category total-innovations denominator (v2)
+#'
+#' RTA denominator for the country-category bars: COUNT(DISTINCT family) per
+#' category WITHOUT the technology filter, with the same per-bar membership
+#' (and dedup) as \code{sql_country_countrycat_combined_v2()}.
+#' @keywords internal
+sql_countrycat_allinnos_v2 <- function(toflow, country_sql, cat_filters,
+                                       firm_clause = "",
+                                       granted_only = FALSE,
+                                       multifam_only = FALSE,
+                                       exclude_um = FALSE) {
+  if (length(cat_filters) == 0) return(NULL)
+
+  granted_clause    <- build_granted_clause_v2(granted_only)
+  exclude_um_clause <- build_exclude_um_clause_v2(exclude_um)
+  multifam_clause   <- build_multifam_clause_v2(multifam_only)
+
+  global_firm_active <- nchar(trimws(firm_clause)) > 0
+  global_firm_filter_sql <- if (!global_firm_active) "" else
+    paste0("WHERE ", gsub("^\\s*AND\\s+f\\.firm", "firm", firm_clause))
+  global_firm_join <- if (global_firm_active)
+    "INNER JOIN filtered_firm_global ffg ON p.docdb_family_id = ffg.docdb_family_id" else ""
+
+  parts <- vapply(names(cat_filters), function(label) {
+    safe_label <- gsub("'", "''", label, fixed = TRUE)
+    glue::glue("
+      SELECT DISTINCT p.docdb_family_id, '{safe_label}' AS country_category
+      FROM full_patent_database p
+      WHERE ({cat_filters[[label]]})
+        AND p.ctry_code IN ({country_sql})
+    ")
+  }, character(1))
+  filtered_country_cats_sql <- paste(parts, collapse = "\nUNION ALL\n")
+
+  glue::glue("
+    WITH filtered_country_cats AS (
+      {filtered_country_cats_sql}
+    )
+    {if (global_firm_active) ',
+    filtered_firm_global AS (
+      SELECT DISTINCT docdb_family_id
+      FROM patents_x_firm f
+      ' else ''}
+    {if (global_firm_active) global_firm_filter_sql else ''}
+    {if (global_firm_active) ')' else ''}
+    SELECT
+      cc.country_category,
+      COUNT(DISTINCT p.docdb_family_id) AS allinnos
+    FROM full_patent_database p
+    INNER JOIN filtered_country_cats cc ON p.docdb_family_id = cc.docdb_family_id
+    {global_firm_join}
+    WHERE p.ctry_code IN ({country_sql})
+      AND p.{toflow} IS NOT NULL
+      {granted_clause}
+      {exclude_um_clause}
+      {multifam_clause}
+    GROUP BY cc.country_category
+  ")
+}
+
 #' Generate SQL combined query for country x firm-category aggregation (v2)
 #'
 #' Sibling of \code{sql_country_tech_combined_v2}: same shape, same stats,

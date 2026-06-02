@@ -31,50 +31,84 @@ region_module_sidebar <- function(id) {
           options  = list(placeholder = 'Choose one or more regions...')
         )
       ),
-      shiny::div(
-        class = "side_input",
-        shiny::selectizeInput(
-          inputId = ns("firm"),
-          label = "Firm or Sector Group",
-          choices = firm_grouped_choices,
-          selected = "No firm filter",
-          multiple = TRUE,
-          options = list(placeholder = 'Choose firms or sector groups...')
+      # Foldable, collapsed by default (no `open` attribute).
+      shiny::tags$details(
+        shiny::tags$summary(
+          "Firm or Sector Group",
+          style = paste0(
+            "font-weight: 500; font-size: 0.8rem; color: #555; ",
+            "margin-bottom: 8px; cursor: pointer; user-select: none;"
+          )
+        ),
+        shiny::div(
+          class = "side_input",
+          shiny::selectizeInput(
+            inputId = ns("firm"),
+            label = NULL,
+            choices = firm_grouped_choices,
+            selected = "No firm filter",
+            multiple = TRUE,
+            options = list(placeholder = 'Choose firms or sector groups...')
+          )
         )
       ),
       shiny::conditionalPanel(
         condition = not_tech,
-        shiny::div(
-          class = "side_input",
-          shiny::selectizeInput(
-            ns("techs_region"),
-            "Technologies included",
-            choices  = grouped_techs,
-            selected = "All innovations",
-            multiple = TRUE,
-            options  = list(placeholder = 'Choose one or more technology categories...')
+        # Foldable, collapsed by default (no `open` attribute).
+        shiny::tags$details(
+          shiny::tags$summary(
+            "Technologies Included",
+            style = paste0(
+              "font-weight: 500; font-size: 0.8rem; color: #555; ",
+              "margin-bottom: 8px; cursor: pointer; user-select: none;"
+            )
+          ),
+          shiny::div(
+            class = "side_input",
+            # Hidden value-holder read by every query / cache; the visible
+            # tree writes the chosen filter technologies into it.
+            shiny::div(
+              style = "display:none;",
+              shiny::selectizeInput(
+                ns("techs_region"),
+                label = NULL,
+                choices  = grouped_techs,
+                selected = "All innovations",
+                multiple = TRUE
+              )
+            ),
+            shiny::div(
+              class = "firm-categories-tree",
+              style = "max-height: 360px; overflow-y: auto;",
+              shinyTree::shinyTree(
+                outputId    = ns("tech_filter_tree"),
+                checkbox    = TRUE,
+                themeIcons  = FALSE,
+                themeDots   = FALSE,
+                search      = TRUE,
+                contextmenu = FALSE
+              )
+            )
           )
         )
       ),
-      shiny::div(
-        class = "side_input",
-        shiny::div(
-          style = "display:flex; gap:18px; flex-wrap:wrap;",
-          shiny::checkboxInput(
-            inputId = ns("granted_only"),
-            label   = "Granted families only",
-            value   = FALSE
-          ),
-          shiny::checkboxInput(
-            inputId = ns("multifam_only"),
-            label   = "Multi-application families only",
-            value   = FALSE
-          ),
-          shiny::checkboxInput(
-            inputId = ns("exclude_um"),
-            label   = "Exclude utility model patents",
-            value   = FALSE
+      # Innovation types — foldable, collapsed by default.
+      shiny::tags$details(
+        shiny::tags$summary(
+          "Innovation Types",
+          style = paste0(
+            "font-weight: 500; font-size: 0.8rem; color: #555; ",
+            "margin-bottom: 8px; cursor: pointer; user-select: none;"
           )
+        ),
+        shiny::div(
+          class = "side_input innovation-types",
+          shiny::checkboxInput(
+            ns("granted_only"), "Granted families only", FALSE),
+          shiny::checkboxInput(
+            ns("multifam_only"), "Multi-application families only", FALSE),
+          shiny::checkboxInput(
+            ns("exclude_um"), "Exclude utility model patents", FALSE)
         )
       ),
 
@@ -87,34 +121,73 @@ region_module_sidebar <- function(id) {
         shiny::h5("VALUE FLOW", style = "font-weight: 600; margin-bottom: 10px;"),
         shiny::div(
           class = "side_input",
-          shiny::selectizeInput(
-            ns("toflow_region"),
-            label = NULL,
-            choices  = toflow_choices,
-            selected = "ev_global",
-            multiple = FALSE,
-            options  = list(placeholder = 'Choose a value flow...')
+          # Hidden value-holder read by the queries / deep-links; the
+          # visible tree below writes the chosen flow into it.
+          shiny::div(
+            style = "display:none;",
+            shiny::selectizeInput(
+              ns("toflow_region"),
+              label = NULL,
+              choices  = toflow_choices,
+              selected = "ev_global",
+              multiple = FALSE
+            )
+          ),
+          shiny::div(
+            class = "firm-categories-tree",
+            style = "max-height: 360px; overflow-y: auto;",
+            shinyTree::shinyTree(
+              outputId    = ns("toflow_tree"),
+              checkbox    = FALSE,
+              multiple    = FALSE,
+              themeIcons  = FALSE,
+              themeDots   = FALSE,
+              search      = TRUE,
+              contextmenu = FALSE
+            )
           )
         )
       )
     ),
 
-    # --- Technology Categories: Tech only ---
+    # --- Technology Categories: Tech only --- (foldable, collapsed)
     shiny::conditionalPanel(
       condition = is_tech,
-      shiny::div(
-        shiny::h5("TECHNOLOGY CATEGORIES", style = "font-weight: 600; margin-bottom: 10px;"),
+      shiny::tags$details(
+        shiny::tags$summary(
+          "TECHNOLOGY CATEGORIES",
+          style = paste0(
+            "font-weight: 600; margin-bottom: 10px; cursor: pointer; ",
+            "user-select: none;"
+          )
+        ),
         shiny::div(
           class = "side_input",
-          shiny::selectizeInput(
-            ns("tech_categories_plot1_region"),
-            label = NULL,
-            choices  = grouped_techs,
-            selected = c("AI", "Green Technology",
-                         "Any Agriculture & Food technology",
-                         "Defence Technology"),
-            multiple = TRUE,
-            options  = list(placeholder = 'Choose one or more technology categories...')
+          # Hidden value-holder read by the by-technology query / cache;
+          # the visible tree writes the chosen categories into it.
+          shiny::div(
+            style = "display:none;",
+            shiny::selectizeInput(
+              ns("tech_categories_plot1_region"),
+              label = NULL,
+              choices  = grouped_techs,
+              selected = c("AI", "Green Technology",
+                           "Any Agriculture & Food technology",
+                           "Defence Technology"),
+              multiple = TRUE
+            )
+          ),
+          shiny::div(
+            class = "firm-categories-tree",
+            style = "max-height: 360px; overflow-y: auto;",
+            shinyTree::shinyTree(
+              outputId    = ns("tech_categories_tree"),
+              checkbox    = TRUE,
+              themeIcons  = FALSE,
+              themeDots   = FALSE,
+              search      = TRUE,
+              contextmenu = FALSE
+            )
           )
         )
       )
@@ -355,6 +428,50 @@ region_module_server <- function(id, parent_session, con) {
           shiny::updateSelectizeInput(session, "firm", selected = new_sel)
         }
       })
+
+      # ── Value Flow tree (single-select; drives the hidden `toflow_region`) ──
+      output$toflow_tree <- shinyTree::renderTree(
+        build_toflow_tree_data(
+          toflow_init_value(session$clientData$url_search,
+                            session$ns("toflow_region"))))
+      shiny::observeEvent(input$toflow_tree, {
+        v <- toflow_tree_value(input$toflow_tree)
+        if (!is.null(v) && !identical(v, input$toflow_region))
+          shiny::updateSelectizeInput(session, "toflow_region", selected = v)
+      }, ignoreInit = TRUE)
+
+      # ── Technology Categories tree (drives hidden tech_categories_plot1_region)
+      output$tech_categories_tree <- shinyTree::renderTree({
+        iv <- tech_url_selected(session$clientData$url_search,
+                                session$ns("tech_categories_plot1_region"))
+        if (is.null(iv)) iv <- c("AI", "Green Technology",
+                                 "Any Agriculture & Food technology",
+                                 "Defence Technology")
+        build_tech_category_tree(iv)
+      })
+      shiny::observeEvent(input$tech_categories_tree, {
+        v   <- tech_category_tree_selected(input$tech_categories_tree)
+        cur <- input$tech_categories_plot1_region
+        if (is.null(cur)) cur <- character(0)
+        if (!identical(sort(v), sort(cur)))
+          shiny::updateSelectizeInput(session, "tech_categories_plot1_region",
+                                      selected = v)
+      }, ignoreInit = TRUE)
+
+      # ── Technologies-included filter tree (drives hidden `techs_region`) ──
+      output$tech_filter_tree <- shinyTree::renderTree({
+        iv <- tech_url_selected(session$clientData$url_search,
+                                session$ns("techs_region"),
+                                deep_link_param = "tech")
+        build_tech_category_tree(if (is.null(iv)) character(0) else iv)
+      })
+      shiny::observeEvent(input$tech_filter_tree, {
+        v   <- tech_category_tree_selected(input$tech_filter_tree)
+        if (length(v) == 0) v <- "All innovations"   # canonical no-filter
+        cur <- input$techs_region; if (is.null(cur)) cur <- character(0)
+        if (!identical(sort(v), sort(cur)))
+          shiny::updateSelectizeInput(session, "techs_region", selected = v)
+      }, ignoreInit = TRUE)
 
       # Update URL when subtab changes
       shiny::observeEvent(input$inner_tabs, {

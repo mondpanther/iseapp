@@ -29,64 +29,139 @@ country_module_sidebar <- function(id) {
           "user-select: none;"
         )
       ),
-      shiny::div(
-        class = "side_input",
-        shiny::selectizeInput(
-          inputId = ns("country"),
-          label = "Country or Group",
-          choices = grouped_choices,
-          selected = "All countries",
-          multiple = TRUE,
-          options = list(placeholder = 'Choose one or more countries or groups...')
+      # Foldable, collapsed by default (no `open` attribute).
+      shiny::tags$details(
+        shiny::tags$summary(
+          "Country or Group",
+          style = paste0(
+            "font-weight: 500; font-size: 0.8rem; color: #555; ",
+            "margin-bottom: 8px; cursor: pointer; user-select: none;"
+          )
+        ),
+        shiny::div(
+          class = "side_input",
+          # Hidden value-holder read by every query / cache / deep-link; the
+          # visible tree writes the chosen countries/groups into it.
+          shiny::div(
+            style = "display:none;",
+            shiny::selectizeInput(
+              inputId = ns("country"),
+              label = NULL,
+              choices = grouped_choices,
+              selected = "All countries",
+              multiple = TRUE
+            )
+          ),
+          shiny::div(
+            class = "firm-categories-tree",
+            style = "max-height: 360px; overflow-y: auto;",
+            shinyTree::shinyTree(
+              outputId    = ns("country_tree"),
+              checkbox    = TRUE,
+              themeIcons  = FALSE,
+              themeDots   = FALSE,
+              search      = TRUE,
+              contextmenu = FALSE
+            )
+          )
         )
       ),
       shiny::conditionalPanel(
         condition = not_firm,
-        shiny::div(
-          class = "side_input",
-          shiny::selectizeInput(
-            inputId = ns("firm"),
-            label = "Firm or Sector Group",
-            choices = firm_grouped_choices,
-            selected = "No firm filter",
-            multiple = TRUE,
-            options = list(placeholder = 'Choose firms or sector groups...')
+        # Foldable, collapsed by default (no `open` attribute).
+        shiny::tags$details(
+          shiny::tags$summary(
+            "Firm or Sector Group",
+            title = paste0(
+              "Tick firms to restrict the chart to them; ticking a sector ",
+              "folder selects every firm in it. Leave empty for no firm ",
+              "filter."
+            ),
+            style = paste0(
+              "font-weight: 500; font-size: 0.8rem; color: #555; ",
+              "margin-bottom: 8px; cursor: pointer; user-select: none;"
+            )
+          ),
+          shiny::div(
+            class = "side_input",
+            shiny::div(
+              class = "firm-categories-tree",
+              style = "max-height: 320px; overflow-y: auto;",
+              shinyTree::shinyTree(
+                outputId    = ns("firm_tree"),
+                checkbox    = TRUE,
+                themeIcons  = FALSE,
+                themeDots   = FALSE,
+                search      = TRUE,
+                contextmenu = FALSE
+              )
+            ),
+            # Compact bookmarkable mirror of the checked firm leaves (the raw
+            # tree input is force-excluded from bookmarks in server.R).
+            shiny::tags$div(
+              style = "display: none;",
+              shiny::textInput(ns("firm_tree_persist"), label = NULL, value = "")
+            )
           )
         )
       ),
       shiny::conditionalPanel(
         condition = not_tech,
-        shiny::div(
-          class = "side_input",
-          shiny::selectizeInput(
-            inputId = ns("techs"),
-            label = "Technologies included",
-            choices = grouped_techs,
-            selected = "All innovations",
-            multiple = TRUE,
-            options = list(placeholder = 'Choose technologies...')
+        # Foldable, collapsed by default (no `open` attribute).
+        shiny::tags$details(
+          shiny::tags$summary(
+            "Technologies Included",
+            style = paste0(
+              "font-weight: 500; font-size: 0.8rem; color: #555; ",
+              "margin-bottom: 8px; cursor: pointer; user-select: none;"
+            )
+          ),
+          shiny::div(
+            class = "side_input",
+            # Hidden value-holder read by every query / cache; the visible
+            # tree writes the chosen filter technologies into it.
+            shiny::div(
+              style = "display:none;",
+              shiny::selectizeInput(
+                inputId = ns("techs"),
+                label = NULL,
+                choices = grouped_techs,
+                selected = "All innovations",
+                multiple = TRUE
+              )
+            ),
+            shiny::div(
+              class = "firm-categories-tree",
+              style = "max-height: 360px; overflow-y: auto;",
+              shinyTree::shinyTree(
+                outputId    = ns("tech_filter_tree"),
+                checkbox    = TRUE,
+                themeIcons  = FALSE,
+                themeDots   = FALSE,
+                search      = TRUE,
+                contextmenu = FALSE
+              )
+            )
           )
         )
       ),
-      shiny::div(
-        class = "side_input",
-        shiny::div(
-          style = "display:flex; gap:18px; flex-wrap:wrap;",
-          shiny::checkboxInput(
-            inputId = ns("granted_only"),
-            label   = "Granted families only",
-            value   = FALSE
-          ),
-          shiny::checkboxInput(
-            inputId = ns("multifam_only"),
-            label   = "Multi-application families only",
-            value   = FALSE
-          ),
-          shiny::checkboxInput(
-            inputId = ns("exclude_um"),
-            label   = "Exclude utility model patents",
-            value   = FALSE
+      # Innovation types — foldable, collapsed by default.
+      shiny::tags$details(
+        shiny::tags$summary(
+          "Innovation Types",
+          style = paste0(
+            "font-weight: 500; font-size: 0.8rem; color: #555; ",
+            "margin-bottom: 8px; cursor: pointer; user-select: none;"
           )
+        ),
+        shiny::div(
+          class = "side_input innovation-types",
+          shiny::checkboxInput(
+            ns("granted_only"), "Granted families only", FALSE),
+          shiny::checkboxInput(
+            ns("multifam_only"), "Multi-application families only", FALSE),
+          shiny::checkboxInput(
+            ns("exclude_um"), "Exclude utility model patents", FALSE)
         )
       ),
 
@@ -135,14 +210,31 @@ country_module_sidebar <- function(id) {
         ),
         shiny::div(
           class = "side_input",
-          shiny::selectizeInput(
-            inputId = ns("toflow"),
-            label = NULL,
-            choices = toflow_choices,
-            selected = "ev_global",
-            multiple = FALSE,
-            width = "400px",
-            options = list(placeholder = 'Choose a value flow...')
+          # Hidden value-holder: stays the single source of truth read by
+          # every query / cache / deep-link. The visible tree below writes
+          # the chosen flow into it.
+          shiny::div(
+            style = "display:none;",
+            shiny::selectizeInput(
+              inputId = ns("toflow"),
+              label = NULL,
+              choices = toflow_choices,
+              selected = "ev_global",
+              multiple = FALSE
+            )
+          ),
+          shiny::div(
+            class = "firm-categories-tree",
+            style = "max-height: 360px; overflow-y: auto;",
+            shinyTree::shinyTree(
+              outputId    = ns("toflow_tree"),
+              checkbox    = FALSE,
+              multiple    = FALSE,
+              themeIcons  = FALSE,
+              themeDots   = FALSE,
+              search      = TRUE,
+              contextmenu = FALSE
+            )
           )
         )
       )
@@ -151,8 +243,8 @@ country_module_sidebar <- function(id) {
     # --- Technology Categories: Tech only --- (foldable, open by default)
     shiny::conditionalPanel(
       condition = is_tech,
+      # Foldable, collapsed by default (no `open` attribute).
       shiny::tags$details(
-        open = NA,
         shiny::tags$summary(
           "TECHNOLOGY CATEGORIES",
           style = paste0(
@@ -162,16 +254,75 @@ country_module_sidebar <- function(id) {
         ),
         shiny::div(
           class = "side_input",
-          shiny::selectizeInput(
-            inputId = ns("tech_categories_plot1"),
-            label = NULL,
-            choices = grouped_techs,
-            selected = c("AI", "Green Technology",
-                         "Any Agriculture & Food technology",
-                         "Defence Technology"),
-            multiple = TRUE,
-            width = "200%",
-            options = list(placeholder = 'Choose one or more technology categories...')
+          # Hidden value-holder read by the by-technology query / cache /
+          # deep-links; the visible tree writes the chosen categories in.
+          shiny::div(
+            style = "display:none;",
+            shiny::selectizeInput(
+              inputId = ns("tech_categories_plot1"),
+              label = NULL,
+              choices = grouped_techs,
+              selected = c("AI", "Green Technology",
+                           "Any Agriculture & Food technology",
+                           "Defence Technology"),
+              multiple = TRUE
+            )
+          ),
+          shiny::div(
+            class = "firm-categories-tree",
+            style = "max-height: 360px; overflow-y: auto;",
+            shinyTree::shinyTree(
+              outputId    = ns("tech_categories_tree"),
+              checkbox    = TRUE,
+              themeIcons  = FALSE,
+              themeDots   = FALSE,
+              search      = TRUE,
+              contextmenu = FALSE
+            )
+          )
+        )
+      )
+    ),
+
+    # --- Country categories: Country + RTA tabs --- (foldable, collapsed)
+    # Defines the bars on the by-country / RTA charts. Ticking a group makes
+    # ONE aggregate bar over its member countries (families deduped across
+    # members in SQL); ticking individual countries makes one bar each.
+    shiny::conditionalPanel(
+      condition = sprintf("(%s) || (%s)", is_country, is_rta),
+      shiny::tags$details(
+        shiny::tags$summary(
+          "COUNTRY CATEGORIES",
+          title = paste0(
+            "Under Country Groupings, tick a group for one aggregate bar ",
+            "over its members. Under Individual Countries, tick countries ",
+            "for their own bars. Group bars dedupe innovations across ",
+            "member countries."
+          ),
+          style = paste0(
+            "font-weight: 600; margin-bottom: 10px; cursor: pointer; ",
+            "user-select: none;"
+          )
+        ),
+        shiny::div(
+          class = "side_input",
+          shiny::div(
+            class = "firm-categories-tree",
+            style = "max-height: 360px; overflow-y: auto;",
+            shinyTree::shinyTree(
+              outputId    = ns("country_categories_tree"),
+              checkbox    = TRUE,
+              themeIcons  = FALSE,
+              themeDots   = FALSE,
+              search      = TRUE,
+              contextmenu = FALSE
+            )
+          ),
+          # Compact bookmarkable mirror of the picked categories.
+          shiny::tags$div(
+            style = "display: none;",
+            shiny::textInput(ns("country_categories_persist"),
+                             label = NULL, value = "")
           )
         )
       )
@@ -199,6 +350,13 @@ country_module_sidebar <- function(id) {
         # marker.
         shiny::tags$summary(
           "SECTOR AND FIRM CATEGORIES",
+          title = paste0(
+            "Under Broad sectors, tick a sector for one aggregate bar ",
+            "covering the whole sector. Under Individual firms, tick firms ",
+            "for their own bars (ticking a sector there selects every firm ",
+            "in it). A sector's aggregate and its individual firms can be ",
+            "shown together."
+          ),
           style = paste0(
             "font-weight: 600; margin-bottom: 10px; cursor: pointer; ",
             "user-select: none;"
@@ -206,37 +364,6 @@ country_module_sidebar <- function(id) {
         ),
         shiny::div(
           class = "side_input",
-          shiny::selectizeInput(
-            inputId  = ns("firm_categories_sectors"),
-            label    = "Aggregate sector bars",
-            choices  = names(firm_sector_groups),
-            # Default: the 10 sectors with the largest distinct-docdb
-            # count, precomputed at build time and saved into sysdata.rda
-            # as `firm_sector_top10`. Falls back to the first 10 sectors
-            # if the object isn't available (e.g. before the next
-            # data-raw-2025/02-build-app-sysdata.R run).
-            # Banks are excluded from the default selection (still
-            # available in the dropdown for users to add manually).
-            selected = setdiff(
-              tryCatch(
-                get("firm_sector_top10", envir = asNamespace(
-                      "innovationStrategyExplorer"), inherits = FALSE),
-                error = function(e) utils::head(names(firm_sector_groups),
-                                                10L)
-              ),
-              "Banks"
-            ),
-            multiple = TRUE,
-            width    = "100%",
-            options  = list(placeholder = 'Choose sectors as single aggregate bars...')
-          )
-        ),
-        shiny::div(
-          class = "side_input",
-          shiny::tags$label(
-            "Individual firm bars",
-            style = "display:block; margin-bottom:4px; font-weight:500;"
-          ),
           shiny::div(
             class = "firm-categories-tree",
             style = "max-height: 380px; overflow-y: auto;",
@@ -275,6 +402,52 @@ country_module_sidebar <- function(id) {
         style = paste0(
           "font-weight: 600; margin-bottom: 10px; cursor: pointer; ",
           "user-select: none;"
+        )
+      ),
+
+      # Value-flow-by-firm display controls (firm tab only)
+      shiny::conditionalPanel(
+        condition = is_firm,
+        shiny::div(
+          class = "side_input",
+          shiny::checkboxInput(
+            ns("sort_firm_bars"),
+            "Sort bars by value (tallest first)",
+            value = TRUE
+          ),
+          shiny::numericInput(
+            ns("limit_firms"),
+            "Limit to top N firms/sectors",
+            value = 20, min = 1, max = 500
+          ),
+          shiny::numericInput(
+            ns("min_innos"),
+            "Min number of innovations",
+            value = 10, min = 0
+          )
+        )
+      ),
+
+      # Value-flow-by-technology display controls (tech tab only)
+      shiny::conditionalPanel(
+        condition = is_tech,
+        shiny::div(
+          class = "side_input",
+          shiny::checkboxInput(
+            ns("sort_tech_bars"),
+            "Sort bars by value (tallest first)",
+            value = TRUE
+          ),
+          shiny::numericInput(
+            ns("limit_techs"),
+            "Limit to top N tech categories",
+            value = 20, min = 1, max = 500
+          ),
+          shiny::numericInput(
+            ns("min_innos_tech"),
+            "Min number of innovations",
+            value = 10, min = 0
+          )
         )
       ),
       shiny::div(
@@ -555,11 +728,26 @@ country_module_server <- function(id, parent_session, con) {
       })
 
       # ── Foldable tree for "Sector and firm categories" (firm tab) ─────
-      # The tree mirrors `firm_sector_groups` from R/sysdata.rda — one
-      # branch per ICB sector, one leaf per firm. On a fresh load nothing
-      # is checked; on bookmark restore the checked-leaf list comes from
-      # the URL (via the hidden `firm_categories_picked_persist` input)
-      # and we pre-check those leaves + open their parent sectors.
+      # Two top-level branches, both built from `firm_sector_groups`:
+      #   • "Broad sectors"    — one leaf per ICB sector; ticking a leaf
+      #                          adds a single aggregate bar for that whole
+      #                          sector.
+      #   • "Individual firms" — the same sectors as sub-folders, each
+      #                          holding its firm leaves; ticking a firm
+      #                          adds that firm's own bar (ticking a
+      #                          sub-folder selects every firm in it).
+      # A sector's aggregate and its individual firms are independent, so
+      # they can be shown together. The same sector name appears in both
+      # branches; `get_selected()` attaches an `ancestry` attribute (the
+      # chain of parent names) to each checked node, and the selection
+      # reader uses the top-level ancestor to tell the aggregate leaf apart
+      # from the firm sub-folder. Selections are persisted to the URL via
+      # the hidden `firm_categories_picked_persist` input: stored tokens
+      # are sector names (aggregates) and firm names (individuals), and on
+      # restore we pre-check the matching leaves.
+      broad_branch <- "Broad sectors"
+      firms_branch <- "Individual firms"
+
       firm_tree_data <- local({
         # `session$clientData$url_search` already carries the restored
         # URL at module-load time. The persist field is name-spaced by
@@ -579,21 +767,51 @@ country_module_server <- function(id, parent_session, con) {
           }
         } else character(0)
 
-        tree <- lapply(firm_sector_groups, function(firms_list) {
-          firm_names <- unlist(firms_list, use.names = FALSE)
-          setNames(as.list(rep("", length(firm_names))), firm_names)
-        })
-        if (length(picks) > 0) {
-          for (sec in names(tree)) {
-            for (f in names(tree[[sec]])) {
-              if (f %in% picks) {
-                attr(tree[[sec]][[f]], "stselected") <- TRUE
-                attr(tree[[sec]],      "stopened")  <- TRUE
-              }
-            }
-          }
+        # No bookmark state → default to the 10 sectors with the largest
+        # distinct-docdb count as aggregate bars (Banks excluded),
+        # matching the previous selectize default. Precomputed at build
+        # time as `firm_sector_top10`; falls back to the first 10 sectors.
+        if (length(picks) == 0) {
+          picks <- setdiff(
+            tryCatch(
+              get("firm_sector_top10", envir = asNamespace(
+                    "innovationStrategyExplorer"), inherits = FALSE),
+              error = function(e) utils::head(names(firm_sector_groups),
+                                              10L)
+            ),
+            "Banks"
+          )
         }
-        tree
+
+        agg_sel  <- intersect(picks, names(firm_sector_groups))  # aggregates
+        firm_sel <- setdiff(picks, names(firm_sector_groups))    # individuals
+
+        # Branch 1 — aggregate-sector leaves (open by default; it's short).
+        broad <- lapply(stats::setNames(nm = names(firm_sector_groups)),
+                        function(sec) {
+          node <- ""
+          if (sec %in% agg_sel) attr(node, "stselected") <- TRUE
+          node
+        })
+        attr(broad, "stopened") <- TRUE
+
+        # Branch 2 — per-sector folders of individual firms (open a folder
+        # only when one of its firms is pre-selected; the branch itself is
+        # opened only if any firm is pre-selected, since it is large).
+        indiv <- lapply(stats::setNames(nm = names(firm_sector_groups)),
+                        function(sec) {
+          firm_names <- unlist(firm_sector_groups[[sec]], use.names = FALSE)
+          children <- stats::setNames(as.list(rep("", length(firm_names))),
+                                      firm_names)
+          for (f in intersect(firm_names, firm_sel))
+            attr(children[[f]], "stselected") <- TRUE
+          if (any(firm_names %in% firm_sel))
+            attr(children, "stopened") <- TRUE
+          children
+        })
+        if (length(firm_sel) > 0) attr(indiv, "stopened") <- TRUE
+
+        stats::setNames(list(broad, indiv), c(broad_branch, firms_branch))
       })
 
       output$firm_categories_tree <- shinyTree::renderTree(firm_tree_data)
@@ -609,55 +827,243 @@ country_module_server <- function(id, parent_session, con) {
                                 value = txt)
       })
 
-      # Pulls the checked leaves (firm names) out of the tree input. With
-      # default jstree cascade, ticking a sector header auto-checks every
-      # firm beneath it AND the sector itself. `get_selected(format =
-      # "names")` returns a list whose elements are length-1 character
-      # vectors holding the node *name* (the path is in attr "ancestry").
-      # We coerce to plain strings, dedupe, and filter out sector names
-      # so they don't double-count alongside the aggregate-sector
-      # selectize.
+      # Reads the checked nodes out of the tree and splits them into the two
+      # bar kinds using each node's `ancestry` (the chain of parent names
+      # that `get_selected()` attaches). A node whose top-level ancestor is
+      # "Broad sectors" and whose name is a sector → an aggregate bar; a
+      # node under "Individual firms" whose name is a firm → that firm's
+      # bar. Sector *folder* names under "Individual firms" and the two
+      # branch headers are ignored (ticking a folder cascade-checks its firm
+      # leaves, which already carry the real selection). Aggregates are kept
+      # on top so bar order is predictable. No mutual exclusion: a sector's
+      # aggregate and its individual firms can both be selected at once.
       firm_categories_selected <- shiny::reactive({
         tree_state <- input$firm_categories_tree
         if (is.null(tree_state)) return(character(0))
         sel <- shinyTree::get_selected(tree_state, format = "names")
         if (length(sel) == 0) return(character(0))
-        names_sel <- unique(unlist(lapply(sel, as.character),
-                                    use.names = FALSE))
-        setdiff(names_sel, names(firm_sector_groups))
-      })
 
-      # Union of both controls — aggregate sectors + individual firms —
-      # passed to `build_firm_categories_filter_v2()` to produce one bar
-      # per selection. Aggregate-sector entries are kept on top so the
-      # bar order is predictable.
-      firm_categories_combined <- shiny::reactive({
-        unique(c(input$firm_categories_sectors,
-                 firm_categories_selected()))
-      })
-
-      # When "No firm filter" is selected alongside other firms, keep only "No firm filter"
-      # When a firm/sector is selected alongside "No firm filter", drop "No firm filter"
-      shiny::observeEvent(input$firm, {
-        sel <- input$firm
-        if ("No firm filter" %in% sel && length(sel) > 1) {
-          # User just added something else — drop "No firm filter"
-          new_sel <- setdiff(sel, "No firm filter")
-          shiny::updateSelectizeInput(session, "firm", selected = new_sel)
+        agg_secs <- character(0)
+        firms    <- character(0)
+        for (node in sel) {
+          nm  <- as.character(node)
+          anc <- attr(node, "ancestry")
+          top <- if (length(anc)) anc[[1]] else NA_character_
+          if (identical(top, broad_branch) &&
+              nm %in% names(firm_sector_groups)) {
+            agg_secs <- c(agg_secs, nm)
+          } else if (identical(top, firms_branch) &&
+                     !(nm %in% names(firm_sector_groups))) {
+            firms <- c(firms, nm)
+          }
         }
+        unique(c(agg_secs, firms))
       })
+
+      # The single tree is now the only control, so the combined selection
+      # passed to `build_firm_categories_filter_v2()` is just its output.
+      firm_categories_combined <- firm_categories_selected
+
+      # ── Firm FILTER tree (replaces the old `firm` selectize) ──────────
+      # Only the individual-firms branch is needed: this restricts the
+      # query rather than defining bar categories. Ticking firms (or a
+      # whole sector folder) filters; nothing ticked = no firm filter.
+      # Collapsed by default. The selection is mirrored into a compact,
+      # bookmarkable hidden input and restored from the URL on load.
+      firm_filter_tree_data <- local({
+        url_q <- shiny::parseQueryString(session$clientData$url_search %||% "")
+        raw   <- url_q[[session$ns("firm_tree_persist")]]
+        picks <- if (!is.null(raw) && nzchar(raw)) {
+          val <- tryCatch(jsonlite::fromJSON(raw),
+                          error = function(e) gsub('^"|"$', "", raw))
+          if (is.null(val) || !length(val) || identical(val, "")) character(0)
+          else strsplit(as.character(val), "||", fixed = TRUE)[[1]]
+        } else character(0)
+        build_firm_filter_tree(picks)
+      })
+      output$firm_tree <- shinyTree::renderTree(firm_filter_tree_data)
+
+      firm_filter_firms <- shiny::reactive({
+        firm_tree_selected_firms(input$firm_tree)
+      })
+
+      shiny::observe({
+        shiny::updateTextInput(session, "firm_tree_persist",
+                                value = paste(firm_filter_firms(),
+                                              collapse = "||"))
+      })
+
+      # ── Value Flow tree (single-select; drives the hidden `toflow`) ────
+      # Clicking a leaf writes its flow value into the hidden selectize so
+      # all the existing query/cache/deep-link code keeps reading
+      # `input$toflow` unchanged. Branch clicks map to no value and are
+      # ignored, leaving the current flow intact.
+      output$toflow_tree <- shinyTree::renderTree(
+        build_toflow_tree_data(
+          toflow_init_value(session$clientData$url_search,
+                            session$ns("toflow"))))
+      shiny::observeEvent(input$toflow_tree, {
+        v <- toflow_tree_value(input$toflow_tree)
+        if (!is.null(v) && !identical(v, input$toflow))
+          shiny::updateSelectizeInput(session, "toflow", selected = v)
+      }, ignoreInit = TRUE)
+
+      # ── Technology Categories tree (multi-select; drives hidden selectize)
+      output$tech_categories_tree <- shinyTree::renderTree({
+        iv <- tech_url_selected(session$clientData$url_search,
+                                session$ns("tech_categories_plot1"))
+        if (is.null(iv)) iv <- c("AI", "Green Technology",
+                                 "Any Agriculture & Food technology",
+                                 "Defence Technology")
+        build_tech_category_tree(iv)
+      })
+      shiny::observeEvent(input$tech_categories_tree, {
+        v   <- tech_category_tree_selected(input$tech_categories_tree)
+        cur <- input$tech_categories_plot1; if (is.null(cur)) cur <- character(0)
+        if (!identical(sort(v), sort(cur)))
+          shiny::updateSelectizeInput(session, "tech_categories_plot1",
+                                      selected = v)
+      }, ignoreInit = TRUE)
+
+      # ── Technologies-included filter tree (drives hidden `techs`) ──────
+      output$tech_filter_tree <- shinyTree::renderTree({
+        iv <- tech_url_selected(session$clientData$url_search,
+                                session$ns("techs"), deep_link_param = "tech")
+        build_tech_category_tree(if (is.null(iv)) character(0) else iv)
+      })
+      shiny::observeEvent(input$tech_filter_tree, {
+        v   <- tech_category_tree_selected(input$tech_filter_tree)
+        if (length(v) == 0) v <- "All innovations"   # canonical no-filter
+        cur <- input$techs; if (is.null(cur)) cur <- character(0)
+        if (!identical(sort(v), sort(cur)))
+          shiny::updateSelectizeInput(session, "techs", selected = v)
+      }, ignoreInit = TRUE)
+
+      # ── Country/Group tree (drives the hidden `country` selectize) ────
+      output$country_tree <- shinyTree::renderTree({
+        iv <- tech_url_selected(session$clientData$url_search,
+                                session$ns("country"), deep_link_param = "ctry")
+        build_country_tree(if (is.null(iv)) "All countries" else iv)
+      })
+      shiny::observeEvent(input$country_tree, {
+        v   <- country_tree_selected(input$country_tree)
+        if (length(v) == 0) v <- "All countries"   # canonical "everything"
+        cur <- input$country; if (is.null(cur)) cur <- character(0)
+        if (!identical(sort(v), sort(cur)))
+          shiny::updateSelectizeInput(session, "country", selected = v)
+      }, ignoreInit = TRUE)
+
+      # ── Country CATEGORIES tree (defines the bars on by-country / RTA) ──
+      # Like the firm-categories tree but for countries: group leaves are
+      # aggregate bars, individual-country leaves are single-country bars.
+      output$country_categories_tree <- shinyTree::renderTree(local({
+        url_q <- shiny::parseQueryString(session$clientData$url_search %||% "")
+        raw   <- url_q[[session$ns("country_categories_persist")]]
+        picks <- if (!is.null(raw) && nzchar(raw)) {
+          val <- tryCatch(jsonlite::fromJSON(raw),
+                          error = function(e) gsub('^"|"$', "", raw))
+          if (is.null(val) || !length(val) || identical(val, "")) character(0)
+          else strsplit(as.character(val), "||", fixed = TRUE)[[1]]
+        } else character(0)
+        if (length(picks) == 0)
+          picks <- c("EU countries", "US", "CN", "GB", "JP", "IN")
+        build_country_tree(picks)
+      }))
+
+      country_categories_selected <- shiny::reactive({
+        country_tree_selected(input$country_categories_tree)
+      })
+      shiny::observe({
+        shiny::updateTextInput(
+          session, "country_categories_persist",
+          value = paste(country_categories_selected(), collapse = "||"))
+      })
+
+      # Per-country-category data: one row per bar (group aggregate or single
+      # country), with group-level docdb dedup handled in SQL, plus per-bar
+      # RTA computed in R from the no-tech-filter denominator.
+      fallback_by_country_cat <- shiny::reactive({
+        shiny::req(input$toflow, input$country)
+        cat_filters <- build_country_categories_filter_v2(
+          country_categories_selected())
+        if (length(cat_filters) == 0) return(NULL)
+
+        selected_countries <- expand_country_selection(input$country)
+        country_sql        <- paste0("'", selected_countries, "'", collapse = ", ")
+        selected_firms     <- firm_filter_firms()
+        firm_clause <- build_firm_clause_v2(
+          selected_firms, no_filter = length(selected_firms) == 0)
+
+        out <- DBI::dbGetQuery(con, sql_country_countrycat_combined_v2(
+          toflow = input$toflow, country_sql = country_sql,
+          cat_filters = cat_filters, firm_clause = firm_clause,
+          techs = input$techs %||% "All", top_n_ids = input$top_n_ids,
+          granted_only = isTRUE(input$granted_only),
+          multifam_only = isTRUE(input$multifam_only),
+          exclude_um = isTRUE(input$exclude_um)))
+        if (nrow(out) == 0) return(NULL)
+
+        allinnos <- DBI::dbGetQuery(con, sql_countrycat_allinnos_v2(
+          toflow = input$toflow, country_sql = country_sql,
+          cat_filters = cat_filters, firm_clause = firm_clause,
+          granted_only = isTRUE(input$granted_only),
+          multifam_only = isTRUE(input$multifam_only),
+          exclude_um = isTRUE(input$exclude_um)))
+
+        out <- out |>
+          dplyr::left_join(
+            dplyr::rename(allinnos, technology = country_category,
+                          Allinnos = allinnos),
+            by = "technology") |>
+          dplyr::mutate(
+            ctry_code = technology,   # bar label for the RTA plotter
+            sector = dplyr::if_else(technology %in% names(group_definitions),
+                                    "Country group", "Individual country"),
+            top3_ids_url = build_espacenet_search(top3_ids))
+
+        if (grepl("^(is_|av_)", input$toflow)) {
+          pct_cols <- intersect(c("mean", "allmean", "sem", "q1", "q2", "q3",
+                                  "top25_bin_mean", "top50_bin_mean"),
+                                names(out))
+          out[pct_cols] <- out[pct_cols] * 100
+        }
+
+        # Per-bar Balassa RTA (mirrors the per-country computation).
+        sum_allinnos <- sum(out$Allinnos, na.rm = TRUE)
+        out <- out |>
+          dplyr::mutate(
+            share_c = innos / Allinnos,
+            share   = sum(innos) / sum_allinnos,
+            RTA     = 2 * share_c / (share_c + share))
+
+        # Denominator for the RTA innovation-count tooltip: distinct families
+        # in the full dataset after country/firm/etc filters but WITHOUT the
+        # technology filter. Attached as an attribute (the numerator total is
+        # already the `allinnos` column).
+        attr(out, "denom") <- DBI::dbGetQuery(con, sql_universe_allinnos_v2(
+          toflow = input$toflow, country_sql = country_sql,
+          firm_clause = firm_clause,
+          granted_only = isTRUE(input$granted_only),
+          multifam_only = isTRUE(input$multifam_only),
+          exclude_um = isTRUE(input$exclude_um)))$allinnos[1]
+        out
+      }) |> shiny::bindCache(
+        input$toflow, input$country, sort(country_categories_selected()),
+        sort(input$techs), sort(firm_filter_firms()), input$top_n_ids,
+        isTRUE(input$granted_only), isTRUE(input$multifam_only),
+        isTRUE(input$exclude_um))
 
       # DuckDB query for Plot 1 (by-technology)
       fallback_by_tech <- shiny::reactive({
         shiny::req(input$toflow, input$country, input$tech_categories_plot1)
 
         toflow             <- input$toflow
-        no_firm_filter     <- "No firm filter" %in% input$firm || length(input$firm) == 0
-        selected_firms     <- expand_firm_selection(setdiff(input$firm, "No firm filter"))
+        selected_firms     <- firm_filter_firms()
         selected_countries <- expand_country_selection(input$country)
         country_sql        <- paste0("'", selected_countries, "'", collapse = ", ")
 
-        firm_clause  <- build_firm_clause_v2(selected_firms, no_filter = no_firm_filter)
+        firm_clause  <- build_firm_clause_v2(selected_firms,
+                                             no_filter = length(selected_firms) == 0)
         tech_filters <- build_tech_filter_v2(input$tech_categories_plot1)
 
         sql <- sql_country_tech_combined_v2(
@@ -706,7 +1112,7 @@ country_module_server <- function(id, parent_session, con) {
         out
 
       }) |> shiny::bindCache(input$toflow, input$country, input$tech_categories_plot1,
-                             sort(input$firm), input$top_n_ids,
+                             sort(firm_filter_firms()), input$top_n_ids,
                              isTRUE(input$granted_only), isTRUE(input$multifam_only), isTRUE(input$exclude_um),
                              sort(input$city), isTRUE(input$include_fallback))
 
@@ -716,12 +1122,12 @@ country_module_server <- function(id, parent_session, con) {
 
         selected_countries <- expand_country_selection(input$country)
         toflow             <- input$toflow
-        no_firm_filter     <- "No firm filter" %in% input$firm || length(input$firm) == 0
-        selected_firms     <- expand_firm_selection(setdiff(input$firm, "No firm filter"))
+        selected_firms     <- firm_filter_firms()
         techs              <- input$techs
         country_sql        <- paste0("'", selected_countries, "'", collapse = ", ")
 
-        firm_clause <- build_firm_clause_v2(selected_firms, no_filter = no_firm_filter)
+        firm_clause <- build_firm_clause_v2(selected_firms,
+                                            no_filter = length(selected_firms) == 0)
 
         out <- DBI::dbGetQuery(con, sql_country_combined_v2(
           toflow, country_sql, techs, firm_clause,
@@ -768,7 +1174,7 @@ country_module_server <- function(id, parent_session, con) {
         out
 
       }) |> shiny::bindCache(input$toflow, input$country, input$techs,
-                             sort(input$firm), input$top_n_ids,
+                             sort(firm_filter_firms()), input$top_n_ids,
                              isTRUE(input$granted_only), isTRUE(input$multifam_only), isTRUE(input$exclude_um))
 
       # Chart 1: Main avstrax plot
@@ -788,6 +1194,9 @@ country_module_server <- function(id, parent_session, con) {
           widthscale       = input$widthscale,
           display_mode     = input$display_mode,
           top_n_ids        = input$top_n_ids,
+          sort_bars        = isTRUE(input$sort_tech_bars),
+          limit_n          = input$limit_techs,
+          min_innos        = input$min_innos_tech %||% 10,
           plot_title       = sub("^[^.]*\\.", "", flow_label),
           precomputed_data = pdata
         )
@@ -875,6 +1284,9 @@ country_module_server <- function(id, parent_session, con) {
           widthscale   = input$widthscale,
           display_mode = input$display_mode,
           top_n_ids    = input$top_n_ids,
+          sort_bars    = isTRUE(input$sort_firm_bars),
+          limit_firms  = input$limit_firms,
+          min_innos    = input$min_innos %||% 10,
           plot_title   = sub("^[^.]*\\.", "", flow_label)
         )
 
@@ -889,29 +1301,31 @@ country_module_server <- function(id, parent_session, con) {
 
       # Chart 2: Returns by Country for Selected Technologies
       output$avstrax_plot2 <- ggiraph::renderGirafe({
-        req(input$country, input$toflow, input$techs, input$topn,
-            input$mininno, input$widthscale, input$display_mode,
-            !is.null(input$top_n_ids))
+        req(input$country, input$toflow, input$topn, input$mininno,
+            input$widthscale, input$display_mode, !is.null(input$top_n_ids),
+            length(country_categories_selected()) > 0)
 
-        flow_label       <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
-        precomputed_data <- fallback_by_country()
+        flow_label <- names(unlist(toflow_choices))[
+          unlist(toflow_choices) == input$toflow]
+        pdata <- fallback_by_country_cat()
+        if (is.null(pdata) || nrow(pdata) == 0) return(NULL)
 
-        if (is.null(precomputed_data) || nrow(precomputed_data) == 0) return(NULL)
-
-        result <- plot_avstrax_by_technology(
-          pdata                   = data.frame(),
-          classes                 = NULL,
-          technologies            = input$techs,
-          toflow                  = input$toflow,
-          custom_colors           = custom_colors,
-          topn                    = input$topn,
-          mininno                 = input$mininno,
-          widthscale              = input$widthscale,
-          display_mode            = input$display_mode,
-          top_n_ids               = input$top_n_ids,
-          plot_title              = paste0(sub("^[^.]*\\.", "", flow_label), " - ", paste(input$techs, collapse = ", ")),
-          comparison_technologies = input$techs_comparison,
-          precomputed_avstrax     = precomputed_data
+        # One bar per selected country category (group aggregates + single
+        # countries), rendered with the same per-category bar plotter used
+        # by the by-firm tab. "Top N countries" / "Minimum innovations"
+        # reused as the limit / min-innovation controls.
+        result <- plot_avstrax_by_firm(
+          pdata        = pdata,
+          toflow       = input$toflow,
+          widthscale   = input$widthscale,
+          display_mode = input$display_mode,
+          top_n_ids    = input$top_n_ids,
+          sort_bars    = TRUE,
+          limit_firms  = input$topn,
+          min_innos    = input$mininno %||% 1,
+          plot_title   = paste0(sub("^[^.]*\\.", "", flow_label), " - ",
+                                paste(input$techs %||% "All innovations",
+                                      collapse = ", "))
         )
 
         if (!is.null(result$ggplot)) {
@@ -965,10 +1379,13 @@ country_module_server <- function(id, parent_session, con) {
         req(input$country, input$toflow, input$techs,
             input$topn_rta, input$bottomn_rta,
             input$mininno_rta, input$minallinnos_rta,
-            input$widthscale)
+            input$widthscale,
+            length(country_categories_selected()) > 0)
 
         flow_label       <- names(unlist(toflow_choices))[unlist(toflow_choices) == input$toflow]
-        precomputed_data <- fallback_by_country()
+        # One bar per selected country category (group aggregates + single
+        # countries), with per-bar RTA computed in fallback_by_country_cat().
+        precomputed_data <- fallback_by_country_cat()
         if (is.null(precomputed_data) || nrow(precomputed_data) == 0) return(NULL)
 
         tech_label <- paste(input$techs, collapse = ", ")
@@ -986,7 +1403,8 @@ country_module_server <- function(id, parent_session, con) {
           widthscale          = input$widthscale,
           x_label             = "Country",
           plot_title          = paste0("RTA - ", tech_label),
-          precomputed_avstrax = precomputed_data
+          precomputed_avstrax = precomputed_data,
+          denom               = attr(precomputed_data, "denom")
         )
 
         if (!is.null(result$ggplot)) {
