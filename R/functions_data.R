@@ -267,16 +267,16 @@ build_tech_category_tree <- function(selected = character(0)) {
 
   detail_names  <- setdiff(names(gt), broad_grp)
 
-  # The broad group accidentally duplicates the narrow sub-categories of
-  # themed broads (e.g. the AI subcategories). Drop those from the Broad
-  # branch so they only appear under their parent in Detailed Categories.
-  # The "CPC Sections & Other Categories" group is itself broad-level, so
-  # its items are kept in the broad branch.
-  themed_detail <- setdiff(detail_names, "CPC Sections & Other Categories")
-  narrow_sub    <- unique(unlist(lapply(gt[themed_detail], names),
-                                 use.names = FALSE))
-  broad_items   <- setdiff(names(gt[[broad_grp]]), narrow_sub)
-  broad_leaves  <- mk_leaves(broad_items)
+  # The broad group duplicates items that also live in a Detailed group
+  # (the AI subcategories AND the CPC sections). Showing the same item in
+  # both branches creates duplicate jsTree nodes, which makes checkbox /
+  # selection behaviour unreliable. So the Broad branch keeps ONLY the
+  # genuine umbrella categories — anything that also appears under a
+  # Detailed sub-group is dropped here and shown there instead.
+  detail_items <- unique(unlist(lapply(gt[detail_names], names),
+                                use.names = FALSE))
+  broad_items  <- setdiff(names(gt[[broad_grp]]), detail_items)
+  broad_leaves <- mk_leaves(broad_items)
   if (any(broad_items %in% selected)) attr(broad_leaves, "stopened") <- TRUE
 
   narrow_branch <- lapply(stats::setNames(nm = detail_names), function(g) {
