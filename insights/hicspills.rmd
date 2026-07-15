@@ -1,0 +1,317 @@
+---
+title: "Spillovers to HICs (ev_HIC) by technology and origin group"
+author: "Innovation Strategy Explorer — insights"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    self_contained: true
+    toc: true
+    toc_depth: 2
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      fig.width = 10, fig.height = 6, dpi = 150)
+library(dplyr)
+library(ggplot2)
+library(scales)
+suppressMessages({library(DBI); library(duckdb)})
+
+# iseapp "database": parquet files under inst/extdata. Path is relative to the
+# package root (this note lives in insights/).
+ED <- normalizePath(file.path("..", "inst", "extdata"), mustWork = TRUE)
+con <- dbConnect(duckdb())
+for (t in c("patent_database", "patents_x_tech", "tech_lookup", "country_lookup"))
+  dbExecute(con, sprintf("CREATE VIEW %s AS SELECT * FROM read_parquet('%s')",
+                         t, file.path(ED, paste0(t, ".parquet"))))
+q <- function(sql) dbGetQuery(con, sql)
+```
+
+## What this note shows
+
+Average **spillover value flowing to High-Income Countries** (`ev_HIC`) per green
+(and related) innovation, split by the **origin** of the innovation. Bars are
+grouped by technology field — **All innovations**, **Green Technology**,
+**Battery Technology** and **AI** — and within each field by the income group of
+the inventing/owning countries: **HIC**, **LMIC ex China**, and **China**.
+Ticking **show HIC × LMIC ex China** adds a fourth bar (a darker orange) for the
+collaboration subset — families spanning at least one high-income and one
+non-China LMIC; it overlaps the HIC and LMIC ex China bars (those families count
+in all three).
+
+`ev_HIC` is the expected spillover value that an innovation ultimately delivers
+to inventors located in high-income countries (the group-restricted Patent-Rank
+social component; \$ millions). A family attributed to more than one income
+group contributes one observation to each group it touches.
+
+Use the **Metric** dropdown to switch the plotted quantity between
+**ev** (spillover value to HICs, \$m), **istrax** (marginal returns to R&D) and
+**avstrax** (average returns to R&D); the latter two are reported as **%**
+(×100). The **Universe** dropdown switches between **all patents** and
+**multi-country patents** (families filed in at least two jurisdictions,
+`fam_size_min2`); the **Status** dropdown switches between **all applications**
+and **granted only** (`granted`); ticking **exclude utility models** drops
+utility-model families (`is_um`). The current selection is stored in the page URL
+(e.g. `?metric=istrax&universe=multi&status=granted&noum=1&collab=1`), so any view
+can be bookmarked or shared as a link.
+
+```{r build, results='asis'}
+TECHS <- c("All innovations" = "*",
+           "Green Technology" = "Green Technology",
+           "Battery Technology" = "Battery Technology",
+           "AI" = "AI")
+# Four origin bars. "COLLAB" is the HIC x EMDE-ex-China collaboration cut (an
+# overlapping subset), drawn in a darker shade of the EMDE orange. Displayed
+# right after "LMIC ex China" so the collaboration premium is easy to read off.
+GRP_LEVELS <- c("HIC", "LMIC ex China", "COLLAB", "China")
+GRP_COLORS <- c("HIC" = "#2c7fb8", "LMIC ex China" = "#d95f0e",
+                "COLLAB" = "#a63603", "China" = "#984ea3")
+GRP_LABELS <- c("HIC" = "HIC", "LMIC ex China" = "LMIC ex China",
+                "COLLAB" = "HIC × LMIC ex China", "China" = "China")
+
+# Three metrics, all built on the HIC-flow ev (ev_hic) with the standard iseapp
+# formulas (data-raw-2025/01-build-app-parquets.R):
+#   ev      = ev_hic                                   ($m)
+#   istrax  = ((alpha+1)/cost)*ev_hic*[pv <= 2*cost]   (x100 -> %)
+#   avstrax = (pv + ev_hic)/cost                       (x100 -> %)
+METRICS <- list(
+  ev      = list(label = "Mean spillover to HICs per innovation  (ev_HIC, $m)",
+                 mult = 1,   pct = FALSE),
+  istrax  = list(label = "Mean marginal returns to R&D toward HICs  (istrax_HIC, %)",
+                 mult = 100, pct = TRUE),
+  avstrax = list(label = "Mean average returns to R&D toward HICs  (avstrax_HIC, %)",
+                 mult = 100, pct = TRUE))
+
+# One query per (universe, status): per (tech field, origin group) the mean and
+# SEM of each metric. We first collapse to one row per family with its group
+# flags, then emit one metric row per group it belongs to — including the
+# synthetic HIC x EMDE-ex-China collaboration group (COLLAB) for families that
+# span both. istrax/avstrax are defined only where cost > 0.
+agg_for <- function(multi_only, granted_only, drop_um) {
+  wmulti <- if (multi_only) "AND p.fam_size_min2" else ""
+  wgrant <- if (granted_only) "AND p.granted" else ""
+  # drop utility-model patents (is_um): keep FALSE and NULL, exclude TRUE
+  wum <- if (drop_um) "AND p.is_um IS NOT TRUE" else ""
+  out <- lapply(names(TECHS), function(tname) {
+    tg <- TECHS[[tname]]
+    techfilter <- if (tg == "*") "" else sprintf(
+      "JOIN patents_x_tech pxt ON pxt.docdb_family_id = p.docdb_family_id
+       JOIN tech_lookup tl ON tl.technology = pxt.technology
+                          AND tl.tech_group = '%s'", tg)
+    d <- q(sprintf("
+      WITH fam AS (
+        SELECT p.docdb_family_id,
+               any_value(p.ev_hic) AS ev_hic, any_value(p.cost) AS cost,
+               any_value(p.alpha)  AS alpha,  any_value(p.pv)   AS pv,
+               max(CASE WHEN cl.is_hic THEN 1 ELSE 0 END)            AS has_hic,
+               max(CASE WHEN cl.is_lmic_excl_china THEN 1 ELSE 0 END) AS has_emde,
+               max(CASE WHEN p.ctry_code = 'CN' THEN 1 ELSE 0 END)    AS has_china
+        FROM patent_database p
+        JOIN country_lookup cl ON p.ctry_code = cl.ctry_code
+        %s
+        WHERE p.ev_hic IS NOT NULL AND p.ctry_code IS NOT NULL %s %s %s
+        GROUP BY p.docdb_family_id),
+      grp AS (
+        SELECT 'HIC'           AS grp3, ev_hic, cost, alpha, pv FROM fam WHERE has_hic = 1
+        UNION ALL SELECT 'LMIC ex China', ev_hic, cost, alpha, pv FROM fam WHERE has_emde = 1
+        UNION ALL SELECT 'COLLAB',        ev_hic, cost, alpha, pv FROM fam WHERE has_hic = 1 AND has_emde = 1
+        UNION ALL SELECT 'China',         ev_hic, cost, alpha, pv FROM fam WHERE has_china = 1),
+      m AS (
+        SELECT grp3, ev_hic AS ev,
+          CASE WHEN cost > 0
+               THEN ((alpha+1)/cost)*ev_hic*(CASE WHEN pv <= 2*cost THEN 1 ELSE 0 END)
+               END AS istrax,
+          CASE WHEN cost > 0 THEN (pv + ev_hic)/cost END AS avstrax
+        FROM grp)
+      SELECT grp3,
+             avg(ev)      AS mean_ev,      stddev_samp(ev)      AS sd_ev,      count(ev)      AS n_ev,
+             avg(istrax)  AS mean_istrax,  stddev_samp(istrax)  AS sd_istrax,  count(istrax)  AS n_istrax,
+             avg(avstrax) AS mean_avstrax, stddev_samp(avstrax) AS sd_avstrax, count(avstrax) AS n_avstrax
+      FROM m GROUP BY grp3", techfilter, wmulti, wgrant, wum))
+    d$tech <- tname
+    d
+  })
+  do.call(rbind, out)
+}
+
+# Extract a single metric into a tidy (tech, grp3, mean, sem) frame, scaled.
+metric_df <- function(agg, mname) {
+  mult <- METRICS[[mname]]$mult
+  data.frame(
+    tech = factor(agg$tech, levels = names(TECHS)),
+    grp3 = factor(agg$grp3, levels = GRP_LEVELS),
+    mean = agg[[paste0("mean_", mname)]] * mult,
+    sem  = agg[[paste0("sd_", mname)]] / sqrt(agg[[paste0("n_", mname)]]) * mult)
+}
+
+mk_plot <- function(d, mname, subtitle) {
+  pct <- METRICS[[mname]]$pct
+  labf <- if (pct) function(v) paste0(formatC(v, format = "fg", digits = 2), "%")
+          else function(v) formatC(v, format = "fg", digits = 2)
+  ggplot(d, aes(x = tech, y = mean, fill = grp3)) +
+    geom_col(position = position_dodge(0.8), width = 0.74) +
+    geom_errorbar(aes(ymin = pmax(0, mean - sem), ymax = mean + sem),
+                  position = position_dodge(0.8), width = 0.25,
+                  linewidth = 0.35, colour = "grey30") +
+    geom_text(aes(label = labf(mean), y = mean + sem),
+              position = position_dodge(0.8), vjust = -0.5, size = 2.7) +
+    scale_fill_manual(values = GRP_COLORS, labels = GRP_LABELS,
+                      name = "Origin group") +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.12)),
+                       labels = if (pct) function(x) paste0(x, "%") else waiver()) +
+    labs(x = NULL, y = METRICS[[mname]]$label, subtitle = subtitle) +
+    theme_minimal(base_size = 12) +
+    theme(legend.position = "top", panel.grid.major.x = element_blank())
+}
+
+uri <- function(pl) {
+  f <- tempfile(fileext = ".png")
+  ggplot2::ggsave(f, pl, width = 10, height = 6, dpi = 150)
+  u <- knitr::image_uri(f); unlink(f); u
+}
+
+# Universe (all vs multi-country) x Status (all vs granted) x Utility models
+# (include vs exclude): eight base aggregations, reused across the three metrics.
+UNIV <- list(all   = list(multi = FALSE, lab = "all patents"),
+             multi = list(multi = TRUE,  lab = "multi-country patents"))
+STAT <- list(all     = list(granted = FALSE, lab = "all applications"),
+             granted = list(granted = TRUE,  lab = "granted only"))
+UM   <- list(all  = list(drop = FALSE, lab = "incl. utility models"),
+             noum = list(drop = TRUE,  lab = "excl. utility models"))
+AGG <- list()
+for (u in names(UNIV)) for (s in names(STAT)) for (um in names(UM))
+  AGG[[paste(u, s, um, sep = "_")]] <-
+    agg_for(UNIV[[u]]$multi, STAT[[s]]$granted, UM[[um]]$drop)
+
+# The exact data behind each figure, as a CSV data-URI so an online viewer can
+# download it. One CSV per metric x universe x status x utility-model x bars.
+csv_uri <- function(df) {
+  tc <- textConnection("buf", "w", local = TRUE)
+  utils::write.csv(df, tc, row.names = FALSE); close(tc)
+  paste0("data:text/csv;charset=utf-8,",
+         utils::URLencode(paste(buf, collapse = "\n"), reserved = TRUE))
+}
+
+# Render every combination to a data-URI PNG (+ matching CSV), swapped by JS.
+# Two bar versions per combination: without the collaboration bar (default,
+# 3 bars) and with it (4 bars), toggled by the checkbox.
+imgs <- ""; csvs <- ""
+for (u in names(UNIV)) for (s in names(STAT)) for (um in names(UM))
+  for (cb in c("off", "on")) for (mn in names(METRICS)) {
+  agg <- AGG[[paste(u, s, um, sep = "_")]]
+  d   <- metric_df(agg, mn)
+  if (cb == "off") { d <- d[d$grp3 != "COLLAB", ]; d$grp3 <- droplevels(d$grp3) }
+  sub <- sprintf("Universe: %s  |  Status: %s  |  %s",
+                 UNIV[[u]]$lab, STAT[[s]]$lab, UM[[um]]$lab)
+  src <- uri(mk_plot(d, mn, sub))
+  disp <- if (u == "all" && s == "all" && um == "all" && cb == "off" && mn == "ev")
+            "" else "display:none;"
+  imgs <- paste0(imgs, sprintf(
+    '<img id="hs-%s-%s-%s-%s-%s" src="%s" style="max-width:100%%;height:auto;%s">',
+    u, s, um, cb, mn, src, disp))
+  unit <- if (METRICS[[mn]]$pct) "percent" else "usd_millions"
+  out <- data.frame(
+    technology     = as.character(d$tech),
+    origin_group   = unname(GRP_LABELS[as.character(d$grp3)]),
+    metric         = mn,
+    universe       = if (u == "all") "all_patents" else "multi_country_patents",
+    status         = if (s == "all") "all_applications" else "granted_only",
+    utility_models = if (um == "all") "included" else "excluded",
+    unit           = unit,
+    mean           = round(d$mean, 4),
+    sem            = round(d$sem, 4))
+  csvs <- paste0(csvs, sprintf(
+    '<a id="csv-%s-%s-%s-%s-%s" href="%s" download="hicspills_%s_%s_%s_%s_%sbar.csv" style="display:none;"></a>',
+    u, s, um, cb, mn, csv_uri(out), mn, u, s, um, if (cb == "on") "4" else "3"))
+}
+
+cat(sprintf('
+<div style="font-family:sans-serif;font-size:14px;margin-bottom:10px;line-height:1.9;">
+  <strong>Metric:</strong>
+  <select id="hsmetric" onchange="hsupd()" style="margin:0 14px 0 6px;">
+    <option value="ev" selected>ev — spillover value ($m)</option>
+    <option value="istrax">istrax — marginal returns to R&D (%%)</option>
+    <option value="avstrax">avstrax — average returns to R&D (%%)</option>
+  </select>
+  <strong>Universe:</strong>
+  <select id="hsuniv" onchange="hsupd()" style="margin:0 14px 0 6px;">
+    <option value="all" selected>All patents</option>
+    <option value="multi">Multi-country patents</option>
+  </select>
+  <strong>Status:</strong>
+  <select id="hsstat" onchange="hsupd()" style="margin:0 14px 0 6px;">
+    <option value="all" selected>All applications</option>
+    <option value="granted">Granted only</option>
+  </select>
+  <label style="margin:0 14px 0 6px;user-select:none;">
+    <input type="checkbox" id="hsum" onchange="hsupd()"> exclude utility models</label>
+  <label style="margin:0 14px 0 6px;user-select:none;">
+    <input type="checkbox" id="hscol" onchange="hsupd()"> show HIC &times; LMIC ex China</label>
+  <a id="hsdl" href="#" onclick="hsdl();return false;"
+     style="font-size:13px;">&#11015; Download data (CSV)</a>
+</div>
+%s%s
+<script>
+function hskey(){
+  var um=document.getElementById("hsum").checked ? "noum" : "all";
+  var cb=document.getElementById("hscol").checked ? "on" : "off";
+  return document.getElementById("hsuniv").value + "-"
+       + document.getElementById("hsstat").value + "-" + um + "-" + cb + "-"
+       + document.getElementById("hsmetric").value;
+}
+function hsurl(){
+  var p=new URLSearchParams();
+  p.set("metric",  document.getElementById("hsmetric").value);
+  p.set("universe",document.getElementById("hsuniv").value);
+  p.set("status",  document.getElementById("hsstat").value);
+  p.set("noum",    document.getElementById("hsum").checked ? "1" : "0");
+  p.set("collab",  document.getElementById("hscol").checked ? "1" : "0");
+  history.replaceState(null,"",location.pathname+"?"+p.toString());
+}
+function hsupd(){
+  var all=document.querySelectorAll(\'img[id^="hs-"]\');
+  for(var i=0;i<all.length;i++) all[i].style.display="none";
+  var el=document.getElementById("hs-"+hskey());
+  if(el) el.style.display="";
+  hsurl();
+}
+function hsdl(){ var a=document.getElementById("csv-"+hskey()); if(a) a.click(); }
+function hsload(){
+  var p=new URLSearchParams(location.search);
+  var m=p.get("metric");   if(m) document.getElementById("hsmetric").value=m;
+  var u=p.get("universe"); if(u) document.getElementById("hsuniv").value=u;
+  var s=p.get("status");   if(s) document.getElementById("hsstat").value=s;
+  var n=p.get("noum");     if(n!==null) document.getElementById("hsum").checked=(n==="1");
+  var c=p.get("collab");   if(c!==null) document.getElementById("hscol").checked=(c==="1");
+  hsupd();
+}
+hsload();
+</script>', imgs, csvs))
+```
+
+**Note.** Bars show the mean of the selected **Metric** per innovation, grouped
+by technology field and by origin income group (HIC, LMIC ex China, China), with
+±1 SEM error bars over families. Ticking **show HIC × LMIC ex China** adds a
+fourth bar (darker orange) for the collaboration subset — families with at least
+one high-income and one non-China LMIC attribution; those families also count in
+the HIC and LMIC ex China bars, so the group is an overlapping cut rather than a
+disjoint one. All three metrics are built on the HIC-flow
+spillover value `ev_HIC` using the standard iseapp formulas:
+**ev** = `ev_HIC` (\$ millions); **istrax** = `((alpha+1)/cost)·ev_HIC·[pv ≤ 2·cost]`;
+**avstrax** = `(pv + ev_HIC)/cost`. istrax and avstrax are reported as
+percentages (×100) and are defined only for families with a positive estimated
+R&D cost. Innovations are attributed to income groups by the country codes on
+the patent family (inventor and owner locations in the iseapp 2025 database); a
+family spanning several groups contributes once to each. The technology fields
+use the iseapp `tech_group` classification; "All innovations" imposes no
+technology filter. The **Universe** dropdown switches between all patents and
+multi-country patents (`fam_size_min2`); the **Status** dropdown between all
+applications and granted patents only (`granted`); ticking **exclude utility
+models** drops utility-model families (`is_um`).
+The **Download data (CSV)** link exports the exact numbers behind the currently
+selected view (technology, origin group, mean and SEM).
+
+```{r cleanup, include=FALSE}
+dbDisconnect(con, shutdown = TRUE)
+```

@@ -757,18 +757,28 @@ hglobe_module_server <- function(id, con) {
         if (is.null(df) || nrow(df) == 0) return(NULL)
 
         rows <- lapply(seq_len(nrow(df)), function(i) {
-          g     <- df$gen[i]
-          cb_id <- sprintf("show_gen_%d", g)
-          prev  <- shiny::isolate(input[[cb_id]])
-          val   <- if (is.null(prev)) TRUE else isTRUE(prev)
+          g       <- df$gen[i]
+          node_id <- sprintf("show_nodes_gen_%d", g)
+          edge_id <- sprintf("show_edges_gen_%d", g)
+          node_prev <- shiny::isolate(input[[node_id]])
+          node_val  <- if (is.null(node_prev)) TRUE else isTRUE(node_prev)
+          edge_prev <- shiny::isolate(input[[edge_id]])
+          edge_val  <- if (is.null(edge_prev)) TRUE else isTRUE(edge_prev)
           fmt_num <- function(x) {
             if (is.null(x) || length(x) == 0 || is.na(x)) "—"
             else format(x, big.mark = ",", digits = 4, scientific = FALSE)
           }
           shiny::tags$tr(
             shiny::tags$td(
-              shiny::checkboxInput(ns(cb_id), label = NULL, value = val,
+              shiny::checkboxInput(ns(node_id), label = NULL, value = node_val,
                                    width = "30px")
+            ),
+            # Gen 0 is the seed set and has no incoming citation arcs, so
+            # there is no edge layer to toggle — leave that cell empty.
+            shiny::tags$td(
+              if (g == 0L) NULL
+              else shiny::checkboxInput(ns(edge_id), label = NULL,
+                                        value = edge_val, width = "30px")
             ),
             shiny::tags$td(shiny::HTML(df$color[i])),
             shiny::tags$td(df$step[i]),
@@ -784,7 +794,8 @@ hglobe_module_server <- function(id, con) {
           class = "table table-sm table-striped table-hover",
           style = "width: 100%;",
           shiny::tags$thead(shiny::tags$tr(
-            shiny::tags$th("Show"),
+            shiny::tags$th("Nodes"),
+            shiny::tags$th("Edges"),
             shiny::tags$th("Color"),
             shiny::tags$th("Step"),
             shiny::tags$th("Avg flow (pop)"),
@@ -797,20 +808,31 @@ hglobe_module_server <- function(id, con) {
         )
       })
 
-      # When any "Show" checkbox toggles, push showGroup/hideGroup to the
-      # map for that generation. This is a CSS-class flip on the existing
-      # leaflet layer — no re-query, no re-render, cheap regardless of how
-      # many edges or markers are in the group.
+      # When any "Nodes"/"Edges" checkbox toggles, push showGroup/hideGroup
+      # to the map for that generation. Nodes (circle markers) and edges
+      # (citation arcs) live in separate leaflet groups — gen_<N>_nodes and
+      # gen_<N>_edges — so each can be toggled independently. This is a
+      # CSS-class flip on the existing leaflet layer — no re-query, no
+      # re-render, cheap regardless of how many edges or markers there are.
       shiny::observe({
         df <- stats_rv()
         if (is.null(df) || nrow(df) == 0) return()
         proxy <- leaflet::leafletProxy("map")
         for (g in df$gen) {
-          val   <- input[[sprintf("show_gen_%d", g)]]
-          show  <- if (is.null(val)) TRUE else isTRUE(val)
-          group <- sprintf("gen_%d", g)
-          if (show) leaflet::showGroup(proxy, group)
-          else      leaflet::hideGroup(proxy, group)
+          nval       <- input[[sprintf("show_nodes_gen_%d", g)]]
+          show_nodes <- if (is.null(nval)) TRUE else isTRUE(nval)
+          ngroup     <- sprintf("gen_%d_nodes", g)
+          if (show_nodes) leaflet::showGroup(proxy, ngroup)
+          else            leaflet::hideGroup(proxy, ngroup)
+
+          # Gen 0 has no edge layer (it is the seed set).
+          if (g > 0L) {
+            eval2      <- input[[sprintf("show_edges_gen_%d", g)]]
+            show_edges <- if (is.null(eval2)) TRUE else isTRUE(eval2)
+            egroup     <- sprintf("gen_%d_edges", g)
+            if (show_edges) leaflet::showGroup(proxy, egroup)
+            else            leaflet::hideGroup(proxy, egroup)
+          }
         }
       })
 
@@ -830,9 +852,10 @@ hglobe_module_server <- function(id, con) {
         if (is.null(df) || nrow(df) == 0) return()
 
         # Filter to visible generations using the same default-TRUE rule
-        # as the show/hide handler above.
+        # as the show/hide handler above. The swatches are circles, so a
+        # generation appears in the legend when its nodes are shown.
         keep <- vapply(df$gen, function(g) {
-          val <- input[[sprintf("show_gen_%d", g)]]
+          val <- input[[sprintf("show_nodes_gen_%d", g)]]
           if (is.null(val)) TRUE else isTRUE(val)
         }, logical(1))
         vis <- df[keep, , drop = FALSE]
@@ -1325,7 +1348,7 @@ hglobe_module_server <- function(id, con) {
             fillColor    = ifelse(isTRUE(dat$geocode_missing),
                                   "#bbbbbb", pick_color(0)),
             popup        = popup_txt,
-            group        = "gen_0"
+            group        = "gen_0_nodes"
           )
       })
 
@@ -1623,7 +1646,8 @@ hglobe_module_server <- function(id, con) {
         tgt_link <- espacenet_link(tgt_pts$tgt_appln_id)
         tgt_link_html <- ifelse(is.na(tgt_link), "(no appln id)", tgt_link)
 
-        gen_group <- sprintf("gen_%d", g)
+        node_group <- sprintf("gen_%d_nodes", g)
+        edge_group <- sprintf("gen_%d_edges", g)
         m <- leaflet::leafletProxy("map") |>
           leaflet::addCircleMarkers(
             lng         = tgt_pts$tgt_lon,
@@ -1643,7 +1667,7 @@ hglobe_module_server <- function(id, con) {
               format(tgt_pts$toflow_val, big.mark = ",",
                      digits = 4, scientific = FALSE)
             ),
-            group       = gen_group
+            group       = node_group
           )
         for (i in seq_len(nrow(edges))) {
           cv <- make_curve(edges$src_lon[i], edges$src_lat[i],
@@ -1655,7 +1679,7 @@ hglobe_module_server <- function(id, con) {
               color   = col,
               weight  = 1,
               opacity = 0.35,
-              group   = gen_group
+              group   = edge_group
             )
         }
         TRUE

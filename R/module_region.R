@@ -17,6 +17,29 @@ region_module_sidebar <- function(id) {
   shiny::div(
     style = "display: flex; flex-direction: column; gap: 20px;",
 
+    # --- Apply settings ---
+    # Charts are deliberately NOT live-reactive to sidebar edits: each
+    # change used to fire the expensive DuckDB queries while the user
+    # was still mid-edit. Every figure render in the server is gated on
+    # this button (see `apply_trigger` there), so users batch their
+    # changes and apply them in one go.
+    shiny::div(
+      shiny::actionButton(
+        inputId = ns("apply_settings"),
+        label   = "Apply settings",
+        icon    = shiny::icon("rotate"),
+        class   = "btn-primary",
+        width   = "100%"
+      ),
+      shiny::div(
+        "Charts update only when you press Apply.",
+        style = paste0(
+          "font-size: 0.75rem; color: #777; margin-top: 4px; ",
+          "text-align: center;"
+        )
+      )
+    ),
+
     # --- Always visible: Region, Firm ---
     shiny::div(
       shiny::h5("GLOBAL FILTERS", style = "font-weight: 600; margin-bottom: 10px;"),
@@ -390,6 +413,20 @@ region_module_server <- function(id, parent_session, con) {
       # Reactive store for ggplot objects and data (for download handlers)
       plot_store <- shiny::reactiveValues()
 
+      # ── Deferred settings: the "Apply settings" button ────────────────
+      # All figure renders below (and the query reactives feeding them)
+      # are gated with `shiny::bindEvent(apply_trigger())`, so editing a
+      # sidebar control no longer recomputes anything — the expensive
+      # DuckDB queries run only when the user clicks "Apply settings".
+      # Unlike the country module, every input the renders `req()` here
+      # has a static UI default available at page load, so the initial
+      # render of each tab happens on first visibility without a click
+      # and no tree-readiness observers are needed.
+      apply_trigger <- shiny::reactiveVal(0L)
+      shiny::observeEvent(input$apply_settings, {
+        apply_trigger(shiny::isolate(apply_trigger()) + 1L)
+      })
+
       # Expand "All categories" / handle "Clear all categories" in both
       # tech inputs.
       shiny::observeEvent(input$tech_categories_plot1_region, {
@@ -543,7 +580,8 @@ region_module_server <- function(id, parent_session, con) {
 
       }) |> shiny::bindCache(input$toflow_region, input$region, input$techs_region,
                              sort(input$firm), input$top_n_ids_region,
-                             isTRUE(input$granted_only), isTRUE(input$multifam_only), isTRUE(input$exclude_um))
+                             isTRUE(input$granted_only), isTRUE(input$multifam_only), isTRUE(input$exclude_um)) |>
+        shiny::bindEvent(apply_trigger())
 
       fallback_by_tech_region <- shiny::reactive({
         shiny::req(input$toflow_region, input$region, input$tech_categories_plot1_region)
@@ -600,7 +638,8 @@ region_module_server <- function(id, parent_session, con) {
 
       }) |> shiny::bindCache(input$toflow_region, input$region, input$tech_categories_plot1_region,
                              sort(input$firm), input$top_n_ids_region,
-                             isTRUE(input$granted_only), isTRUE(input$multifam_only), isTRUE(input$exclude_um))
+                             isTRUE(input$granted_only), isTRUE(input$multifam_only), isTRUE(input$exclude_um)) |>
+        shiny::bindEvent(apply_trigger())
       # ===== RENDER OUTPUTS =====
       
       # Plot 1: Returns by Technology
@@ -631,7 +670,7 @@ region_module_server <- function(id, parent_session, con) {
         } else {
           result
         }
-      })
+      }) |> shiny::bindEvent(apply_trigger())
       
       # Plot 2: Returns by Region
       output$avstrax_plot2_region <- ggiraph::renderGirafe({
@@ -668,7 +707,7 @@ region_module_server <- function(id, parent_session, con) {
         } else {
           result
         }
-      })
+      }) |> shiny::bindEvent(apply_trigger())
       
       # UK Map: Returns
       output$uk_regions_map <- leaflet::renderLeaflet({
@@ -700,7 +739,7 @@ region_module_server <- function(id, parent_session, con) {
           plot_title   = map_title,
           is_return    = is_return
         )
-      })
+      }) |> shiny::bindEvent(apply_trigger())
       
       # RTA Plot: Returns by Region (RTA version)
       output$avstrax_plot2_region_rta <- ggiraph::renderGirafe({
@@ -736,7 +775,7 @@ region_module_server <- function(id, parent_session, con) {
         } else {
           result
         }
-      })
+      }) |> shiny::bindEvent(apply_trigger())
       
       # RTA Scatter: RTA vs Returns
       output$rta_returns_scatter_region <- ggiraph::renderGirafe({
@@ -765,7 +804,7 @@ region_module_server <- function(id, parent_session, con) {
         } else {
           result
         }
-      })
+      }) |> shiny::bindEvent(apply_trigger())
       
       # UK Map: RTA
       output$uk_regions_map_rta <- leaflet::renderLeaflet({
@@ -802,7 +841,7 @@ region_module_server <- function(id, parent_session, con) {
           plot_title   = rta_title,
           is_return    = FALSE
         )
-      })
+      }) |> shiny::bindEvent(apply_trigger())
 
       # ── Download handlers ──────────────────────────────────────────────────
       # SVG + CSV for girafe plots

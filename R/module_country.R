@@ -19,6 +19,30 @@ country_module_sidebar <- function(id) {
   shiny::div(
     style = "display: flex; flex-direction: column; gap: 20px;",
 
+    # --- Apply settings ---
+    # Charts are deliberately NOT live-reactive to sidebar edits: each
+    # change used to fire the expensive DuckDB queries while the user
+    # was still mid-edit. Every figure render in the server is gated on
+    # this button (see `apply_trigger` there), so users batch their
+    # changes and apply them in one go. HiGGlo has its own "Render Map"
+    # button and needs no equivalent.
+    shiny::div(
+      shiny::actionButton(
+        inputId = ns("apply_settings"),
+        label   = "Apply settings",
+        icon    = shiny::icon("rotate"),
+        class   = "btn-primary",
+        width   = "100%"
+      ),
+      shiny::div(
+        "Charts update only when you press Apply.",
+        style = paste0(
+          "font-size: 0.75rem; color: #777; margin-top: 4px; ",
+          "text-align: center;"
+        )
+      )
+    ),
+
     # --- Always visible: Country, Firm --- (foldable, open by default)
     shiny::tags$details(
       open = NA,
@@ -661,6 +685,31 @@ country_module_server <- function(id, parent_session, con) {
       # Reactive store for ggplot objects and data (for download handlers)
       plot_store <- shiny::reactiveValues()
 
+      # ── Deferred settings: the "Apply settings" button ────────────────
+      # All figure renders below (and the query reactives feeding them)
+      # are gated with `shiny::bindEvent(apply_trigger())`, so editing a
+      # sidebar control no longer recomputes anything — the expensive
+      # DuckDB queries run only when the user clicks "Apply settings".
+      # The shinyTree widgets initialise asynchronously (only once their
+      # sidebar panel becomes visible), so a one-shot observer per tree
+      # bumps the trigger when the tree's input first arrives; that gives
+      # every tab its initial render from the default selections without
+      # requiring a click.
+      apply_trigger <- shiny::reactiveVal(0L)
+      bump_apply    <- function() {
+        apply_trigger(shiny::isolate(apply_trigger()) + 1L)
+      }
+      shiny::observeEvent(input$apply_settings, bump_apply())
+      auto_apply_when_ready <- function(get_value) {
+        obs <- shiny::observe({
+          if (is.null(get_value())) return()
+          bump_apply()
+          obs$destroy()
+        })
+      }
+      auto_apply_when_ready(function() input$country_categories_tree)
+      auto_apply_when_ready(function() input$firm_categories_tree)
+
       # Server-side selectize for the City filter (Value flows by
       # Technology tab). Same reasoning as the HiGGlo module: we
       # leave `choices = NULL` in the UI and push the full list via
@@ -816,13 +865,40 @@ country_module_server <- function(id, parent_session, con) {
 
       output$firm_categories_tree <- shinyTree::renderTree(firm_tree_data)
 
-      # Live mirror: whenever the user checks/unchecks a leaf, write the
-      # current selection into the hidden persist input. The bookmark
-      # observer in server.R picks up its value automatically because
-      # the input is prefixed `country-`.
+      # Bars actually drawn in the "Value flow by firm" chart: the selection
+      # narrowed by the "Limit to top N" / "Min number of innovations"
+      # controls. Mirrors the filtering inside `plot_avstrax_by_firm()`
+      # (filter innos >= min_innos, rank by `mean`, keep the top N) so this
+      # set is exactly what the user sees — keep the two in sync if that
+      # ranking ever changes. Empty when nothing matches yet.
+      visible_firm_bars <- shiny::reactive({
+        pdata <- fallback_by_firm()
+        if (is.null(pdata) || nrow(pdata) == 0) return(character(0))
+
+        mi <- input$min_innos %||% 10
+        if (is.null(mi) || is.na(mi) || mi < 0) mi <- 10
+        d <- pdata |>
+          dplyr::filter(innos >= mi) |>
+          dplyr::arrange(dplyr::desc(mean))
+
+        lf <- input$limit_firms
+        if (!is.null(lf) && !is.na(lf) && lf > 0) d <- utils::head(d, lf)
+        as.character(d$technology)
+      })
+
+      # Live mirror: write the selection into the hidden persist input, which
+      # the bookmark observer in server.R serialises into the URL (the input
+      # is auto-included by the `country-` keep rule). We persist the bars
+      # that are actually *visible* rather than the full tree selection, so
+      # picking many firms but showing only a few keeps the shareable URL
+      # short. On restore those bars re-check the matching leaves and, with
+      # the (also bookmarked) filter values, reproduce the identical chart.
+      # Fall back to the full selection only when nothing is drawn yet, so
+      # the bookmark is never blanked while the chart is still computing.
       shiny::observe({
-        sel <- firm_categories_selected()
-        txt <- paste(sel, collapse = "||")
+        visible <- visible_firm_bars()
+        tokens  <- if (length(visible)) visible else firm_categories_selected()
+        txt <- paste(tokens, collapse = "||")
         shiny::updateTextInput(session, "firm_categories_picked_persist",
                                 value = txt)
       })
@@ -1028,30 +1104,39 @@ country_module_server <- function(id, parent_session, con) {
           out[pct_cols] <- out[pct_cols] * 100
         }
 
-        # Per-bar Balassa RTA (mirrors the per-country computation).
-        sum_allinnos <- sum(out$Allinnos, na.rm = TRUE)
-        out <- out |>
-          dplyr::mutate(
-            share_c = innos / Allinnos,
-            share   = sum(innos) / sum_allinnos,
-            RTA     = 2 * share_c / (share_c + share))
-
-        # Denominator for the RTA innovation-count tooltip: distinct families
-        # in the full dataset after country/firm/etc filters but WITHOUT the
-        # technology filter. Attached as an attribute (the numerator total is
-        # already the `allinnos` column).
-        attr(out, "denom") <- DBI::dbGetQuery(con, sql_universe_allinnos_v2(
+        # Universe denominator: distinct families in the full dataset after
+        # country/firm/etc filters but WITHOUT the technology filter. Used
+        # for the benchmark share below and for the RTA innovation-count
+        # tooltip (the numerator total is already the `allinnos` column).
+        denom <- DBI::dbGetQuery(con, sql_universe_allinnos_v2(
           toflow = input$toflow, country_sql = country_sql,
           firm_clause = firm_clause,
           granted_only = isTRUE(input$granted_only),
           multifam_only = isTRUE(input$multifam_only),
           exclude_um = isTRUE(input$exclude_um)))$allinnos[1]
+
+        # Per-bar Balassa RTA. The benchmark share must be independent of
+        # which categories happen to be selected: universe innovations in
+        # the selected techs (`allinnos`, from the combined query's
+        # overall_stats CTE) over universe innovations without the tech
+        # filter (`denom`). Summing innos/Allinnos over the selected bars
+        # instead moves every bar's RTA whenever a category is added —
+        # overlapping groups (e.g. HIC alongside US) get double-counted
+        # and the selection rarely spans the universe.
+        out <- out |>
+          dplyr::mutate(
+            share_c = innos / Allinnos,
+            share   = allinnos / denom,
+            RTA     = 2 * share_c / (share_c + share))
+
+        attr(out, "denom") <- denom
         out
       }) |> shiny::bindCache(
         input$toflow, input$country, sort(country_categories_selected()),
         sort(input$techs), sort(firm_filter_firms()), input$top_n_ids,
         isTRUE(input$granted_only), isTRUE(input$multifam_only),
-        isTRUE(input$exclude_um))
+        isTRUE(input$exclude_um)) |>
+        shiny::bindEvent(apply_trigger())
 
       # DuckDB query for Plot 1 (by-technology)
       fallback_by_tech <- shiny::reactive({
@@ -1114,7 +1199,8 @@ country_module_server <- function(id, parent_session, con) {
       }) |> shiny::bindCache(input$toflow, input$country, input$tech_categories_plot1,
                              sort(firm_filter_firms()), input$top_n_ids,
                              isTRUE(input$granted_only), isTRUE(input$multifam_only), isTRUE(input$exclude_um),
-                             sort(input$city), isTRUE(input$include_fallback))
+                             sort(input$city), isTRUE(input$include_fallback)) |>
+        shiny::bindEvent(apply_trigger())
 
       # DuckDB query for Plot 2 / World Map (by-country)
       fallback_by_country <- shiny::reactive({
@@ -1175,7 +1261,8 @@ country_module_server <- function(id, parent_session, con) {
 
       }) |> shiny::bindCache(input$toflow, input$country, input$techs,
                              sort(firm_filter_firms()), input$top_n_ids,
-                             isTRUE(input$granted_only), isTRUE(input$multifam_only), isTRUE(input$exclude_um))
+                             isTRUE(input$granted_only), isTRUE(input$multifam_only), isTRUE(input$exclude_um)) |>
+        shiny::bindEvent(apply_trigger())
 
       # Chart 1: Main avstrax plot
       output$avstrax_plot1 <- ggiraph::renderGirafe({
@@ -1208,7 +1295,7 @@ country_module_server <- function(id, parent_session, con) {
         } else {
           result
         }
-      })
+      }) |> shiny::bindEvent(apply_trigger())
 
       # ── Value flow by firm ──────────────────────────────────────────────
       # Mirror of `fallback_by_tech()` / `avstrax_plot1` but with the bar
@@ -1266,7 +1353,8 @@ country_module_server <- function(id, parent_session, con) {
                              sort(input$techs), input$top_n_ids,
                              isTRUE(input$granted_only),
                              isTRUE(input$multifam_only),
-                             isTRUE(input$exclude_um))
+                             isTRUE(input$exclude_um)) |>
+        shiny::bindEvent(apply_trigger())
 
       output$avstrax_plot_by_firm <- ggiraph::renderGirafe({
         req(input$country, input$toflow,
@@ -1297,7 +1385,7 @@ country_module_server <- function(id, parent_session, con) {
         } else {
           result
         }
-      })
+      }) |> shiny::bindEvent(apply_trigger())
 
       # Chart 2: Returns by Country for Selected Technologies
       output$avstrax_plot2 <- ggiraph::renderGirafe({
@@ -1335,7 +1423,7 @@ country_module_server <- function(id, parent_session, con) {
         } else {
           result
         }
-      })
+      }) |> shiny::bindEvent(apply_trigger())
       
       # World Map
       output$world_map <- plotly::renderPlotly({
@@ -1370,7 +1458,7 @@ country_module_server <- function(id, parent_session, con) {
           plot_title   = map_title,
           is_return    = is_return
         )
-      })
+      }) |> shiny::bindEvent(apply_trigger())
 
       # ── RTA Plots ─────────────────────────────────────────────────────────
 
@@ -1414,7 +1502,7 @@ country_module_server <- function(id, parent_session, con) {
         } else {
           result
         }
-      })
+      }) |> shiny::bindEvent(apply_trigger())
 
       # RTA vs Returns Scatter
       output$rta_returns_scatter <- ggiraph::renderGirafe({
@@ -1445,7 +1533,7 @@ country_module_server <- function(id, parent_session, con) {
         } else {
           result
         }
-      })
+      }) |> shiny::bindEvent(apply_trigger())
 
       # RTA vs GDP per Capita Scatter
       output$rta_gdp_scatter <- ggiraph::renderGirafe({
@@ -1474,7 +1562,7 @@ country_module_server <- function(id, parent_session, con) {
         } else {
           result
         }
-      })
+      }) |> shiny::bindEvent(apply_trigger())
 
       # World Map: RTA
       output$world_map_rta <- plotly::renderPlotly({
@@ -1512,7 +1600,7 @@ country_module_server <- function(id, parent_session, con) {
           plot_title   = rta_title,
           is_return    = FALSE
         )
-      })
+      }) |> shiny::bindEvent(apply_trigger())
 
       # ── Download handlers ──────────────────────────────────────────────────
       # SVG + CSV for girafe plots
