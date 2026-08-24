@@ -7,6 +7,57 @@ rsconnect::writeManifest()
 
 ## Data pipeline notes
 
+### No BigQuery (changed 2026-08-24)
+
+`data-raw-2025/01-build-app-parquets.R` no longer uses `bigrquery`. The four
+tables it used to download from `patbis.fromPATSTAT2025` are read as parquet
+from `<dropbox>/PATSTAT autumn 2025 data/patstat_clean/` via DuckDB:
+
+- `tls225_docdb_fam_cpc` -> `cpcs.fst` (space-stripping pushed into SQL, and
+  `docdb_family_id` cast to INTEGER -- DuckDB maps BIGINT to double, whereas
+  `bq_table_download()` defaulted to `bigint = "integer"`)
+- `tls201_appln` -> the granted-family and family-size sets
+
+`bq_cache()` source ids changed accordingly, so a cache built from BigQuery is
+refreshed once rather than silently reused. Tune the scan with
+`ISEAPP_DUCK_MEMORY` (default 8GB).
+
+`whole_databuild_pipeline.R` gains `HARMONIZATION_BACKEND`, defaulting to
+`"duckdb"` -- the country harmonisation now runs locally via
+`LMICinnovation/code2025/build_countries_harm_duck.R` (override with
+`LMIC_HARM_SCRIPT`). Set `HARMONIZATION_BACKEND="bq"` for the old path.
+
+### Publishing to Dropbox (added 2026-08-24)
+
+`data-raw-2025/publish_to_dropbox.R` copies
+
+    inst/extdata/*.parquet  ->  <dropbox>/iseapp/database/
+
+and writes a `manifest.json`. It runs automatically at the end of
+`01-build-app-parquets.R` and again as the last step of
+`whole_databuild_pipeline.R`, so `citenet.parquet` (built in step 4) is
+included. Files already identical are skipped. `ISEAPP_NO_PUBLISH=1` skips it;
+`publish_iseapp_database(dry_run = TRUE)` previews.
+
+**This did not exist before** -- the shared copy was maintained by hand, so
+nothing guaranteed it matched the build. `LMICinnovation/code2025` and
+`code_linkedin` both read `<dropbox>/iseapp/database/`.
+
+Note the destination is `<dropbox>/iseapp/`, **not** `<dropbox>/Apps/iseapp/`.
+Two different folders, easy to conflate: `Apps/iseapp/` holds the legacy
+assets (`istraxes/`, `inglobe/`, `duck/`, `LMICinnovation_repo/`).
+
+### Country definitions (changed 2026-08-24)
+
+`01-build-app-parquets.R` no longer hardcodes `lmics` / `eu_countries`. It
+sources `LMICinnovation/code2025/country_definitions.R` (override with
+`LMIC_COUNTRY_DEFS`), so `inst/extdata/country_lookup.parquet` is a derived
+artefact of the same definition the paper uses rather than a second copy that
+happens to match. Do not invert that: `country_lookup.parquet` only covers
+countries observed in the patent data, so deriving the LMIC list from it would
+drop GW, ST, TD and TL and reclassify them as high income.
+
+
 ### `RUN_VERSION` (added 2026-05-10)
 
 `data-raw-2025/01-build-app-parquets.R` now reads from
