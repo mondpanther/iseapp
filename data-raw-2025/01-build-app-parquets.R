@@ -1205,10 +1205,21 @@ tech_group_map <- c(
 )
 
 # ---- Country group boolean flags ----
-all_iso2     <- unique(na.omit(countrycode::codelist$iso2c))
-lmics        <- c("AF","AL","DZ","AO","AR","AM","AZ","BD","BJ","BO","BA","BW","BR","BG","BF","BI","KH","CM","CV","CF","TD","CL","CN","CO","KM","CG","CR","CI","CU","DJ","DM","DO","EC","EG","SV","GQ","ER","ET","FJ","GA","GM","GE","GH","GT","GN","GW","GY","HT","HN","IN","ID","IR","IQ","JM","JO","KZ","KE","KI","KP","KG","LA","LB","LS","LR","LY","MG","MW","MY","MV","ML","MR","MU","MX","MD","MN","ME","MA","MZ","MM","NA","NP","NI","NE","NG","MK","PK","PW","PA","PG","PY","PE","PH","RW","WS","ST","SN","RS","SC","SL","SB","SO","ZA","LK","SD","SR","SY","TJ","TZ","TH","TL","TG","TO","TN","TR","TM","TV","UG","UA","UZ","VU","VE","VN","YE","ZM","ZW")
-eu_countries <- c("AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU","IE","IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE")
-hic          <- setdiff(all_iso2, lmics)
+# The LMIC / EU / HIC definitions are NOT restated here. They come from
+# LMICinnovation/code2025/country_definitions.R, which the paper pipeline reads
+# too, so country_lookup.parquet below is a derived artefact of exactly the
+# definition the analysis uses -- rather than a second copy that happens to
+# match. (They did match when this was checked on 2026-08-24; nothing enforced
+# it.) Point LMIC_COUNTRY_DEFS at the file if your checkout is elsewhere.
+country_defs <- Sys.getenv(
+  "LMIC_COUNTRY_DEFS",
+  path.expand("~/github/LMICinnovation/code2025/country_definitions.R"))
+if (!file.exists(country_defs))
+  stop("Country definitions not found at ", country_defs,
+       "\nThey live in LMICinnovation/code2025/. Set LMIC_COUNTRY_DEFS to the path.")
+source(country_defs)   # all_countries, lmics, lmics_excl_china, eu_countries, hic
+
+all_iso2 <- all_countries
 
 # -- patents_x_tech --
 # Filter to families that actually end up in the main database. The full
