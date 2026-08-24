@@ -21,7 +21,6 @@ library(tictoc)
 library(jsonlite)
 library(DBI)
 library(duckdb)
-library(bigrquery)
 
 # Raise R's per-process vector memory ceiling. The patchar_slim x countrymap
 # cross-join transiently materialises ~230M rows x ~25 doubles, which exceeds
@@ -207,28 +206,39 @@ cat("patstat_clean:", patstat_clean, "\n")
 cat("iseapp_dir:   ", iseapp_dir,   "\n\n")
 
 # ============================================================================
-# STEP 1: Build CPC base table from BigQuery
-# Source: patbis.fromPATSTAT2025.tls225_docdb_fam_cpc
+# STEP 1: Build CPC base table from patstat_clean
+# Source: <dropbox>/PATSTAT autumn 2025 data/patstat_clean/tls225_docdb_fam_cpc.parquet
+# (was BigQuery patbis.fromPATSTAT2025.tls225_docdb_fam_cpc -- the same table,
+#  read straight off the shared Dropbox parquet so no Google credentials are
+#  needed. The space-stripping is pushed down into DuckDB.)
 # ============================================================================
 
 cpcs_cache <- file.path(bigdata_dir, "cpcs.fst")
 
-library(bigrquery)
-library(DBI)
+# One DuckDB connection reused by every patstat_clean query in this script.
+patstat_parquet <- function(table)
+  file.path(patstat_clean, paste0(table, ".parquet"))
+
+pq_lit <- function(x) gsub("'", "''", x, fixed = TRUE)
+
+pq_con <- dbConnect(duckdb::duckdb())
+dbExecute(pq_con, sprintf("SET memory_limit='%s'",
+                          Sys.getenv("ISEAPP_DUCK_MEMORY", "8GB")))
+dbExecute(pq_con, sprintf("SET temp_directory='%s'",
+                          normalizePath(bigdata_dir, mustWork = FALSE)))
+
+patstat_query <- function(sql) as.data.table(dbGetQuery(pq_con, sql))
 
 cpcs <- bq_cache(
   cache_path = cpcs_cache,
-  source_id  = "fromPATSTAT2025.tls225_docdb_fam_cpc",
+  source_id  = "patstat_clean.tls225_docdb_fam_cpc",
   fetch_fn   = function() {
-    tic("CPC base (BigQuery)")
-    x <- bq_table_download(
-      bq_table("patbis", "fromPATSTAT2025", "tls225_docdb_fam_cpc"),
-      page_size = 50000
-    ) |>
-      dplyr::select(docdb_family_id, cpc_class_symbol)
-    setDT(x)
-    # Strip all spaces from CPC symbols for matching
-    x[, cpc_class_symbol := stri_replace_all_fixed(cpc_class_symbol, " ", "")]
+    tic("CPC base (patstat_clean parquet)")
+    x <- patstat_query(sprintf("
+      SELECT docdb_family_id,
+             replace(cpc_class_symbol, ' ', '') AS cpc_class_symbol
+      FROM read_parquet('%s')",
+      pq_lit(patstat_parquet("tls225_docdb_fam_cpc"))))
     gc()
     toc()
     x
@@ -710,19 +720,16 @@ if (FAMILY_SIZE_MIN > 1L) {
   eligible <- bq_cache(
     cache_path = cache,
     source_id  = sprintf(
-      "fromPATSTAT2025.tls201_appln (docdb_family_size>=%d)",
+      "patstat_clean.tls201_appln (docdb_family_size>=%d)",
       as.integer(FAMILY_SIZE_MIN)),
     fetch_fn   = function() {
-      sql <- sprintf("
+      patstat_query(sprintf("
         SELECT DISTINCT docdb_family_id
-        FROM `patbis.fromPATSTAT2025.tls201_appln`
+        FROM read_parquet('%s')
         WHERE docdb_family_size >= %d
-          AND docdb_family_id IS NOT NULL
-      ", as.integer(FAMILY_SIZE_MIN))
-      as.data.table(bq_table_download(
-        bq_project_query("patbis", sql),
-        page_size = 200000, bigint = "integer"
-      ))
+          AND docdb_family_id IS NOT NULL",
+        pq_lit(patstat_parquet("tls201_appln")),
+        as.integer(FAMILY_SIZE_MIN)))
     }
   )
 
@@ -743,22 +750,19 @@ if (FAMILY_SIZE_MIN > 1L) {
 # ---- Pull granted-family set from BigQuery ---------------------------------
 # Used later to attach a per-family `granted` boolean column to
 # patent_database, so the Shiny UI can filter by grant status at query time.
-cat("\nFetching granted-family set from BigQuery ...\n")
+cat("\nFetching granted-family set from patstat_clean ...\n")
 tic("granted-family fetch")
 granted_cache <- file.path(bigdata_dir, "fam_granted.parquet")
 granted_fams <- bq_cache(
   cache_path = granted_cache,
-  source_id  = "fromPATSTAT2025.tls201_appln (granted='Y')",
+  source_id  = "patstat_clean.tls201_appln (granted='Y')",
   fetch_fn   = function() {
-    as.data.table(bq_table_download(
-      bq_project_query("patbis", "
-        SELECT DISTINCT docdb_family_id
-        FROM `patbis.fromPATSTAT2025.tls201_appln`
-        WHERE granted = 'Y'
-          AND docdb_family_id IS NOT NULL
-      "),
-      page_size = 200000, bigint = "integer"
-    ))
+    patstat_query(sprintf("
+      SELECT DISTINCT docdb_family_id
+      FROM read_parquet('%s')
+      WHERE granted = 'Y'
+        AND docdb_family_id IS NOT NULL",
+      pq_lit(patstat_parquet("tls201_appln"))))
   }
 )
 toc()
@@ -769,22 +773,19 @@ toc()
 # We always materialise this list, regardless of the build-time
 # FAMILY_SIZE_MIN setting, so the runtime filter can be toggled
 # independently of the build-time scope.
-cat("\nFetching fam_size>=2 set from BigQuery ...\n")
+cat("\nFetching fam_size>=2 set from patstat_clean ...\n")
 tic("multifam-family fetch")
 multifam_cache <- file.path(bigdata_dir, "fam_size_min2.parquet")
 multifam_fams <- bq_cache(
   cache_path = multifam_cache,
-  source_id  = "fromPATSTAT2025.tls201_appln (docdb_family_size>=2)",
+  source_id  = "patstat_clean.tls201_appln (docdb_family_size>=2)",
   fetch_fn   = function() {
-    as.data.table(bq_table_download(
-      bq_project_query("patbis", "
-        SELECT DISTINCT docdb_family_id
-        FROM `patbis.fromPATSTAT2025.tls201_appln`
-        WHERE docdb_family_size >= 2
-          AND docdb_family_id IS NOT NULL
-      "),
-      page_size = 200000, bigint = "integer"
-    ))
+    patstat_query(sprintf("
+      SELECT DISTINCT docdb_family_id
+      FROM read_parquet('%s')
+      WHERE docdb_family_size >= 2
+        AND docdb_family_id IS NOT NULL",
+      pq_lit(patstat_parquet("tls201_appln"))))
   }
 )
 toc()
@@ -1536,3 +1537,6 @@ for (f in list.files(bigdata_dir, pattern = "\\.fst$")) {
   cat("  ", f, ":", round(sz / 1024^2, 1), "MB\n")
 }
 cat("  istraxes/:", length(list.files(file.path(bigdata_dir, "istraxes"))), "files\n")
+
+# ---- Release the patstat_clean DuckDB connection ---------------------------
+try(dbDisconnect(pq_con, shutdown = TRUE), silent = TRUE)
