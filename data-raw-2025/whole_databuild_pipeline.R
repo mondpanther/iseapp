@@ -218,6 +218,23 @@ run_step("Build R/sysdata.rda for the app",
          "data-raw-2025/02-build-app-sysdata.R")
 
 # ============================================================================
+# 6. Publish to the shared Dropbox folder
+# ----------------------------------------------------------------------------
+# Runs last so citenet.parquet (step 4) is included. Copies
+#   inst/extdata/*.parquet -> <dropbox>/iseapp/database/
+#   .bigdata/cpcs.fst      -> <dropbox>/iseapp/bigdata/
+# which is what LMICinnovation/code2025 and code_linkedin actually read.
+# Files already identical are skipped. Set ISEAPP_NO_PUBLISH=1 to skip.
+# ============================================================================
+if (!toupper(Sys.getenv("ISEAPP_NO_PUBLISH", "")) %in% c("1", "TRUE", "T", "YES", "Y")) {
+  run_step("Publish database to <dropbox>/iseapp/",
+           "data-raw-2025/publish_to_dropbox.R")
+  try(publish_iseapp_database(), silent = FALSE)
+} else {
+  cat("\nISEAPP_NO_PUBLISH set - skipping the Dropbox publish step.\n")
+}
+
+# ============================================================================
 # Summary
 # ============================================================================
 total_min <- round(as.numeric(difftime(Sys.time(), pipeline_start,
@@ -231,5 +248,6 @@ cat("  .bigdata/holder_countries_harm.parquet\n")
 cat("  .bigdata/countrymap.fst\n")
 cat("  .bigdata/nationalkey.fst\n")
 cat("  inst/extdata/patent_database.parquet (+ lookup parquets)\n")
-cat("  R/sysdata.rda\n\n")
+cat("  R/sysdata.rda\n")
+cat("  <dropbox>/iseapp/database/*.parquet (published)\n\n")
 cat("Next: run/reload the Shiny app to pick up the new data.\n")

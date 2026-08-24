@@ -235,7 +235,7 @@ cpcs <- bq_cache(
   fetch_fn   = function() {
     tic("CPC base (patstat_clean parquet)")
     x <- patstat_query(sprintf("
-      SELECT docdb_family_id,
+      SELECT CAST(docdb_family_id AS INTEGER) AS docdb_family_id,
              replace(cpc_class_symbol, ' ', '') AS cpc_class_symbol
       FROM read_parquet('%s')",
       pq_lit(patstat_parquet("tls225_docdb_fam_cpc"))))
@@ -1540,3 +1540,27 @@ cat("  istraxes/:", length(list.files(file.path(bigdata_dir, "istraxes"))), "fil
 
 # ---- Release the patstat_clean DuckDB connection ---------------------------
 try(dbDisconnect(pq_con, shutdown = TRUE), silent = TRUE)
+
+
+# ============================================================================
+# PUBLISH: copy the built database to the shared Dropbox folder
+# ----------------------------------------------------------------------------
+# inst/extdata/*.parquet -> <dropbox>/iseapp/database/
+# .bigdata/cpcs.fst      -> <dropbox>/iseapp/bigdata/
+#
+# This used to be a manual copy, so nothing guaranteed the shared folder
+# matched the build -- and LMICinnovation/code2025 and code_linkedin both read
+# the shared folder. Now it happens on every rebuild.
+#
+# citenet.parquet is written later by 03-build-citenet.R, so the pipeline
+# publishes again at the end; publishing is a no-op for files already current.
+#
+# Skip with ISEAPP_NO_PUBLISH=1.
+# ============================================================================
+
+if (!toupper(Sys.getenv("ISEAPP_NO_PUBLISH", "")) %in% c("1", "TRUE", "T", "YES", "Y")) {
+  source("data-raw-2025/publish_to_dropbox.R")
+  try(publish_iseapp_database(), silent = FALSE)
+} else {
+  cat("\nISEAPP_NO_PUBLISH set - skipping the Dropbox publish step.\n")
+}
