@@ -128,7 +128,8 @@ publish_iseapp_database <- function(extdata  = "inst/extdata",
   }
 
   cat(sprintf("\n  %d published, %d already current, %d failed\n",
-              counts["published"], counts["current"], counts["failed"]))
+              as.integer(counts["published"]), as.integer(counts["current"]),
+              as.integer(counts["failed"])))
   if (counts["failed"] > 0)
     warning("publish_iseapp_database: ", counts["failed"], " file(s) failed to copy.")
   invisible(counts)
