@@ -23,10 +23,12 @@
 
 suppressMessages({ library(jsonlite) })
 
-# The .bigdata intermediates worth sharing. cpcs.fst is the one downstream
-# code actually reads (innopaper_results1.rmd, CPC-breadth series); the rest
-# stay local because they are cheap to rebuild or unused elsewhere.
-ISEAPP_SHARED_BIGDATA <- c("cpcs.fst")
+# .bigdata intermediates worth sharing. Currently none: cpcs.fst used to be
+# here, but LMICinnovation now reads tls225_docdb_fam_cpc from patstat_clean
+# directly (and caches only the per-family count), so publishing a 1.9 GB
+# duplicate bought nothing. Add a filename here if something downstream starts
+# needing one.
+ISEAPP_SHARED_BIGDATA <- character(0)
 
 .pub_dropbox_root <- function() {
   # Reuse the caller's resolver when sourced from 01-build-app-parquets.R,
