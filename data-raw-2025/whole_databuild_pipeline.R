@@ -43,15 +43,24 @@
 # -------- Options (override by assigning before source()) --------
 if (!exists("RUN_WATSON_CONVERT")) RUN_WATSON_CONVERT <- TRUE
 if (!exists("STOP_ON_ERROR"))      STOP_ON_ERROR      <- TRUE
-# Use the BigQuery-native harmonization rebuild (post-1999 scope, address-
-# inferred country codes, built from tls20* PATSTAT tables) rather than the
-# legacy local DuckDB version that consumes the inglobe bridges.
-if (!exists("USE_BQ_HARMONIZATION")) USE_BQ_HARMONIZATION <- TRUE
-# The BigQuery countrymap builder now lives in the patbis2025 repo (single
-# source of truth — it is Source 1 of the patbis innos_country build). iseapp
-# sources it from there. Override PATBIS_COUNTRYMAP_SCRIPT if your patbis
-# checkout is elsewhere. (.bigdata/ intermediates still land in the iseapp
-# cwd, as before, because source() runs the file in the current directory.)
+# Harmonization backend.
+#   "duckdb" (default) - build the harmonized country tables locally from the
+#     patstat_clean parquets on Dropbox. Same rule, same outputs, no Google
+#     credentials and no BigQuery billing. Script lives in the LMICinnovation
+#     repo (single source of truth); override LMIC_HARM_SCRIPT if your
+#     checkout is elsewhere.
+#   "bq" - the legacy BigQuery-native rebuild in the patbis2025 repo. Kept so
+#     a run can still be reproduced against BigQuery if ever needed.
+#   "local-inglobe" - the old local DuckDB version consuming the inglobe
+#     bridges.
+if (!exists("HARMONIZATION_BACKEND"))
+  HARMONIZATION_BACKEND <- Sys.getenv("HARMONIZATION_BACKEND", "duckdb")
+
+if (!exists("LMIC_HARM_SCRIPT"))
+  LMIC_HARM_SCRIPT <- Sys.getenv(
+    "LMIC_HARM_SCRIPT",
+    path.expand("~/github/LMICinnovation/code2025/build_countries_harm_duck.R"))
+
 if (!exists("PATBIS_COUNTRYMAP_SCRIPT"))
   PATBIS_COUNTRYMAP_SCRIPT <- Sys.getenv(
     "PATBIS_COUNTRYMAP_SCRIPT",
@@ -120,14 +129,33 @@ if (RUN_WATSON_CONVERT) {
 #   .bigdata/inventor_countries_harm.parquet
 #   .bigdata/holder_countries_harm.parquet
 # ============================================================================
-if (USE_BQ_HARMONIZATION) {
+if (identical(HARMONIZATION_BACKEND, "duckdb")) {
+  if (!file.exists(LMIC_HARM_SCRIPT))
+    stop("DuckDB harmonization builder not found at ", LMIC_HARM_SCRIPT,
+         "\nIt lives in LMICinnovation/code2025/. Set LMIC_HARM_SCRIPT to its path,",
+         "\nor set HARMONIZATION_BACKEND='bq' to fall back to BigQuery.")
+  cat("\n", strrep("=", 78), "\n", sep = "")
+  cat("STEP: Harmonize inventor/holder country codes (DuckDB over patstat_clean)\n")
+  cat("      ", LMIC_HARM_SCRIPT, "\n", sep = "")
+  cat(strrep("=", 78), "\n", sep = "")
+  harm_dir <- dirname(LMIC_HARM_SCRIPT)
+  source(file.path(harm_dir, "find_dropbox.R"))
+  source(file.path(harm_dir, "patstat_duck.R"))
+  source(LMIC_HARM_SCRIPT)
+  # iseapp keeps the country tables flat in .bigdata/, not .bigdata/data/.
+  build_countries_harm(
+    bigdatadir = ".bigdata",
+    out_inv    = file.path(".bigdata", "inventor_countries_harm.parquet"),
+    out_hold   = file.path(".bigdata", "holder_countries_harm.parquet"),
+    out_person = file.path(".bigdata", "persons_addr_inferred.parquet"))
+} else if (identical(HARMONIZATION_BACKEND, "bq")) {
   if (!file.exists(PATBIS_COUNTRYMAP_SCRIPT))
     stop("Countrymap builder not found at ", PATBIS_COUNTRYMAP_SCRIPT,
-         "\nIt now lives in the patbis2025 repo. Set PATBIS_COUNTRYMAP_SCRIPT to its path.")
+         "\nIt lives in the patbis2025 repo. Set PATBIS_COUNTRYMAP_SCRIPT to its path.")
   run_step("Harmonize inventor/holder country codes (BigQuery, from patbis2025)",
            PATBIS_COUNTRYMAP_SCRIPT)
 } else {
-  run_step("Harmonize inventor/holder country codes (local DuckDB)",
+  run_step("Harmonize inventor/holder country codes (local DuckDB, inglobe bridges)",
            "data-raw/build_inventor_countries_harm.R")
 }
 
@@ -190,6 +218,23 @@ run_step("Build R/sysdata.rda for the app",
          "data-raw-2025/02-build-app-sysdata.R")
 
 # ============================================================================
+# 6. Publish to the shared Dropbox folder
+# ----------------------------------------------------------------------------
+# Runs last so citenet.parquet (step 4) is included. Copies
+#   inst/extdata/*.parquet -> <dropbox>/iseapp/database/
+#   .bigdata/cpcs.fst      -> <dropbox>/iseapp/bigdata/
+# which is what LMICinnovation/code2025 and code_linkedin actually read.
+# Files already identical are skipped. Set ISEAPP_NO_PUBLISH=1 to skip.
+# ============================================================================
+if (!toupper(Sys.getenv("ISEAPP_NO_PUBLISH", "")) %in% c("1", "TRUE", "T", "YES", "Y")) {
+  run_step("Publish database to <dropbox>/iseapp/",
+           "data-raw-2025/publish_to_dropbox.R")
+  try(publish_iseapp_database(), silent = FALSE)
+} else {
+  cat("\nISEAPP_NO_PUBLISH set - skipping the Dropbox publish step.\n")
+}
+
+# ============================================================================
 # Summary
 # ============================================================================
 total_min <- round(as.numeric(difftime(Sys.time(), pipeline_start,
@@ -203,5 +248,6 @@ cat("  .bigdata/holder_countries_harm.parquet\n")
 cat("  .bigdata/countrymap.fst\n")
 cat("  .bigdata/nationalkey.fst\n")
 cat("  inst/extdata/patent_database.parquet (+ lookup parquets)\n")
-cat("  R/sysdata.rda\n\n")
+cat("  R/sysdata.rda\n")
+cat("  <dropbox>/iseapp/database/*.parquet (published)\n\n")
 cat("Next: run/reload the Shiny app to pick up the new data.\n")

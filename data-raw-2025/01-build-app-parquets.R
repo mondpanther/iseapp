@@ -21,7 +21,6 @@ library(tictoc)
 library(jsonlite)
 library(DBI)
 library(duckdb)
-library(bigrquery)
 
 # Raise R's per-process vector memory ceiling. The patchar_slim x countrymap
 # cross-join transiently materialises ~230M rows x ~25 doubles, which exceeds
@@ -207,28 +206,39 @@ cat("patstat_clean:", patstat_clean, "\n")
 cat("iseapp_dir:   ", iseapp_dir,   "\n\n")
 
 # ============================================================================
-# STEP 1: Build CPC base table from BigQuery
-# Source: patbis.fromPATSTAT2025.tls225_docdb_fam_cpc
+# STEP 1: Build CPC base table from patstat_clean
+# Source: <dropbox>/PATSTAT autumn 2025 data/patstat_clean/tls225_docdb_fam_cpc.parquet
+# (was BigQuery patbis.fromPATSTAT2025.tls225_docdb_fam_cpc -- the same table,
+#  read straight off the shared Dropbox parquet so no Google credentials are
+#  needed. The space-stripping is pushed down into DuckDB.)
 # ============================================================================
 
 cpcs_cache <- file.path(bigdata_dir, "cpcs.fst")
 
-library(bigrquery)
-library(DBI)
+# One DuckDB connection reused by every patstat_clean query in this script.
+patstat_parquet <- function(table)
+  file.path(patstat_clean, paste0(table, ".parquet"))
+
+pq_lit <- function(x) gsub("'", "''", x, fixed = TRUE)
+
+pq_con <- dbConnect(duckdb::duckdb())
+dbExecute(pq_con, sprintf("SET memory_limit='%s'",
+                          Sys.getenv("ISEAPP_DUCK_MEMORY", "8GB")))
+dbExecute(pq_con, sprintf("SET temp_directory='%s'",
+                          normalizePath(bigdata_dir, mustWork = FALSE)))
+
+patstat_query <- function(sql) as.data.table(dbGetQuery(pq_con, sql))
 
 cpcs <- bq_cache(
   cache_path = cpcs_cache,
-  source_id  = "fromPATSTAT2025.tls225_docdb_fam_cpc",
+  source_id  = "patstat_clean.tls225_docdb_fam_cpc",
   fetch_fn   = function() {
-    tic("CPC base (BigQuery)")
-    x <- bq_table_download(
-      bq_table("patbis", "fromPATSTAT2025", "tls225_docdb_fam_cpc"),
-      page_size = 50000
-    ) |>
-      dplyr::select(docdb_family_id, cpc_class_symbol)
-    setDT(x)
-    # Strip all spaces from CPC symbols for matching
-    x[, cpc_class_symbol := stri_replace_all_fixed(cpc_class_symbol, " ", "")]
+    tic("CPC base (patstat_clean parquet)")
+    x <- patstat_query(sprintf("
+      SELECT CAST(docdb_family_id AS INTEGER) AS docdb_family_id,
+             replace(cpc_class_symbol, ' ', '') AS cpc_class_symbol
+      FROM read_parquet('%s')",
+      pq_lit(patstat_parquet("tls225_docdb_fam_cpc"))))
     gc()
     toc()
     x
@@ -710,19 +720,16 @@ if (FAMILY_SIZE_MIN > 1L) {
   eligible <- bq_cache(
     cache_path = cache,
     source_id  = sprintf(
-      "fromPATSTAT2025.tls201_appln (docdb_family_size>=%d)",
+      "patstat_clean.tls201_appln (docdb_family_size>=%d)",
       as.integer(FAMILY_SIZE_MIN)),
     fetch_fn   = function() {
-      sql <- sprintf("
+      patstat_query(sprintf("
         SELECT DISTINCT docdb_family_id
-        FROM `patbis.fromPATSTAT2025.tls201_appln`
+        FROM read_parquet('%s')
         WHERE docdb_family_size >= %d
-          AND docdb_family_id IS NOT NULL
-      ", as.integer(FAMILY_SIZE_MIN))
-      as.data.table(bq_table_download(
-        bq_project_query("patbis", sql),
-        page_size = 200000, bigint = "integer"
-      ))
+          AND docdb_family_id IS NOT NULL",
+        pq_lit(patstat_parquet("tls201_appln")),
+        as.integer(FAMILY_SIZE_MIN)))
     }
   )
 
@@ -743,22 +750,19 @@ if (FAMILY_SIZE_MIN > 1L) {
 # ---- Pull granted-family set from BigQuery ---------------------------------
 # Used later to attach a per-family `granted` boolean column to
 # patent_database, so the Shiny UI can filter by grant status at query time.
-cat("\nFetching granted-family set from BigQuery ...\n")
+cat("\nFetching granted-family set from patstat_clean ...\n")
 tic("granted-family fetch")
 granted_cache <- file.path(bigdata_dir, "fam_granted.parquet")
 granted_fams <- bq_cache(
   cache_path = granted_cache,
-  source_id  = "fromPATSTAT2025.tls201_appln (granted='Y')",
+  source_id  = "patstat_clean.tls201_appln (granted='Y')",
   fetch_fn   = function() {
-    as.data.table(bq_table_download(
-      bq_project_query("patbis", "
-        SELECT DISTINCT docdb_family_id
-        FROM `patbis.fromPATSTAT2025.tls201_appln`
-        WHERE granted = 'Y'
-          AND docdb_family_id IS NOT NULL
-      "),
-      page_size = 200000, bigint = "integer"
-    ))
+    patstat_query(sprintf("
+      SELECT DISTINCT docdb_family_id
+      FROM read_parquet('%s')
+      WHERE granted = 'Y'
+        AND docdb_family_id IS NOT NULL",
+      pq_lit(patstat_parquet("tls201_appln"))))
   }
 )
 toc()
@@ -769,22 +773,19 @@ toc()
 # We always materialise this list, regardless of the build-time
 # FAMILY_SIZE_MIN setting, so the runtime filter can be toggled
 # independently of the build-time scope.
-cat("\nFetching fam_size>=2 set from BigQuery ...\n")
+cat("\nFetching fam_size>=2 set from patstat_clean ...\n")
 tic("multifam-family fetch")
 multifam_cache <- file.path(bigdata_dir, "fam_size_min2.parquet")
 multifam_fams <- bq_cache(
   cache_path = multifam_cache,
-  source_id  = "fromPATSTAT2025.tls201_appln (docdb_family_size>=2)",
+  source_id  = "patstat_clean.tls201_appln (docdb_family_size>=2)",
   fetch_fn   = function() {
-    as.data.table(bq_table_download(
-      bq_project_query("patbis", "
-        SELECT DISTINCT docdb_family_id
-        FROM `patbis.fromPATSTAT2025.tls201_appln`
-        WHERE docdb_family_size >= 2
-          AND docdb_family_id IS NOT NULL
-      "),
-      page_size = 200000, bigint = "integer"
-    ))
+    patstat_query(sprintf("
+      SELECT DISTINCT docdb_family_id
+      FROM read_parquet('%s')
+      WHERE docdb_family_size >= 2
+        AND docdb_family_id IS NOT NULL",
+      pq_lit(patstat_parquet("tls201_appln"))))
   }
 )
 toc()
@@ -1204,10 +1205,21 @@ tech_group_map <- c(
 )
 
 # ---- Country group boolean flags ----
-all_iso2     <- unique(na.omit(countrycode::codelist$iso2c))
-lmics        <- c("AF","AL","DZ","AO","AR","AM","AZ","BD","BJ","BO","BA","BW","BR","BG","BF","BI","KH","CM","CV","CF","TD","CL","CN","CO","KM","CG","CR","CI","CU","DJ","DM","DO","EC","EG","SV","GQ","ER","ET","FJ","GA","GM","GE","GH","GT","GN","GW","GY","HT","HN","IN","ID","IR","IQ","JM","JO","KZ","KE","KI","KP","KG","LA","LB","LS","LR","LY","MG","MW","MY","MV","ML","MR","MU","MX","MD","MN","ME","MA","MZ","MM","NA","NP","NI","NE","NG","MK","PK","PW","PA","PG","PY","PE","PH","RW","WS","ST","SN","RS","SC","SL","SB","SO","ZA","LK","SD","SR","SY","TJ","TZ","TH","TL","TG","TO","TN","TR","TM","TV","UG","UA","UZ","VU","VE","VN","YE","ZM","ZW")
-eu_countries <- c("AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU","IE","IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE")
-hic          <- setdiff(all_iso2, lmics)
+# The LMIC / EU / HIC definitions are NOT restated here. They come from
+# LMICinnovation/code2025/country_definitions.R, which the paper pipeline reads
+# too, so country_lookup.parquet below is a derived artefact of exactly the
+# definition the analysis uses -- rather than a second copy that happens to
+# match. (They did match when this was checked on 2026-08-24; nothing enforced
+# it.) Point LMIC_COUNTRY_DEFS at the file if your checkout is elsewhere.
+country_defs <- Sys.getenv(
+  "LMIC_COUNTRY_DEFS",
+  path.expand("~/github/LMICinnovation/code2025/country_definitions.R"))
+if (!file.exists(country_defs))
+  stop("Country definitions not found at ", country_defs,
+       "\nThey live in LMICinnovation/code2025/. Set LMIC_COUNTRY_DEFS to the path.")
+source(country_defs)   # all_countries, lmics, lmics_excl_china, eu_countries, hic
+
+all_iso2 <- all_countries
 
 # -- patents_x_tech --
 # Filter to families that actually end up in the main database. The full
@@ -1536,3 +1548,30 @@ for (f in list.files(bigdata_dir, pattern = "\\.fst$")) {
   cat("  ", f, ":", round(sz / 1024^2, 1), "MB\n")
 }
 cat("  istraxes/:", length(list.files(file.path(bigdata_dir, "istraxes"))), "files\n")
+
+# ---- Release the patstat_clean DuckDB connection ---------------------------
+try(dbDisconnect(pq_con, shutdown = TRUE), silent = TRUE)
+
+
+# ============================================================================
+# PUBLISH: copy the built database to the shared Dropbox folder
+# ----------------------------------------------------------------------------
+# inst/extdata/*.parquet -> <dropbox>/iseapp/database/
+# .bigdata/cpcs.fst      -> <dropbox>/iseapp/bigdata/
+#
+# This used to be a manual copy, so nothing guaranteed the shared folder
+# matched the build -- and LMICinnovation/code2025 and code_linkedin both read
+# the shared folder. Now it happens on every rebuild.
+#
+# citenet.parquet is written later by 03-build-citenet.R, so the pipeline
+# publishes again at the end; publishing is a no-op for files already current.
+#
+# Skip with ISEAPP_NO_PUBLISH=1.
+# ============================================================================
+
+if (!toupper(Sys.getenv("ISEAPP_NO_PUBLISH", "")) %in% c("1", "TRUE", "T", "YES", "Y")) {
+  source("data-raw-2025/publish_to_dropbox.R")
+  try(publish_iseapp_database(), silent = FALSE)
+} else {
+  cat("\nISEAPP_NO_PUBLISH set - skipping the Dropbox publish step.\n")
+}
