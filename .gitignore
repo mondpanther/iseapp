@@ -33,3 +33,6 @@ nul
 !.posit/publish/
 !.posit/publish/**/*.toml
 .positai
+
+# scratch: git lock/tmp files the Cowork device bridge cannot unlink
+_to_delete/
