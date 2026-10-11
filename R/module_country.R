@@ -98,8 +98,9 @@ country_module_sidebar <- function(id) {
             "Firm or Sector Group",
             title = paste0(
               "Tick firms to restrict the chart to them; ticking a sector ",
-              "folder selects every firm in it. Leave empty for no firm ",
-              "filter."
+              "folder selects every firm in it. \"All Scoreboard ",
+              "Companies\" keeps every family linked to any scoreboard firm. ",
+              "Leave empty for no firm filter."
             ),
             style = paste0(
               "font-weight: 500; font-size: 0.8rem; color: #555; ",
@@ -778,9 +779,11 @@ country_module_server <- function(id, parent_session, con) {
 
       # ── Foldable tree for "Sector and firm categories" (firm tab) ─────
       # Two top-level branches, both built from `firm_sector_groups`:
-      #   • "Broad sectors"    — one leaf per ICB sector; ticking a leaf
-      #                          adds a single aggregate bar for that whole
-      #                          sector.
+      #   • "Broad sectors"    — an "All Scoreboard Companies" leaf (one
+      #                          aggregate bar over every scoreboard-matched
+      #                          family) followed by one leaf per ICB
+      #                          sector; ticking a leaf adds a single
+      #                          aggregate bar for that whole sector.
       #   • "Individual firms" — the same sectors as sub-folders, each
       #                          holding its firm leaves; ticking a firm
       #                          adds that firm's own bar (ticking a
@@ -832,11 +835,12 @@ country_module_server <- function(id, parent_session, con) {
           )
         }
 
-        agg_sel  <- intersect(picks, names(firm_sector_groups))  # aggregates
-        firm_sel <- setdiff(picks, names(firm_sector_groups))    # individuals
+        agg_sel  <- intersect(picks, firm_group_names())  # aggregates
+        firm_sel <- setdiff(picks, firm_group_names())    # individuals
 
-        # Branch 1 — aggregate-sector leaves (open by default; it's short).
-        broad <- lapply(stats::setNames(nm = names(firm_sector_groups)),
+        # Branch 1 — aggregate leaves: "All Scoreboard Companies" first,
+        # then one per ICB sector (open by default; it's short).
+        broad <- lapply(stats::setNames(nm = firm_group_names()),
                         function(sec) {
           node <- ""
           if (sec %in% agg_sel) attr(node, "stselected") <- TRUE
@@ -926,10 +930,10 @@ country_module_server <- function(id, parent_session, con) {
           anc <- attr(node, "ancestry")
           top <- if (length(anc)) anc[[1]] else NA_character_
           if (identical(top, broad_branch) &&
-              nm %in% names(firm_sector_groups)) {
+              nm %in% firm_group_names()) {
             agg_secs <- c(agg_secs, nm)
           } else if (identical(top, firms_branch) &&
-                     !(nm %in% names(firm_sector_groups))) {
+                     !(nm %in% firm_group_names())) {
             firms <- c(firms, nm)
           }
         }

@@ -67,8 +67,9 @@ hglobe_module_sidebar <- function(id) {
           "Firm or Sector Group",
           title = paste0(
             "Tick firms to restrict the map to them; ticking a sector ",
-            "folder selects every firm in it. Leave empty for no firm ",
-            "filter."
+            "folder selects every firm in it. \"All Scoreboard ",
+            "Companies\" keeps every family linked to any scoreboard firm. ",
+            "Leave empty for no firm filter."
           ),
           style = paste0(
             "font-weight: 500; font-size: 0.8rem; color: #555; ",

@@ -48,11 +48,15 @@ build_tech_bool_v2 <- function(selected) {
 #'
 #' Accepts a character vector of firm names and generates an IN clause.
 #' When no_filter is TRUE or firms is empty, returns empty string (no filtering).
+#' If \code{firms} contains \code{all_scoreboard_label}, the clause keeps
+#' every family linked to *any* scoreboard firm (\code{f.firm IS NOT NULL})
+#' instead of enumerating them.
 #' @param firms Character vector. Firm names from the treeInput.
 #' @param no_filter Logical. If TRUE, skip firm filtering entirely.
 #' @return Character. SQL AND clause fragment, or empty string.
 build_firm_clause_v2 <- function(firms, no_filter = TRUE) {
   if (no_filter || is.null(firms) || length(firms) == 0) return("")
+  if (is_all_scoreboard(firms)) return("AND f.firm IS NOT NULL")
   firms_sql <- paste0("'", gsub("'", "''", firms), "'", collapse = ", ")
   glue::glue("AND f.firm IN ({firms_sql})")
 }
@@ -525,7 +529,9 @@ sql_country_tech_combined_v2 <- function(toflow, country_sql, tech_filters, firm
 #' \code{firm_grouped_choices}) and returns one WHERE clause per selection,
 #' keyed by the display label that should appear on the corresponding bar.
 #' Sector groups are expanded to their constituent firms via
-#' \code{firm_sector_groups} (from \code{R/sysdata.rda}).
+#' \code{firm_sector_groups} (from \code{R/sysdata.rda}); the
+#' \code{all_scoreboard_label} grouping becomes a single aggregate bar over
+#' all scoreboard-matched families.
 #'
 #' Sentinel values ("No firm filter", empty strings, "All categories") are
 #' dropped so they never become bars.
@@ -537,7 +543,10 @@ build_firm_categories_filter_v2 <- function(selected) {
   selected <- setdiff(selected, c("No firm filter", "", "All categories"))
   if (length(selected) == 0) return(list())
   lapply(setNames(selected, selected), function(s) {
-    if (s %in% names(firm_sector_groups)) {
+    if (identical(s, all_scoreboard_label)) {
+      # Aggregate over every scoreboard-matched family.
+      "WHERE f.firm IS NOT NULL"
+    } else if (s %in% names(firm_sector_groups)) {
       firms <- firm_sector_groups[[s]]
       firms_sql <- paste0("'", gsub("'", "''", firms, fixed = TRUE),
                           "'", collapse = ", ")

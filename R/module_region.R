@@ -68,7 +68,7 @@ region_module_sidebar <- function(id) {
           shiny::selectizeInput(
             inputId = ns("firm"),
             label = NULL,
-            choices = firm_grouped_choices,
+            choices = firm_grouped_choices_with_all(),
             selected = "No firm filter",
             multiple = TRUE,
             options = list(placeholder = 'Choose firms or sector groups...')

@@ -110,8 +110,9 @@ server <- function(input, output, session, con) {
   #   region     Comma-separated UK region names (region-tab input).
   #   tech       Comma-separated technology labels; applied to BOTH the
   #              country-tab and region-tab tech inputs.
-  #   firm       Comma-separated firm names or "No firm filter"; applied
-  #              to both country and region firm inputs.
+  #   firm       Comma-separated firm names, "All Scoreboard Companies"
+  #              (any scoreboard-matched family) or "No firm filter";
+  #              applied to both country and region firm inputs.
   #   flow       Flow column name (e.g. "is_global", "ev_emde").
   #   granted    "1" / "true" / "yes" to tick the "Granted families only"
   #              checkbox; anything else unticks it.

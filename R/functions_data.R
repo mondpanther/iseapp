@@ -33,14 +33,67 @@ expand_region_selection <- function(selected) {
   unique(expanded)
 }
 
+#' Label of the "all scoreboard companies" firm grouping
+#'
+#' A pseudo-group offered alongside the ICB sector groups in every firm /
+#' sector filter. Selecting it restricts the query to patent families that
+#' are linked to *any* company in the R&D Scoreboard match (i.e. any row of
+#' \code{patents_x_firm}), without enumerating the firms. The SQL builders
+#' (\code{build_firm_clause_v2()}, \code{build_firm_categories_filter_v2()})
+#' translate it into \code{f.firm IS NOT NULL}.
+#' @export
+all_scoreboard_label <- "All Scoreboard Companies"
+
+#' Does a firm selection include the "all scoreboard companies" grouping?
+#' @param selected Character vector of firm / group tokens.
+#' @return Logical scalar.
+#' @export
+is_all_scoreboard <- function(selected) {
+  !is.null(selected) && all_scoreboard_label %in% selected
+}
+
+#' Sector-group names plus the "all scoreboard companies" grouping
+#'
+#' The set of tokens that denote an aggregate (non-firm) selection in the
+#' firm trees and selectizes.
+#' @return Character vector.
+#' @keywords internal
+firm_group_names <- function() {
+  c(all_scoreboard_label, names(firm_sector_groups))
+}
+
+#' Grouped selectize choices for the firm filter, including the
+#' "All Scoreboard Companies" option
+#'
+#' Wraps the build-time \code{firm_grouped_choices} (from
+#' \code{R/sysdata.rda}) and inserts \code{all_scoreboard_label} into the
+#' leading "Filter Options" group, right after "No firm filter".
+#' @return Named nested list for \code{shiny::selectizeInput(choices = )}.
+#' @export
+firm_grouped_choices_with_all <- function() {
+  ch <- firm_grouped_choices
+  if ("Filter Options" %in% names(ch)) {
+    fo <- ch[["Filter Options"]]
+    fo[[all_scoreboard_label]] <- all_scoreboard_label
+    ch[["Filter Options"]] <- fo
+  } else {
+    ch <- c(list("Filter Options" = stats::setNames(
+      list(all_scoreboard_label), all_scoreboard_label)), ch)
+  }
+  ch
+}
+
 #' Expand a firm selection to individual firm names
 #'
 #' Converts sector group names to their constituent firm names.
-#' Individual firm names are passed through unchanged.
+#' Individual firm names are passed through unchanged. If the selection
+#' contains \code{all_scoreboard_label}, that single token is returned
+#' instead (it subsumes every firm; the SQL builders handle it directly).
 #' @param selected Character vector of sector names or firm names.
-#' @return Character vector of unique firm names.
+#' @return Character vector of unique firm names (or the all-scoreboard token).
 #' @export
 expand_firm_selection <- function(selected) {
+  if (is_all_scoreboard(selected)) return(all_scoreboard_label)
   expanded <- unlist(lapply(selected, function(x) {
     if (x %in% names(firm_sector_groups)) firm_sector_groups[[x]] else x
   }))
@@ -49,16 +102,20 @@ expand_firm_selection <- function(selected) {
 
 #' Build a shinyTree data structure for a firm FILTER selector
 #'
-#' One folder per ICB sector, each holding its firm leaves (the
-#' "Individual firms" branch only — no aggregate-sector leaves, since this
-#' is a filter rather than a set of bar categories). Firms in `picks` are
-#' pre-checked and their sector folders opened; everything else is
-#' collapsed and unchecked.
-#' @param picks Character vector of firm names to pre-check.
+#' A leading "All Scoreboard Companies" leaf (restricts to families linked
+#' to any scoreboard firm) followed by one folder per ICB sector, each
+#' holding its firm leaves (the "Individual firms" branch only — no
+#' aggregate-sector leaves, since this is a filter rather than a set of bar
+#' categories). Firms in `picks` are pre-checked and their sector folders
+#' opened; everything else is collapsed and unchecked.
+#' @param picks Character vector of firm names (and/or
+#'   \code{all_scoreboard_label}) to pre-check.
 #' @return Nested named list suitable for `shinyTree::renderTree()`.
 #' @export
 build_firm_filter_tree <- function(picks = character(0)) {
-  lapply(stats::setNames(nm = names(firm_sector_groups)), function(sec) {
+  all_leaf <- ""
+  if (is_all_scoreboard(picks)) attr(all_leaf, "stselected") <- TRUE
+  sectors <- lapply(stats::setNames(nm = names(firm_sector_groups)), function(sec) {
     firm_names <- unlist(firm_sector_groups[[sec]], use.names = FALSE)
     children <- stats::setNames(as.list(rep("", length(firm_names))),
                                 firm_names)
@@ -68,21 +125,25 @@ build_firm_filter_tree <- function(picks = character(0)) {
       attr(children, "stopened") <- TRUE
     children
   })
+  c(stats::setNames(list(all_leaf), all_scoreboard_label), sectors)
 }
 
 #' Read the checked firm leaves out of a firm-filter shinyTree input
 #'
 #' Returns the individual firm names that are ticked, dropping the sector
 #' folder names (ticking a folder cascade-checks its firm leaves, which
-#' already carry the real selection).
+#' already carry the real selection). If the "All Scoreboard Companies"
+#' leaf is ticked, that single token is returned (it subsumes any firms).
 #' @param tree_state The `input$<id>` value of a `shinyTree` filter control.
-#' @return Character vector of selected firm names (empty = no filter).
+#' @return Character vector of selected firm names (empty = no filter), or
+#'   \code{all_scoreboard_label}.
 #' @export
 firm_tree_selected_firms <- function(tree_state) {
   if (is.null(tree_state)) return(character(0))
   sel <- shinyTree::get_selected(tree_state, format = "names")
   if (length(sel) == 0) return(character(0))
   nm <- unique(unlist(lapply(sel, as.character), use.names = FALSE))
+  if (is_all_scoreboard(nm)) return(all_scoreboard_label)
   setdiff(nm, names(firm_sector_groups))
 }
 
@@ -428,7 +489,8 @@ country_tree_selected <- function(tree_state) {
 #'
 #' Used by the "Value flow by firm" tab to colour bars by sector. When the
 #' label is already a sector group (matches a name in
-#' \code{firm_sector_groups}), it is its own sector. Individual firms are
+#' \code{firm_sector_groups}) or the "All Scoreboard Companies" grouping,
+#' it is its own sector. Individual firms are
 #' looked up in the inverted mapping built from \code{firm_sector_groups}.
 #' Unmatched / unsectored firms (sysdata occasionally has NA \code{firm_sector})
 #' get \code{"Other"}.
@@ -447,6 +509,7 @@ firm_to_sector <- function(labels) {
   }))
   vapply(labels, function(x) {
     if (x %in% names(firm_sector_groups)) x
+    else if (identical(x, all_scoreboard_label)) x
     else if (x %in% names(firm_to_sec))   unname(firm_to_sec[[x]])
     else                                  "Other"
   }, character(1), USE.NAMES = FALSE)
