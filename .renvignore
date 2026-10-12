@@ -1,1 +1,3 @@
-data_raw/archive/
+data-raw/archive/
+.claude/
+_to_delete/
